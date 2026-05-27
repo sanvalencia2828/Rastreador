@@ -17,14 +17,31 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Configuración de la base de datos
-DB_CONFIG = {
-    'host': 'localhost',
-    'port': 5432,
-    'database': 'londrina_comercio',
-    'user': 'postgres',
-    'password': 'postgres'
-}
+import os
+
+# ==============================================================================
+# ENVIRONMENT VARIABLE LOADER (ZERO-DEPENDENCY)
+# ==============================================================================
+def load_env_file(dotenv_path: str = ".env") -> None:
+    """Loads environment variables from a .env file if it exists."""
+    if os.path.exists(dotenv_path):
+        try:
+            with open(dotenv_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        key, val = line.split("=", 1)
+                        key = key.strip()
+                        val = val.strip().strip("'\"")
+                        if key not in os.environ:
+                            os.environ[key] = val
+            logger.info(f"Loaded environment variables from {dotenv_path}")
+        except Exception as e:
+            logger.warning(f"Could not read {dotenv_path}: {e}")
+
+load_env_file()
 
 # Configuración de Nominatim
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
@@ -34,8 +51,32 @@ HEADERS = {
 
 def conectar_db() -> psycopg2.extensions.connection:
     """Establece conexión con la base de datos PostgreSQL"""
+    db_url = os.environ.get("DATABASE_URL")
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
+        if db_url:
+            logger.info("Conectando a PostgreSQL usando DATABASE_URL...")
+            conn = psycopg2.connect(db_url)
+        else:
+            db_user = os.environ.get("DB_USER")
+            db_password = os.environ.get("DB_PASSWORD")
+            db_host = os.environ.get("DB_HOST")
+            db_port = os.environ.get("DB_PORT", "5432")
+            db_name = os.environ.get("DB_NAME")
+
+            if all([db_user, db_password, db_host, db_name]):
+                conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+                logger.info(f"Conectando a PostgreSQL en {db_host} usando variables de entorno...")
+                conn = psycopg2.connect(conn_str)
+            else:
+                logger.info("Conectando usando configuración local hardcoded...")
+                db_config = {
+                    'host': os.environ.get("DB_HOST", "localhost"),
+                    'port': int(os.environ.get("DB_PORT", 5432)),
+                    'database': os.environ.get("DB_NAME", "londrina_comercio"),
+                    'user': os.environ.get("DB_USER", "postgres"),
+                    'password': os.environ.get("DB_PASSWORD", "postgres")
+                }
+                conn = psycopg2.connect(**db_config)
         logger.info("Conexión a la base de datos establecida correctamente")
         return conn
     except Exception as e:

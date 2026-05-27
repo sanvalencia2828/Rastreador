@@ -1,6 +1,9 @@
 -- init.sql: Database initialization script for Londrina business data
 -- This script creates the necessary tables and indexes for storing CNPJ data
 
+-- Enable PostGIS extension first
+CREATE EXTENSION IF NOT EXISTS postgis;
+
 -- Create the main table for establishment data
 CREATE TABLE IF NOT EXISTS estabelecimentos (
     id SERIAL PRIMARY KEY,
@@ -98,9 +101,6 @@ GRANT ALL PRIVILEGES ON TABLE heatmap_data TO postgres;
 GRANT ALL PRIVILEGES ON SEQUENCE estabelecimentos_id_seq TO postgres;
 GRANT ALL PRIVILEGES ON SEQUENCE clusters_cluster_id_seq TO postgres;
 GRANT ALL PRIVILEGES ON SEQUENCE heatmap_data_id_seq TO postgres;
-
--- Enable PostGIS extension (should be enabled by the postgis image, but just in case)
-CREATE EXTENSION IF NOT EXISTS postgis;
 
 -- Output success message
 SELECT 'Database initialization completed successfully' as message;

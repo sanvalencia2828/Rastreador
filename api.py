@@ -17,6 +17,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
 
+# ==============================================================================
+# ENVIRONMENT VARIABLE LOADER (ZERO-DEPENDENCY)
+# ==============================================================================
+def load_env_file(dotenv_path: str = ".env") -> None:
+    """Loads environment variables from a .env file if it exists."""
+    if os.path.exists(dotenv_path):
+        try:
+            with open(dotenv_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        key, val = line.split("=", 1)
+                        key = key.strip()
+                        val = val.strip().strip("'\"")
+                        if key not in os.environ:
+                            os.environ[key] = val
+            print(f"Loaded environment variables from {dotenv_path}")
+        except Exception as e:
+            print(f"Warning: Could not read {dotenv_path}: {e}")
+
+load_env_file()
+
 app = FastAPI(
     title="Rastreador CNPJ API",
     description="API para mapas y clústeres de comercios en Londrina, PR",
@@ -68,18 +92,25 @@ def load_businesses() -> List[Dict[str, Any]]:
     Loads businesses from PostgreSQL database if configured,
     otherwise falls back to reading the local JSON file.
     """
-    db_user = os.environ.get("DB_USER")
-    db_password = os.environ.get("DB_PASSWORD")
-    db_host = os.environ.get("DB_HOST")
-    db_port = os.environ.get("DB_PORT", "5432")
-    db_name = os.environ.get("DB_NAME")
+    conn_str = os.environ.get("DATABASE_URL")
+    db_host = "Database URL"
+
+    if not conn_str:
+        db_user = os.environ.get("DB_USER")
+        db_password = os.environ.get("DB_PASSWORD")
+        db_host = os.environ.get("DB_HOST")
+        db_port = os.environ.get("DB_PORT", "5432")
+        db_name = os.environ.get("DB_NAME")
+        if all([db_user, db_password, db_host, db_name]):
+            conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+        else:
+            db_host = None
 
     # Attempt DB connection if variables exist
-    if all([db_user, db_password, db_host, db_name]):
+    if conn_str:
         try:
-            conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
             engine = create_engine(conn_str)
-            print(f"Connecting to database at {db_host}...")
+            print(f"Connecting to database at {db_host or 'configured connection string'}...")
             with engine.connect() as conn:
                 result = conn.execute(text("SELECT * FROM londrina_businesses"))
                 # Convert rows to dictionaries

@@ -18,6 +18,31 @@ import json
 import sys
 import os
 
+# ==============================================================================
+# ENVIRONMENT VARIABLE LOADER (ZERO-DEPENDENCY)
+# ==============================================================================
+def load_env_file(dotenv_path: str = ".env") -> None:
+    """Loads environment variables from a .env file if it exists."""
+    if os.path.exists(dotenv_path):
+        try:
+            with open(dotenv_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    if "=" in line:
+                        key, val = line.split("=", 1)
+                        key = key.strip()
+                        val = val.strip().strip("'\"")
+                        if key not in os.environ:
+                            os.environ[key] = val
+            print(f"Loaded environment variables from {dotenv_path}")
+        except Exception as e:
+            print(f"Warning: Could not read {dotenv_path}: {e}")
+
+load_env_file()
+
+
 
 # Londrina/PR IBGE code
 LONDRINA_IBGE_CODE = 4113700
@@ -208,18 +233,25 @@ def main():
     export_to_json_polars(filtered_data, output_json)
 
     # Option 2: Export to PostgreSQL (automatic detection via env variables)
-    db_user = os.environ.get("DB_USER")
-    db_password = os.environ.get("DB_PASSWORD")
-    db_host = os.environ.get("DB_HOST")
-    db_port = os.environ.get("DB_PORT", "5432")
-    db_name = os.environ.get("DB_NAME")
+    postgres_connection = os.environ.get("DATABASE_URL")
+    db_host = "Database URL"
 
-    if all([db_user, db_password, db_host, db_name]):
-        print("Database environment variables found. Exporting to PostgreSQL...")
-        postgres_connection = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+    if not postgres_connection:
+        db_user = os.environ.get("DB_USER")
+        db_password = os.environ.get("DB_PASSWORD")
+        db_host = os.environ.get("DB_HOST")
+        db_port = os.environ.get("DB_PORT", "5432")
+        db_name = os.environ.get("DB_NAME")
+        if all([db_user, db_password, db_host, db_name]):
+            postgres_connection = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+        else:
+            db_host = None
+
+    if postgres_connection:
+        print(f"Database connection credentials found. Exporting to PostgreSQL at {db_host or 'configured connection string'}...")
         export_to_postgresql_polars(filtered_data, postgres_connection, "londrina_businesses")
     else:
-        print("Database environment variables not fully set. Skipping PostgreSQL export.")
+        print("Database connection variables not set. Skipping PostgreSQL export.")
 
     print("ETL process completed successfully with Polars!")
 
