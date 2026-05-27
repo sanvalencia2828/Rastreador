@@ -1,17 +1,75 @@
 version: '3.8'
 
 services:
+  # ==============================================================================
+  # PostgreSQL + PostGIS Database
+  # ==============================================================================
   db:
     image: postgis/postgis:15-3.4
-    container_name: londrina_db
+    container_name: rastreador_db
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: londrina_comercio
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres_secure_pass}
+      POSTGRES_DB: ${DB_NAME:-rastreador_db}
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-rastreador_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ==============================================================================
+  # FastAPI Backend API
+  # ==============================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    container_name: rastreador_api
+    environment:
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres_secure_pass}
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-rastreador_db}
+      API_PORT: 8000
+      API_HOST: 0.0.0.0
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  # ==============================================================================
+  # Next.js Frontend Dashboard
+  # ==============================================================================
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8000}
+    container_name: rastreador_frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8000}
+      PORT: 3000
+    ports:
+      - "${PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

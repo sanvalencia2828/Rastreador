@@ -1,100 +1,184 @@
-# CNPJ ETL Processor
+# 🛰️ Londrina Radar Comercial
 
-This project provides an ETL (Extract, Transform, Load) script for processing Brazilian CNPJ (Cadastro Nacional da Pessoa Jurídica) data from the Federal Revenue Service, filtering for businesses in Londrina/PR that are active and operate in retail or gastronomy sectors.
+**Plataforma analítica geoespacial** para el rastreo y análisis de comercios y polos emergentes en Londrina, PR (Brasil). Dashboard interactivo 100% de código abierto, sin APIs comerciales.
 
-## Features
+## 🏗️ Arquitectura
 
-- Loads large CNPJ CSV files in chunks to manage memory efficiently
-- Filters data for:
-  - Businesses located in Londrina/PR (IBGE code: 4113700)
-  - Active businesses only (situacao_cadastral = 2)
-  - Retail and gastronomy activities based on CNAE codes
-- Exports results to JSON or PostgreSQL database
-- Two implementations: one using Pandas and another using Polars (more memory efficient)
+```
+┌─────────────────────────────────────────────────────────┐
+│                    DOCKER COMPOSE                       │
+│                                                         │
+│  ┌──────────┐    ┌──────────────┐    ┌──────────────┐  │
+│  │ PostGIS  │◄───│  FastAPI      │◄───│  Next.js 16  │  │
+│  │ :5432    │    │  :8000        │    │  :3000       │  │
+│  │          │    │              │    │              │  │
+│  │ DB +     │    │ /api/heatmap │    │ MapLibre GL  │  │
+│  │ GeoData  │    │ /api/clusters│    │ React 19     │  │
+│  └──────────┘    └──────────────┘    └──────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
 
-## Requirements
+| Capa | Tecnología | Puerto |
+|------|-----------|--------|
+| **Base de Datos** | PostGIS 15 | 5432 |
+| **Backend API** | Python 3.11, FastAPI, SQLAlchemy | 8000 |
+| **Frontend** | Next.js 16, React 19, MapLibre GL, TailwindCSS 4 | 3000 |
+| **ETL** | Python (Pandas / Polars) | CLI |
 
-- Python 3.7+
-- pandas
-- polars (optional but recommended for better performance)
-- sqlalchemy
-- psycopg2-binary (for PostgreSQL connectivity)
+## ✨ Features
 
-## Installation
+- **Mapa de calor (Heatmap)** — Visualización de densidad comercial en tiempo real con MapLibre GL
+- **5 Polos Comerciales** — Clustering geográfico de los hubs comerciales más importantes de Londrina
+- **Filtros de Sector** — Alterna entre Retail, Gastronomía o todos los comercios
+- **Toggle de Capas** — Activa/desactiva el heatmap y los marcadores de cluster independientemente
+- **Sidebar Interactivo** — Ranking de polos con métricas, búsqueda y navegación por click
+- **Detalle de Cluster** — Panel flotante HUD con identidad de zona, densidad y coordenadas GIS
+- **FlyTo Animado** — Navegación suave al hacer click en cualquier polo
+- **Dark Mode Premium** — Diseño glassmorphism con efectos de radar y escaneo
+- **Sin APIs comerciales** — No requiere Mapbox, Google Maps ni claves API pagas
 
-1. Install the required packages:
+## 🚀 Quick Start
+
+### Opción 1: Docker Compose (Recomendado)
+
 ```bash
+# Clonar el repositorio
+git clone <url-del-repo> rastreador
+cd rastreador
+
+# Copiar configuración de entorno
+cp .env.example .env
+
+# Levantar todos los servicios
+docker-compose up --build
+```
+
+Acceder a:
+- **Dashboard**: http://localhost:3000
+- **API**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
+
+### Opción 2: Desarrollo Local
+
+#### 1. Base de Datos (opcional — la API funciona sin DB usando JSON)
+
+```bash
+docker-compose up db
+```
+
+#### 2. Backend API
+
+```bash
+# Instalar dependencias de Python
 pip install -r requirements.txt
+
+# Ejecutar el backend
+python api.py
 ```
 
-Or use our installation script:
+La API se levanta en http://localhost:8000 y automáticamente usa `londrina_businesses.json` si no hay PostgreSQL disponible.
+
+#### 3. Frontend
+
 ```bash
-python install_deps.py
+cd frontend
+
+# Instalar dependencias de Node.js
+npm install
+
+# Ejecutar en modo desarrollo
+npm run dev
 ```
 
-## Data Source
+El dashboard se levanta en http://localhost:3000.
 
-Download the CNPJ data from the official source:
-http://receita.economia.gov.br/orientacao/tributaria/cadastros/cadastro-nacional-de-pessoas-juridicas-cnpj/DadosPublicosCNPJ
+## 📊 Pipeline ETL
 
-The data is organized in several files:
-- Empresas: Basic company information
-- Estabelecimentos: Business establishment information (addresses, activities)
-- Socios: Partner/shareholder information
+### Generar datos de muestra
 
-For this script, we primarily use the "Estabelecimentos" files which contain the location and activity information.
-
-## Usage
-
-We provide two implementations:
-
-1. **Pandas version** (`cnpj_etl.py`): Traditional approach using pandas
-2. **Polars version** (`cnpj_etl_polars.py`): More memory-efficient approach using polars
-
-To run either version:
 ```bash
+python generate_sample_data.py
+```
+
+### Ejecutar el ETL
+
+```bash
+# Versión Pandas
 python cnpj_etl.py
-# or
+
+# Versión Polars (recomendada para datasets grandes)
 python cnpj_etl_polars.py
 ```
 
-## Configuration
+### Enriquecer datos con geocodificación
 
-1. Download and extract the CNPJ data files
-2. Modify the `input_file` variable in the script to point to your data file
-3. (Optional) Adjust filtering criteria in the constants section
+```bash
+python enriquecer_lojas.py
+```
 
-## Output Options
+## 📁 Estructura del Proyecto
 
-The script supports two output formats:
+```
+rastreador/
+├── api.py                    # FastAPI backend (endpoints GeoJSON)
+├── cnpj_etl.py               # ETL con Pandas
+├── cnpj_etl_polars.py         # ETL con Polars
+├── generate_sample_data.py    # Generador de datos de prueba
+├── enriquecer_lojas.py        # Enriquecimiento geográfico (Nominatim)
+├── init.sql                   # Schema PostgreSQL + PostGIS
+├── requirements.txt           # Dependencias Python
+├── docker-compose.yml         # Stack completo (DB + API + Frontend)
+├── Dockerfile.api             # Imagen Docker del backend
+├── Dockerfile.frontend        # Imagen Docker del frontend
+├── londrina_businesses.json   # Datos procesados (fallback sin DB)
+├── .env.example               # Variables de entorno
+│
+└── frontend/                  # Next.js 16 App
+    ├── src/
+    │   ├── app/
+    │   │   ├── layout.tsx     # Root layout (Inter font, metadata SEO)
+    │   │   ├── page.tsx       # Dashboard principal (SWR + state)
+    │   │   └── globals.css    # Design system (glassmorphism, animations)
+    │   └── components/
+    │       ├── map-view.tsx   # MapLibre GL canvas + heatmap + markers
+    │       └── sidebar.tsx    # Panel lateral con ranking y controles
+    ├── package.json
+    └── next.config.ts
+```
 
-1. **JSON**: Exports to a JSON file with all filtered records
-2. **PostgreSQL**: Inserts data into a PostgreSQL database table
+## 🔧 Configuración
 
-To use PostgreSQL export, uncomment the relevant lines in the main() function and configure your connection string.
+Todas las variables de configuración están documentadas en [`.env.example`](.env.example):
 
-## Customization
+| Variable | Descripción | Default |
+|----------|-------------|---------|
+| `DB_USER` | Usuario de PostgreSQL | `postgres` |
+| `DB_PASSWORD` | Contraseña de PostgreSQL | `postgres_secure_pass` |
+| `DB_HOST` | Host de la base de datos | `db` (Docker) / `localhost` |
+| `DB_PORT` | Puerto de PostgreSQL | `5432` |
+| `DB_NAME` | Nombre de la base de datos | `rastreador_db` |
+| `API_PORT` | Puerto del backend FastAPI | `8000` |
+| `NEXT_PUBLIC_API_URL` | URL pública del backend | `http://localhost:8000` |
+| `PORT` | Puerto del frontend Next.js | `3000` |
 
-You can modify the filtering criteria by adjusting:
-- `LONDRINA_IBGE_CODE`: Change to filter for a different municipality
-- `RETAIL_CNAE_CODES` and `GASTRONOMY_CNAE_CODES`: Add/remove CNAE codes for different business categories
-- Chunk size in `load_cnpj_data()` function for memory/performance tuning
+## 📋 API Endpoints
 
-## CNAE Codes Reference
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| `GET` | `/health` | Health check |
+| `GET` | `/api/heatmap` | GeoJSON FeatureCollection de todos los comercios |
+| `GET` | `/api/clusters/emergentes` | Ranking de los 5 polos comerciales con totales |
 
-The script includes CNAE codes for:
-- Retail trade (sections 47xxxxx)
-- Food and beverage services (section 56xxxxx)
+## 🗺️ Fuente de Datos CNPJ
 
-You can extend this list based on your specific requirements.
+Los datos provienen de la **Receita Federal do Brasil**:
+http://receita.economia.gov.br/orientacao/tributaria/cadastros/cadastro-nacional-de-pessoas-juridicas-cnpj/DadosPublicosCNPJ
 
-## Performance Comparison
+Se filtran para:
+- Municipio: **Londrina/PR** (IBGE: 4113700)
+- Situação Cadastral: **Ativa** (2)
+- CNAE: Códigos de **retail** (47xxxxx) y **gastronomía** (56xxxxx)
 
-- **Pandas version**: More familiar to most data scientists, good for medium datasets
-- **Polars version**: Better memory efficiency and performance for large datasets
+## 📜 Licencia
 
-For processing the full CNPJ dataset (which can be tens of GB), the Polars version is recommended.
-
-## License
-
-This project is provided for educational and research purposes. Please ensure compliance with the terms of use of the CNPJ public data.
+Este proyecto se provee con fines educativos y de investigación. Asegúrese de cumplir con los términos de uso de los datos públicos del CNPJ.
