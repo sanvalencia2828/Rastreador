@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import Map, { Source, Layer, Marker, NavigationControl, FullscreenControl, MapRef } from "react-map-gl/maplibre";
 import maplibregl from "maplibre-gl";
 import { Cluster } from "./sidebar";
-import { Radio, Flame, Sparkles, MapPin, Store, UtensilsCrossed, LayoutGrid } from "lucide-react";
+import { Radio, Flame, Sparkles, MapPin, Store, UtensilsCrossed, LayoutGrid, Locate } from "lucide-react";
 
 // Register maplibre-gl globally so react-map-gl uses it
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -81,6 +81,11 @@ export default function MapView({
     bearing: 0,
   });
 
+  // Geolocation states
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
+  const [isLocating, setIsLocating] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
+
   // Heatmap configuration layers style
   const heatmapLayer: any = {
     id: "heatmap-layer",
@@ -138,6 +143,60 @@ export default function MapView({
     }
   };
 
+  // Geolocation function
+  const locateUser = () => {
+    if (!navigator.geolocation) {
+      setLocationError("Geolocalización no soportada por este navegador");
+      setTimeout(() => setLocationError(null), 3000);
+      return;
+    }
+
+    setIsLocating(true);
+    setLocationError(null);
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        setUserLocation([longitude, latitude]);
+        setIsLocating(false);
+
+        // Fly to user location
+        if (mapRef.current) {
+          mapRef.current.flyTo({
+            center: [longitude, latitude],
+            zoom: 15,
+            duration: 2000,
+          });
+        }
+      },
+      (error) => {
+        setIsLocating(false);
+        let errorMessage = "";
+        switch (error.code) {
+          case error.PERMISSION_DENIED:
+            errorMessage = "Permiso de ubicación denegado";
+            break;
+          case error.POSITION_UNAVAILABLE:
+            errorMessage = "Información de ubicación no disponible";
+            break;
+          case error.TIMEOUT:
+            errorMessage = "Tiempo de espera agotado para obtener ubicación";
+            break;
+          default:
+            errorMessage = "Error desconocido al obtener ubicación";
+            break;
+        }
+        setLocationError(errorMessage);
+        setTimeout(() => setLocationError(null), 3000);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 300000, // 5 minutes
+      }
+    );
+  };
+
   return (
     <div className="flex-1 h-screen w-full relative animate-fade-in">
       <Map
@@ -155,6 +214,23 @@ export default function MapView({
           <NavigationControl position="top-right" showCompass={true} />
           <FullscreenControl position="top-right" />
         </div>
+
+        {/* User Location Marker */}
+        {userLocation && (
+          <Marker
+            longitude={userLocation[0]}
+            latitude={userLocation[1]}
+            anchor="center"
+          >
+            <div className="relative">
+              {/* Pulsing blue circle */}
+              <div className="absolute inset-0 rounded-full bg-blue-500/30 animate-ping" style={{ width: '20px', height: '20px', margin: '-10px' }}></div>
+              <div className="absolute inset-0 rounded-full bg-blue-500/50" style={{ width: '16px', height: '16px', margin: '-8px' }}></div>
+              {/* Center dot */}
+              <div className="w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow-lg"></div>
+            </div>
+          </Marker>
+        )}
 
         {/* 1. Heatmap Source and Layer */}
         {showHeatmap && heatmapData && (
@@ -348,6 +424,26 @@ export default function MapView({
             <Sparkles className="w-3.5 h-3.5 text-white animate-pulse" />
             Hacer zoom a este polo
           </button>
+        </div>
+      )}
+
+      {/* Geolocation Button */}
+      <button
+        onClick={locateUser}
+        disabled={isLocating}
+        className="absolute left-4 top-4 z-20 w-12 h-12 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center text-white hover:bg-white/20 transition-all duration-300 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {isLocating ? (
+          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+        ) : (
+          <Locate className="w-5 h-5" />
+        )}
+      </button>
+
+      {/* Location Error Message */}
+      {locationError && (
+        <div className="absolute left-1/2 top-4 z-20 transform -translate-x-1/2 bg-red-500/90 backdrop-blur-sm text-white text-xs font-bold px-4 py-2 rounded-lg shadow-lg animate-fade-in">
+          {locationError}
         </div>
       )}
     </div>

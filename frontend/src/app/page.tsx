@@ -8,7 +8,7 @@ import MapView from "@/components/map-view";
 import { AlertCircle, Terminal, HelpCircle } from "lucide-react";
 
 // API base URL from environment variable (set in .env or Docker)
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
 // Generic JSON fetcher utility for SWR
 const fetcher = async (url: string) => {

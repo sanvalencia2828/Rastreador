@@ -84,9 +84,53 @@ class Cluster(BaseModel):
     total_lojas: int
     center_geom: ClusterPoint
 
+# CNAE code prefixes → human-readable categories
+CNAE_CATEGORY_MAP: Dict[str, str] = {
+    "47": "Moda y Calzado",
+    "46": "Comercio Mayorista",
+    "56": "Alimentos y Bebidas",
+    "55": "Alimentos y Bebidas",
+    "45": "Automotriz",
+    "62": "Tecnología",
+    "63": "Tecnología",
+    "26": "Electrónica",
+    "27": "Electrónica",
+    "86": "Salud",
+    "87": "Salud",
+    "96": "Servicios",
+    "95": "Servicios",
+    "64": "Servicios Financieros",
+    "65": "Servicios Financieros",
+    "66": "Servicios Financieros",
+    "70": "Consultoría",
+    "71": "Consultoría",
+    "41": "Construcción",
+    "42": "Construcción",
+    "43": "Construcción",
+    "85": "Educación",
+    "84": "Administración Pública",
+    "49": "Transporte",
+    "50": "Transporte",
+    "51": "Transporte",
+    "52": "Logística",
+}
+
+def cnae_to_category(cnae) -> str:
+    """Maps a CNAE code (int or str) to a human-readable category."""
+    if cnae is None:
+        return "Otros"
+    prefix = str(cnae)[:2]
+    return CNAE_CATEGORY_MAP.get(prefix, "Otros")
+
+class RubroDistribucion(BaseModel):
+    categoria: str
+    cantidad: int
+
 class StreetAnalytics(BaseModel):
     logradouro: str
-    total_locais: int
+    total_negocios: int
+    distribucion_rubros: List[RubroDistribucion]
+    predominancia: str
 
 # ==============================================================================
 # DATABASE OR LOCAL JSON LOADER
@@ -292,11 +336,12 @@ def get_emergent_clusters():
 @app.get("/api/analytics/streets", response_model=List[StreetAnalytics])
 def get_commercial_streets_analytics():
     """
-    Returns the top 15 commercial streets in Londrina for micro/small businesses.
-    Executes a direct SQL query on PostgreSQL if available, with a robust local fallback.
+    Returns the top 15 commercial streets in Londrina.
+    Each street includes total business count, distribution by category (rubro),
+    and the predominant category. Uses PostgreSQL when available, JSON fallback otherwise.
     """
     conn_str = os.environ.get("DATABASE_URL")
-    
+
     if not conn_str:
         db_user = os.environ.get("DB_USER")
         db_password = os.environ.get("DB_PASSWORD")
@@ -306,64 +351,85 @@ def get_commercial_streets_analytics():
         if all([db_user, db_password, db_host, db_name]):
             conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 
+    raw_rows: List[Dict[str, Any]] = []
+
     if conn_str:
         try:
             engine = create_engine(conn_str)
             with engine.connect() as conn:
                 query = text("""
-                    SELECT logradouro, COUNT(*) as total_locais
+                    SELECT logradouro, cnae_fiscal_principal, porte_empresa
                     FROM londrina_businesses
-                    WHERE porte_empresa IN ('01', '03')
-                    GROUP BY logradouro
-                    ORDER BY total_locais DESC
-                    LIMIT 15;
+                    WHERE logradouro IS NOT NULL AND logradouro != ''
+                      AND porte_empresa IN ('01', '03')
                 """)
                 result = conn.execute(query)
-                analytics = []
                 for row in result:
-                    # SQLAlchemy compatibility (row mapping or tuple)
-                    row_dict = dict(row._mapping) if hasattr(row, "_mapping") else {"logradouro": row[0], "total_locais": row[1]}
-                    # Ensure logradouro is not null or empty
-                    if row_dict.get("logradouro"):
-                        analytics.append(StreetAnalytics(
-                            logradouro=row_dict["logradouro"],
-                            total_locais=row_dict["total_locais"]
-                        ))
-                print(f"Loaded {len(analytics)} street analytics from PostgreSQL DB.")
-                if len(analytics) > 0:
-                    return analytics
+                    raw_rows.append(
+                        dict(row._mapping) if hasattr(row, "_mapping")
+                        else {
+                            "logradouro": row[0],
+                            "cnae_fiscal_principal": row[1],
+                            "porte_empresa": row[2]
+                        }
+                    )
+                print(f"Loaded {len(raw_rows)} rows from PostgreSQL for street analytics.")
         except Exception as e:
-            print(f"PostgreSQL query failed for analytics: {e}. Falling back to JSON...")
+            print(f"PostgreSQL query failed: {e}. Falling back to JSON...")
 
-    # Fallback to local JSON file
-    businesses = load_businesses()
-    if len(businesses) == 0:
+    # Fallback to local JSON
+    if not raw_rows:
+        raw_rows = load_businesses()
+
+    if not raw_rows:
         return []
 
-    # Filter records where porte_empresa is '01' or '03'
-    # Group results by logradouro
-    counts = {}
-    for biz in businesses:
-        porte = biz.get("porte_empresa")
-        logradouro = biz.get("logradouro")
-        
-        # Check if porte_empresa is '01' or '03' (fallback: if column isn't present, process all to be safe)
-        if (not porte) or (porte in ["01", "03"]):
-            if logradouro and logradouro.strip():
-                street_name = logradouro.strip()
-                counts[street_name] = counts.get(street_name, 0) + 1
+    # -------------------------------------------------------------------------
+    # Aggregate: street → { total, {category → count} }
+    # -------------------------------------------------------------------------
+    street_data: Dict[str, Dict[str, Any]] = {}
 
-    # Convert to list and sort descending
-    sorted_streets = sorted(counts.items(), key=lambda item: item[1], reverse=True)
-    
-    # Take top 15
-    top_15 = sorted_streets[:15]
-    
-    # Form response
-    return [
-        StreetAnalytics(logradouro=street, total_locais=count)
-        for street, count in top_15
-    ]
+    for biz in raw_rows:
+        logradouro = (biz.get("logradouro") or "").strip()
+        if not logradouro:
+            continue
+
+        porte = biz.get("porte_empresa")
+        # Filter: only micro/small businesses size '01' or '03'
+        if porte and porte not in ["01", "03"]:
+            continue
+
+        categoria = cnae_to_category(biz.get("cnae_fiscal_principal"))
+
+        if logradouro not in street_data:
+            street_data[logradouro] = {"total": 0, "rubros": {}}
+
+        street_data[logradouro]["total"] += 1
+        rubros = street_data[logradouro]["rubros"]
+        rubros[categoria] = rubros.get(categoria, 0) + 1
+
+    # Sort streets by total descending, take top 15
+    sorted_streets = sorted(street_data.items(), key=lambda x: x[1]["total"], reverse=True)[:15]
+
+    result_list: List[StreetAnalytics] = []
+    for street_name, data in sorted_streets:
+        rubros_sorted = sorted(data["rubros"].items(), key=lambda x: x[1], reverse=True)
+        predominancia = rubros_sorted[0][0] if rubros_sorted else "Otros"
+        distribucion = [
+            RubroDistribucion(categoria=cat, cantidad=cnt)
+            for cat, cnt in rubros_sorted
+        ]
+        result_list.append(
+            StreetAnalytics(
+                logradouro=street_name,
+                total_negocios=data["total"],
+                distribucion_rubros=distribucion,
+                predominancia=predominancia,
+            )
+        )
+
+    print(f"Returning analytics for {len(result_list)} streets.")
+    return result_list
 
 
 # ==============================================================================
