@@ -41,6 +41,24 @@ SAMPLE_BUSINESS_NAMES = [
     'Escola Infantil Sonho Meu'
 ]
 
+SAMPLE_STREETS = [
+    "Av. Higienópolis",
+    "Av. Ayrton Senna",
+    "Rua Sergipe",
+    "Av. Saul Elkind",
+    "Av. Bandeirantes",
+    "Av. Tiradentes",
+    "Av. Paraná",
+    "Av. Santos Dumont",
+    "Av. Juscelino Kubitschek",
+    "Rua Paranaguá",
+    "Av. Madre Leônia Milito",
+    "Rua Piauí",
+    "Av. Duque de Caxias",
+    "Av. Maringá",
+    "Av. Leste Oeste"
+]
+
 def generate_sample_data(num_records=1000):
     """Generate sample CNPJ data for testing"""
 
