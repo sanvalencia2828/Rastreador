@@ -92,7 +92,7 @@ export default function Sidebar({
   const formatCoord = (val: number) => val.toFixed(4);
 
   return (
-    <aside className="w-[350px] min-w-[350px] h-screen glass-panel flex flex-col z-10 shadow-2xl relative select-none">
+    <aside className="w-full md:w-[350px] md:min-w-[350px] h-screen glass-panel flex flex-col z-10 shadow-2xl relative select-none">
       {/* Visual Scanning Effect */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden opacity-10">
         <div className="w-full h-1/2 scan-line" />

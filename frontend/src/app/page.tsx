@@ -5,10 +5,7 @@ import useSWR from "swr";
 import { MapRef } from "react-map-gl/maplibre";
 import Sidebar, { Cluster } from "@/components/sidebar";
 import MapView from "@/components/map-view";
-import { AlertCircle, Terminal, HelpCircle } from "lucide-react";
-
-// API base URL from environment variable (set in .env or Docker)
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+import { AlertCircle, Terminal, HelpCircle, Layers, Map } from "lucide-react";
 
 // Generic JSON fetcher utility for SWR
 const fetcher = async (url: string) => {
@@ -31,15 +28,36 @@ export default function DashboardPage() {
   // Sector filter state ("all" | "retail" | "gastronomy")
   const [selectedType, setSelectedType] = useState<"all" | "retail" | "gastronomy">("all");
 
+  // State for mobile view toggle ("map" | "list")
+  const [mobileView, setMobileView] = useState<"map" | "list">("map");
+
   // Reference for smooth fly-to camera controls on MapLibre canvas
   const mapRef = useRef<MapRef | null>(null);
+
+  // Dynamic API base URL resolver for local networks / mobile testing
+  const apiBaseUrl = useMemo(() => {
+    const defaultUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+    if (typeof window !== "undefined") {
+      const hostname = window.location.hostname;
+      try {
+        const url = new URL(defaultUrl);
+        if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+          url.hostname = hostname;
+        }
+        return url.toString().replace(/\/$/, "");
+      } catch (e) {
+        return defaultUrl;
+      }
+    }
+    return defaultUrl;
+  }, []);
 
   // Fetch Heatmap GeoJSON points from the local API
   const {
     data: heatmapData,
     error: heatmapError,
     isLoading: heatmapLoading,
-  } = useSWR(`${API_BASE_URL}/api/heatmap`, fetcher, {
+  } = useSWR(`${apiBaseUrl}/api/heatmap`, fetcher, {
     revalidateOnFocus: false,
     shouldRetryOnError: true,
     errorRetryInterval: 5000, // Retry every 5 seconds if local API is not up yet
@@ -50,7 +68,7 @@ export default function DashboardPage() {
     data: clustersData,
     error: clustersError,
     isLoading: clustersLoading,
-  } = useSWR<Cluster[]>(`${API_BASE_URL}/api/clusters/emergentes`, fetcher, {
+  } = useSWR<Cluster[]>(`${apiBaseUrl}/api/clusters/emergentes`, fetcher, {
     revalidateOnFocus: false,
     shouldRetryOnError: true,
     errorRetryInterval: 5000,
@@ -137,38 +155,60 @@ export default function DashboardPage() {
   const isLoading = heatmapLoading || clustersLoading;
 
   return (
-    <main className="w-screen h-screen flex bg-zinc-950 overflow-hidden text-white relative font-sans">
+    <main className="w-screen h-screen flex flex-col md:flex-row bg-zinc-950 overflow-hidden text-white relative font-sans">
       {/* 1. Left Sidebar - Dynamic Rankings & Metrics */}
-      <Sidebar
-        clusters={filteredClusters}
-        isLoading={isLoading}
-        error={hasErrors}
-        activeClusterId={activeClusterId}
-        setActiveClusterId={setActiveClusterId}
-        hoveredClusterId={hoveredClusterId}
-        setHoveredClusterId={setHoveredClusterId}
-        onFlyTo={handleFlyTo}
-        showHeatmap={showHeatmap}
-        setShowHeatmap={setShowHeatmap}
-        showClusters={showClusters}
-        setShowClusters={setShowClusters}
-        selectedType={selectedType}
-        setSelectedType={setSelectedType}
-      />
+      <div className={`h-screen md:h-auto flex-shrink-0 ${mobileView === "list" ? "w-full flex" : "hidden md:flex md:w-[350px]"}`}>
+        <Sidebar
+          clusters={filteredClusters}
+          isLoading={isLoading}
+          error={hasErrors}
+          activeClusterId={activeClusterId}
+          setActiveClusterId={setActiveClusterId}
+          hoveredClusterId={hoveredClusterId}
+          setHoveredClusterId={setHoveredClusterId}
+          onFlyTo={handleFlyTo}
+          showHeatmap={showHeatmap}
+          setShowHeatmap={setShowHeatmap}
+          showClusters={showClusters}
+          setShowClusters={setShowClusters}
+          selectedType={selectedType}
+          setSelectedType={setSelectedType}
+        />
+      </div>
 
       {/* 2. Right Pane - Interactive MapLibre GL Canvas */}
-      <MapView
-        heatmapData={filteredHeatmapData}
-        clusters={filteredClusters}
-        activeClusterId={activeClusterId}
-        setActiveClusterId={setActiveClusterId}
-        hoveredClusterId={hoveredClusterId}
-        setHoveredClusterId={setHoveredClusterId}
-        mapRef={mapRef}
-        showHeatmap={showHeatmap}
-        showClusters={showClusters}
-        selectedType={selectedType}
-      />
+      <div className={`flex-1 h-screen relative ${mobileView === "map" ? "block" : "hidden md:block"}`}>
+        <MapView
+          heatmapData={filteredHeatmapData}
+          clusters={filteredClusters}
+          activeClusterId={activeClusterId}
+          setActiveClusterId={setActiveClusterId}
+          hoveredClusterId={hoveredClusterId}
+          setHoveredClusterId={setHoveredClusterId}
+          mapRef={mapRef}
+          showHeatmap={showHeatmap}
+          showClusters={showClusters}
+          selectedType={selectedType}
+        />
+      </div>
+
+      {/* Floating Mobile Toggle Button */}
+      <button
+        onClick={() => setMobileView(mobileView === "map" ? "list" : "map")}
+        className="md:hidden absolute bottom-6 left-1/2 -translate-x-1/2 z-40 bg-zinc-900/90 backdrop-blur-md border border-white/10 hover:bg-zinc-800 text-white font-black text-xs px-6 py-3.5 rounded-full shadow-2xl flex items-center gap-2 cursor-pointer uppercase tracking-wider transition-all duration-300 active:scale-95"
+      >
+        {mobileView === "map" ? (
+          <>
+            <Terminal className="w-4 h-4 text-primary" />
+            <span>Ver Lista de Polos</span>
+          </>
+        ) : (
+          <>
+            <Layers className="w-4 h-4 text-primary" />
+            <span>Ver Mapa de Calor</span>
+          </>
+        )}
+      </button>
 
       {/* 3. Helpful Offline Overlay Banner in case the Local API has not started */}
       {hasErrors && (
@@ -181,7 +221,7 @@ export default function DashboardPage() {
               API Fuera de Línea
             </h4>
             <p className="text-[10px] text-muted-foreground leading-normal">
-              No pudimos conectar con <code className="text-primary font-mono font-bold">{API_BASE_URL}</code>. El panel reintentará automáticamente cada 5 segundos.
+              No pudimos conectar con <code className="text-primary font-mono font-bold">{apiBaseUrl}</code>. El panel reintentará automáticamente cada 5 segundos.
             </p>
             <div className="pt-2 flex flex-col gap-1">
               <span className="text-[9px] text-zinc-400 font-bold uppercase flex items-center gap-1">
