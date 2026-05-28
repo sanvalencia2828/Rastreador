@@ -90,7 +90,8 @@ def generate_sample_data(num_records=1000):
             'fax': '',
             'correio_eletronico': f'contato{random.randint(1, 1000)}@empresa.com.br',
             'situacao_especial': '',
-            'data_situacao_especial': ''
+            'data_situacao_especial': '',
+            'porte_empresa': random.choice(['01', '01', '01', '01', '03', '03', '05'])  # ~57% Micro, ~29% Small, ~14% Other
         }
 
         data.append(record)

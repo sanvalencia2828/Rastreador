@@ -84,6 +84,10 @@ class Cluster(BaseModel):
     total_lojas: int
     center_geom: ClusterPoint
 
+class StreetAnalytics(BaseModel):
+    logradouro: str
+    total_locais: int
+
 # ==============================================================================
 # DATABASE OR LOCAL JSON LOADER
 # ==============================================================================
@@ -284,6 +288,83 @@ def get_emergent_clusters():
     # Sort by density descending
     clusters.sort(key=lambda c: c.total_lojas, reverse=True)
     return clusters
+
+@app.get("/api/analytics/streets", response_model=List[StreetAnalytics])
+def get_commercial_streets_analytics():
+    """
+    Returns the top 15 commercial streets in Londrina for micro/small businesses.
+    Executes a direct SQL query on PostgreSQL if available, with a robust local fallback.
+    """
+    conn_str = os.environ.get("DATABASE_URL")
+    
+    if not conn_str:
+        db_user = os.environ.get("DB_USER")
+        db_password = os.environ.get("DB_PASSWORD")
+        db_host = os.environ.get("DB_HOST")
+        db_port = os.environ.get("DB_PORT", "5432")
+        db_name = os.environ.get("DB_NAME")
+        if all([db_user, db_password, db_host, db_name]):
+            conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+
+    if conn_str:
+        try:
+            engine = create_engine(conn_str)
+            with engine.connect() as conn:
+                query = text("""
+                    SELECT logradouro, COUNT(*) as total_locais
+                    FROM londrina_businesses
+                    WHERE porte_empresa IN ('01', '03')
+                    GROUP BY logradouro
+                    ORDER BY total_locais DESC
+                    LIMIT 15;
+                """)
+                result = conn.execute(query)
+                analytics = []
+                for row in result:
+                    # SQLAlchemy compatibility (row mapping or tuple)
+                    row_dict = dict(row._mapping) if hasattr(row, "_mapping") else {"logradouro": row[0], "total_locais": row[1]}
+                    # Ensure logradouro is not null or empty
+                    if row_dict.get("logradouro"):
+                        analytics.append(StreetAnalytics(
+                            logradouro=row_dict["logradouro"],
+                            total_locais=row_dict["total_locais"]
+                        ))
+                print(f"Loaded {len(analytics)} street analytics from PostgreSQL DB.")
+                if len(analytics) > 0:
+                    return analytics
+        except Exception as e:
+            print(f"PostgreSQL query failed for analytics: {e}. Falling back to JSON...")
+
+    # Fallback to local JSON file
+    businesses = load_businesses()
+    if len(businesses) == 0:
+        return []
+
+    # Filter records where porte_empresa is '01' or '03'
+    # Group results by logradouro
+    counts = {}
+    for biz in businesses:
+        porte = biz.get("porte_empresa")
+        logradouro = biz.get("logradouro")
+        
+        # Check if porte_empresa is '01' or '03' (fallback: if column isn't present, process all to be safe)
+        if (not porte) or (porte in ["01", "03"]):
+            if logradouro and logradouro.strip():
+                street_name = logradouro.strip()
+                counts[street_name] = counts.get(street_name, 0) + 1
+
+    # Convert to list and sort descending
+    sorted_streets = sorted(counts.items(), key=lambda item: item[1], reverse=True)
+    
+    # Take top 15
+    top_15 = sorted_streets[:15]
+    
+    # Form response
+    return [
+        StreetAnalytics(logradouro=street, total_locais=count)
+        for street, count in top_15
+    ]
+
 
 # ==============================================================================
 # MAIN METHOD

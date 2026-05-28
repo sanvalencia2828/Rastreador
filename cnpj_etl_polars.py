@@ -94,7 +94,7 @@ def load_cnpj_data_polars(file_path: str, chunk_size: int = 50000) -> pl.DataFra
         'tipo_logradouro', 'logradouro', 'numero', 'complemento', 'bairro',
         'cep', 'uf', 'codigo_municipio', 'municipio', 'ddd_1', 'telefone_1',
         'ddd_2', 'telefone_2', 'ddd_fax', 'fax', 'correio_eletronico',
-        'situacao_especial', 'data_situacao_especial'
+        'situacao_especial', 'data_situacao_especial', 'porte_empresa'
     ]
 
     try:
@@ -133,7 +133,9 @@ def filter_cnpj_data_polars(df: pl.DataFrame) -> pl.DataFrame:
     """
     try:
         # Apply all filters in a single operation
-        filtered_df = df.filter(
+        filtered_df = df.with_columns(
+            pl.col("cnae_fiscal_principal").cast(pl.Utf8, strict=False)
+        ).filter(
             (pl.col("codigo_municipio").cast(pl.Int64, strict=False) == LONDRINA_IBGE_CODE) &
             (pl.col("situacao_cadastral").cast(pl.Int64, strict=False) == 2) &
             (pl.col("cnae_fiscal_principal").is_in(VALID_CNAE_CODES))
@@ -154,7 +156,7 @@ def filter_cnpj_data_polars(df: pl.DataFrame) -> pl.DataFrame:
             columns_to_keep = [
                 "cnpj_basico", "cnpj_ordem", "cnpj_dv", "nome_fantasia",
                 "cnae_fiscal_principal", "logradouro", "numero", "bairro", "cep", "telefone_1",
-                "business_type"
+                "business_type", "porte_empresa"
             ]
 
             # Only keep columns that exist in the dataframe
@@ -177,8 +179,10 @@ def export_to_json_polars(df: pl.DataFrame, output_file: str) -> None:
         output_file: Path to output JSON file
     """
     try:
-        # Convert to JSON
-        df.write_json(output_file, row_oriented=True)
+        # Convert Polars DataFrame to list of dicts and write using standard json module
+        data_dicts = df.to_dicts()
+        with open(output_file, "w", encoding="utf-8") as f:
+            json.dump(data_dicts, f, indent=2, ensure_ascii=False)
         print(f"Data exported to {output_file}")
     except Exception as e:
         print(f"Error exporting to JSON: {e}")
@@ -213,7 +217,9 @@ def main():
     """
     # Example usage - modify these paths according to your setup
     input_file = "Estabelecimentos0.csv"  # Replace with actual path to your CNPJ data file
-    output_json = "londrina_businesses_polars.json"
+    if not os.path.exists(input_file) and os.path.exists("sample_estabelecimentos.csv"):
+        input_file = "sample_estabelecimentos.csv"
+    output_json = "londrina_businesses.json"
 
     # Check if input file exists
     if not os.path.exists(input_file):

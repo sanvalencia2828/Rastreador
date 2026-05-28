@@ -95,7 +95,7 @@ def load_cnpj_data(file_path: str, chunk_size: int = 10000) -> pd.DataFrame:
         'tipo_logradouro', 'logradouro', 'numero', 'complemento', 'bairro',
         'cep', 'uf', 'codigo_municipio', 'municipio', 'ddd_1', 'telefone_1',
         'ddd_2', 'telefone_2', 'ddd_fax', 'fax', 'correio_eletronico',
-        'situacao_especial', 'data_situacao_especial'
+        'situacao_especial', 'data_situacao_especial', 'porte_empresa'
     ]
 
     filtered_chunks = []
@@ -166,7 +166,7 @@ def filter_cnpj_data(df: pd.DataFrame) -> pd.DataFrame:
         # Remove unnecessary columns to reduce size
         columns_to_keep = [
             'cnpj_basico', 'cnpj_ordem', 'cnpj_dv', 'nome_fantasia',
-            'cnae_fiscal_principal', 'logradouro', 'numero', 'bairro', 'cep', 'telefone_1'
+            'cnae_fiscal_principal', 'logradouro', 'numero', 'bairro', 'cep', 'telefone_1', 'porte_empresa'
         ]
 
         # Only keep columns that exist in the dataframe
