@@ -41,11 +41,34 @@ HUBS = {
     5: {"name": "Zona Leste (Av. Bandeirantes)", "coords": [-51.1550, -23.3180]}
 }
 
-def assign_geographic_coords(cnpj: str, business_type: str) -> list:
-    """Calcula deterministamente coordenadas a partir del CNPJ y tipo de negocio."""
+def assign_geographic_coords(cnpj: str, business_type: str, municipio: str = None) -> list:
+    """Calcula deterministamente coordenadas a partir del CNPJ, tipo de negocio y ciudad."""
     h = hashlib.md5(cnpj.encode('utf-8')).hexdigest()
     hash_val = int(h, 16)
 
+    city_key = str(municipio).strip().lower() if municipio else ""
+
+    # Determine centroid based on prefix to prevent encoding conflicts (e.g. UTF-8 vs Latin1)
+    center_lng, center_lat = None, None
+    if city_key.startswith("camb"):
+        center_lng, center_lat = [-51.2782, -23.2758]  # Cambé
+    elif city_key.startswith("ibipor"):
+        center_lng, center_lat = [-51.0478, -23.2694]  # Ibiporã
+    elif city_key.startswith("apucar") or "apucar" in city_key:
+        center_lng, center_lat = [-51.4614, -23.5521]  # Apucarana
+    elif "janda" in city_key or "jata" in city_key:
+        center_lng, center_lat = [-51.6447, -23.6064]  # Jandaia do Sul
+
+    # Si es una ciudad vecina, dispersar los puntos alrededor de su centroide
+    if center_lng is not None and center_lat is not None:
+        lng_factor = ((hash_val % 1000) - 500) / 500.0
+        lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
+        
+        lng_offset = (lng_factor ** 3) * 0.015
+        lat_offset = (lat_factor ** 3) * 0.015
+        return [center_lng + lng_offset, center_lat + lat_offset]
+
+    # Por defecto: Hubs de Londrina
     if business_type == "gastronomy":
         hub_idx = [2, 3, 5, 1, 4][hash_val % 5]
     else:
@@ -103,21 +126,21 @@ def main():
         conn.rollback()
         print(f"Error al agregar columna geom: {e}")
 
-    # 4. Obtener todos los registros para calcular y actualizar coordenadas
-    cursor.execute("SELECT id, cnpj_basico, cnpj_ordem, cnpj_dv, business_type FROM londrina_businesses;")
+    # 4. Obtener todos los registros para calcular y actualizar coordenadas (incluyendo municipio)
+    cursor.execute("SELECT id, cnpj_basico, cnpj_ordem, cnpj_dv, business_type, municipio FROM londrina_businesses;")
     rows = cursor.fetchall()
     print(f"Calculando coordenadas para {len(rows)} comercios...")
 
     updates = []
     for row in rows:
-        row_id, cnpj_basico, cnpj_ordem, cnpj_dv, business_type = row
+        row_id, cnpj_basico, cnpj_ordem, cnpj_dv, business_type, municipio = row
         # Reconstruir CNPJ completo de 14 dígitos
         cnpj_completo = f"{cnpj_basico or ''}{cnpj_ordem or ''}{cnpj_dv or ''}"
         if len(cnpj_completo) < 14:
             # Rellenar con ceros si falta algo
             cnpj_completo = cnpj_completo.zfill(14)
             
-        lng, lat = assign_geographic_coords(cnpj_completo, business_type)
+        lng, lat = assign_geographic_coords(cnpj_completo, business_type, municipio)
         updates.append((lat, lng, row_id))
 
     # 5. Guardar en base de datos

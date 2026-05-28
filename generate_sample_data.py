@@ -18,7 +18,11 @@ SAMPLE_CNAE_CODES = [
 ]
 
 SAMPLE_MUNICIPALITIES = [
-    (4113700, 'Londrina'),  # Target city
+    (4113700, 'Londrina'),       # Target city
+    (4103701, 'Cambé'),          # Nearby metro city
+    (4109807, 'Ibiporã'),        # Nearby metro city
+    (4101408, 'Apucarana'),       # Nearby city
+    (4112108, 'Jandaia do Sul'),  # Nearby city
     (3550308, 'São Paulo'),
     (3304557, 'Rio de Janeiro'),
     (4106902, 'Curitiba')
@@ -43,11 +47,11 @@ def generate_sample_data(num_records=1000):
     data = []
 
     for i in range(num_records):
-        # Randomly select municipality (mostly Londrina to ensure we have matches)
-        if random.random() < 0.7:  # 70% chance of being Londrina
-            cod_municipio, municipio = SAMPLE_MUNICIPALITIES[0]
+        # 70% chance of being in the Londrina metro/nearby region
+        if random.random() < 0.7:
+            cod_municipio, municipio = random.choice(SAMPLE_MUNICIPALITIES[:5])
         else:
-            cod_municipio, municipio = random.choice(SAMPLE_MUNICIPALITIES)
+            cod_municipio, municipio = random.choice(SAMPLE_MUNICIPALITIES[5:])
 
         # Randomly select CNAE code
         cnae_code = random.choice(SAMPLE_CNAE_CODES)
@@ -113,12 +117,13 @@ def main():
     print(f"Total records: {len(df)}")
 
     # Show some statistics
-    londrina_count = len(df[df['codigo_municipio'] == 4113700])
+    target_cities_codes = [4113700, 4103701, 4109807, 4101408, 4112108]
+    metro_count = len(df[df['codigo_municipio'].isin(target_cities_codes)])
     active_count = len(df[df['situacao_cadastral'] == 2])
     retail_gastronomy_count = len(df[df['cnae_fiscal_principal'].isin(SAMPLE_CNAE_CODES[:11])])
 
     print(f"\nStatistics:")
-    print(f"- Londrina businesses: {londrina_count}")
+    print(f"- Target regional businesses (Londrina + nearby): {metro_count}")
     print(f"- Active businesses: {active_count}")
     print(f"- Retail/Gastronomy businesses: {retail_gastronomy_count}")
 

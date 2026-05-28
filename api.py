@@ -192,18 +192,41 @@ def load_businesses() -> List[Dict[str, Any]]:
 # ==============================================================================
 # SPATIAL ALGORITHMS
 # ==============================================================================
-def assign_geographic_coords(cnpj: str, business_type: str) -> List[float]:
+def assign_geographic_coords(cnpj: str, business_type: str, municipio: Optional[str] = None) -> List[float]:
     """
-    Deterministically maps a CNPJ to one of the 5 hotspots in Londrina,
-    and applies a stable random Gaussian-like noise to distribute the point on the map.
-    This creates an extremely realistic spatial distribution (heatmap) without external APIs.
+    Deterministically maps a CNPJ to geographical coordinates.
+    If the business is in Londrina (or default), it maps it to one of the 5 hubs.
+    If it is in a nearby city, it maps it around the city's centroid.
     """
     # Create a md5 hash of the CNPJ to have deterministic geographic placement
     h = hashlib.md5(cnpj.encode('utf-8')).hexdigest()
     hash_val = int(h, 16)
 
+    city_key = str(municipio).strip().lower() if municipio else ""
+    
+    # Determine centroid based on prefix to prevent encoding conflicts (e.g. UTF-8 vs Latin1)
+    center_lng, center_lat = None, None
+    if city_key.startswith("camb"):
+        center_lng, center_lat = [-51.2782, -23.2758]  # Cambé
+    elif city_key.startswith("ibipor"):
+        center_lng, center_lat = [-51.0478, -23.2694]  # Ibiporã
+    elif city_key.startswith("apucar") or "apucar" in city_key:
+        center_lng, center_lat = [-51.4614, -23.5521]  # Apucarana
+    elif "janda" in city_key or "jata" in city_key:
+        center_lng, center_lat = [-51.6447, -23.6064]  # Jandaia do Sul
+
+    # If the business is in one of the other target cities, place it around its centroid
+    if center_lng is not None and center_lat is not None:
+        # Deterministic displacement within 2km radius
+        lng_factor = ((hash_val % 1000) - 500) / 500.0
+        lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
+        
+        lng_offset = (lng_factor ** 3) * 0.015
+        lat_offset = (lat_factor ** 3) * 0.015
+        return [center_lng + lng_offset, center_lat + lat_offset]
+
+    # Default: Londrina Hubs
     # Determine Hub index (1-5) based on hash and business type bias
-    # Bias gastronomy slightly towards Hubs 2, 3 and 5, and retail towards Hubs 1 and 4
     if business_type == "gastronomy":
         hub_idx = [2, 3, 5, 1, 4][hash_val % 5]
     else:
@@ -218,7 +241,6 @@ def assign_geographic_coords(cnpj: str, business_type: str) -> List[float]:
     lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0  # [-1.0, 1.0]
 
     # Add Gaussian weight (dense at center, scattered at edges)
-    # Apply exponentiation to draw points closer to the center of each hub
     lng_offset = (lng_factor ** 3) * 0.0075
     lat_offset = (lat_factor ** 3) * 0.0075
 
@@ -261,7 +283,8 @@ def get_heatmap_geojson():
     for biz in businesses:
         cnpj = biz.get("cnpj_basico", "00000000") + biz.get("cnpj_ordem", "0000") + biz.get("cnpj_dv", "00")
         biz_type = biz.get("business_type", "retail")
-        coords = assign_geographic_coords(cnpj, biz_type)
+        municipio = biz.get("municipio")
+        coords = assign_geographic_coords(cnpj, biz_type, municipio)
         
         feature = {
             "type": "Feature",
@@ -271,11 +294,12 @@ def get_heatmap_geojson():
             },
             "properties": {
                 "cnpj": cnpj,
-                "nome_fantasia": biz.get("nome_fantasia", "Comercio de Londrina"),
+                "nome_fantasia": biz.get("nome_fantasia", "Comercio"),
                 "business_type": biz_type,
                 "cnae": biz.get("cnae_fiscal_principal", ""),
                 "bairro": biz.get("bairro", "Centro"),
-                "logradouro": biz.get("logradouro", "")
+                "logradouro": biz.get("logradouro", ""),
+                "municipio": municipio or "Londrina"
             }
         }
         features.append(feature)
