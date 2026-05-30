@@ -1,0 +1,8 @@
+# ==============================================================================
+# pyproject.toml — Vercel Python Deployment Configuration
+# ==============================================================================
+# This configuration file helps Vercel's Python builder discover our core FastAPI
+# application entrypoint in api.py (variable 'app').
+
+[tool.vercel]
+entrypoint = "api:app"
