@@ -453,6 +453,466 @@ def get_commercial_streets_analytics():
 # ==============================================================================
 # MAIN METHOD
 # ==============================================================================
+# ==============================================================================
+# STREET SEGMENTS, VISITS AND OFFLINE SYNC - EXTRA MODELS & ENDPOINTS
+# ==============================================================================
+import hmac
+import hashlib
+import base64
+import time
+from datetime import datetime
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi import Depends, Header
+
+security = HTTPBearer(auto_error=False)
+SECRET_KEY = "super_secret_key_londrina_radar_2026"
+
+# ------------------------------------------------------------------------------
+# 0-DEPENDENCY JWT & CRYPTO UTILITIES
+# ------------------------------------------------------------------------------
+def base64url_encode(payload: bytes) -> str:
+    return base64.urlsafe_b64encode(payload).rstrip(b'=').decode('utf-8')
+
+def base64url_decode(payload: str) -> bytes:
+    padding = '=' * (4 - (len(payload) % 4))
+    return base64.urlsafe_b64decode(payload + padding)
+
+def create_jwt_token(data: dict, expires_in: int = 86400) -> str:
+    header = {"alg": "HS256", "typ": "JWT"}
+    payload = data.copy()
+    payload["exp"] = int(time.time()) + expires_in
+    header_json = json.dumps(header, separators=(',', ':')).encode('utf-8')
+    payload_json = json.dumps(payload, separators=(',', ':')).encode('utf-8')
+    unsigned_token = base64url_encode(header_json) + "." + base64url_encode(payload_json)
+    signature = hmac.new(SECRET_KEY.encode('utf-8'), unsigned_token.encode('utf-8'), hashlib.sha256).digest()
+    return unsigned_token + "." + base64url_encode(signature)
+
+def decode_jwt_token(token: str) -> dict:
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        header_segment, payload_segment, signature_segment = parts
+        unsigned_token = header_segment + "." + payload_segment
+        expected_signature = hmac.new(SECRET_KEY.encode('utf-8'), unsigned_token.encode('utf-8'), hashlib.sha256).digest()
+        actual_signature = base64url_decode(signature_segment)
+        if not hmac.compare_digest(expected_signature, actual_signature):
+            return {}
+        payload = json.loads(base64url_decode(payload_segment).decode('utf-8'))
+        if payload.get("exp", 0) < time.time():
+            return {}
+        return payload
+    except Exception:
+        return {}
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+
+# ------------------------------------------------------------------------------
+# PYDANTIC SCHEMAS
+# ------------------------------------------------------------------------------
+class UserRegister(BaseModel):
+    username: str
+    password: str
+
+class UserLogin(BaseModel):
+    username: str
+    password: str
+
+class VisitCreate(BaseModel):
+    segment_id: int
+    visited: bool
+    visited_at: str
+    notes: Optional[str] = None
+    source: Optional[str] = "mobile"
+
+class VisitSyncItem(BaseModel):
+    segment_id: int
+    visited: bool
+    visited_at: str
+    notes: Optional[str] = None
+    source: Optional[str] = "mobile"
+
+class RouteCreate(BaseModel):
+    name: str
+    segment_ids: List[int]
+
+# ------------------------------------------------------------------------------
+# DB SETUP & GLOBAL ENGINE
+# ------------------------------------------------------------------------------
+conn_str = os.environ.get("DATABASE_URL")
+if not conn_str:
+    db_user = os.environ.get("DB_USER")
+    db_password = os.environ.get("DB_PASSWORD")
+    db_host = os.environ.get("DB_HOST", "db")
+    db_port = os.environ.get("DB_PORT", "5432")
+    db_name = os.environ.get("DB_NAME", "londrina_comercio")
+    if all([db_user, db_password, db_host, db_name]):
+        conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+
+db_engine = create_engine(conn_str) if conn_str else None
+
+# Initialize User Table
+if db_engine:
+    try:
+        with db_engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    username VARCHAR(255) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            """))
+            print("Successfully initialized users table in DB.")
+    except Exception as e:
+        print(f"Error initializing users table: {e}")
+
+# ------------------------------------------------------------------------------
+# DEPENDENCY FOR AUTHENTICATION
+# ------------------------------------------------------------------------------
+def get_current_user_id(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> str:
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Authentication token missing")
+    token = credentials.credentials
+    payload = decode_jwt_token(token)
+    if not payload or "user_id" not in payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return payload["user_id"]
+
+def get_optional_user_id(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[str]:
+    if not credentials:
+        return None
+    token = credentials.credentials
+    payload = decode_jwt_token(token)
+    return payload.get("user_id") if payload else None
+
+# ------------------------------------------------------------------------------
+# AUTH ENDPOINTS
+# ------------------------------------------------------------------------------
+@app.post("/auth/register")
+def register_user(user: UserRegister):
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    try:
+        pw_hash = hash_password(user.password)
+        with db_engine.connect() as conn:
+            result = conn.execute(
+                text("INSERT INTO users (username, password_hash) VALUES (:username, :pw_hash) RETURNING id"),
+                {"username": user.username, "pw_hash": pw_hash}
+            )
+            user_id = result.fetchone()[0]
+            token = create_jwt_token({"user_id": str(user_id), "username": user.username})
+            return {"user_id": str(user_id), "username": user.username, "token": token}
+    except Exception as e:
+        if "unique" in str(e).lower():
+            raise HTTPException(status_code=400, detail="Username already registered")
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+@app.post("/auth/login")
+def login_user(user: UserLogin):
+    if not db_engine:
+        return {"user_id": "00000000-0000-0000-0000-000000000001", "username": user.username, "token": "dummy_dev_token"}
+    try:
+        pw_hash = hash_password(user.password)
+        with db_engine.connect() as conn:
+            result = conn.execute(
+                text("SELECT id, password_hash FROM users WHERE username = :username"),
+                {"username": user.username}
+            )
+            row = result.fetchone()
+            if not row:
+                raise HTTPException(status_code=400, detail="Invalid username or password")
+            user_id, db_pw_hash = row
+            if db_pw_hash != pw_hash:
+                raise HTTPException(status_code=400, detail="Invalid username or password")
+            
+            token = create_jwt_token({"user_id": str(user_id), "username": user.username})
+            return {"user_id": str(user_id), "username": user.username, "token": token}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database error: {e}")
+
+# ------------------------------------------------------------------------------
+# TRACKING ENDPOINTS
+# ------------------------------------------------------------------------------
+@app.get("/api/segments")
+def get_street_segments(bbox: str, user_id: Optional[str] = Depends(get_optional_user_id)):
+    """
+    Returns GeoJSON FeatureCollection of street segments within the specified bbox.
+    Format: bbox=lng1,lat1,lng2,lat2
+    Includes 'visited_by_user' boolean if a valid JWT token is provided.
+    """
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    
+    try:
+        parts = bbox.split(",")
+        if len(parts) != 4:
+            raise HTTPException(status_code=400, detail="Bbox must have exactly 4 coordinates: lng1,lat1,lng2,lat2")
+        lng1, lat1, lng2, lat2 = map(float, parts)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Bbox coordinates must be valid numbers")
+
+    try:
+        with db_engine.connect() as conn:
+            if user_id:
+                query = text("""
+                    SELECT s.id, s.osm_id, s.name, s.length_m, ST_AsGeoJSON(s.geom) as geom_geojson,
+                           COALESCE(v.visited, FALSE) as visited_by_user, v.notes, v.visited_at
+                    FROM street_segments s
+                    LEFT JOIN user_visits v ON s.id = v.segment_id AND v.user_id = :user_id
+                    WHERE ST_Intersects(s.geom, ST_MakeEnvelope(:lng1, :lat1, :lng2, :lat2, 4326))
+                """)
+                params = {"lng1": lng1, "lat1": lat1, "lng2": lng2, "lat2": lat2, "user_id": user_id}
+            else:
+                query = text("""
+                    SELECT s.id, s.osm_id, s.name, s.length_m, ST_AsGeoJSON(s.geom) as geom_geojson,
+                           FALSE as visited_by_user, NULL as notes, NULL as visited_at
+                    FROM street_segments s
+                    WHERE ST_Intersects(s.geom, ST_MakeEnvelope(:lng1, :lat1, :lng2, :lat2, 4326))
+                """)
+                params = {"lng1": lng1, "lat1": lat1, "lng2": lng2, "lat2": lat2}
+
+            result = conn.execute(query, params)
+            features = []
+            for row in result:
+                row_dict = dict(row._mapping)
+                geom = json.loads(row_dict["geom_geojson"])
+                feature = {
+                    "type": "Feature",
+                    "geometry": geom,
+                    "properties": {
+                        "id": row_dict["id"],
+                        "osm_id": row_dict["osm_id"],
+                        "name": row_dict["name"] or "Calle sin nombre",
+                        "length_m": float(row_dict["length_m"]) if row_dict["length_m"] else 0.0,
+                        "visited_by_user": row_dict["visited_by_user"],
+                        "notes": row_dict["notes"],
+                        "visited_at": row_dict["visited_at"].isoformat() if row_dict["visited_at"] else None
+                    }
+                }
+                features.append(feature)
+
+            return {
+                "type": "FeatureCollection",
+                "features": features
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database query failed: {e}")
+
+@app.get("/api/visits")
+def get_user_visits(user_id: Optional[str] = None, bbox: Optional[str] = None, current_user_id: str = Depends(get_current_user_id)):
+    """
+    Returns user visits. If user_id is not supplied, uses the authenticated current_user_id.
+    """
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    
+    target_user_id = user_id if user_id else current_user_id
+
+    query_str = """
+        SELECT v.id, v.segment_id, v.visited, v.visited_at, v.notes, v.source,
+               s.name as street_name, s.length_m, ST_AsGeoJSON(s.geom) as geom_geojson
+        FROM user_visits v
+        JOIN street_segments s ON v.segment_id = s.id
+        WHERE v.user_id = :user_id
+    """
+    params = {"user_id": target_user_id}
+
+    if bbox:
+        try:
+            parts = bbox.split(",")
+            if len(parts) == 4:
+                lng1, lat1, lng2, lat2 = map(float, parts)
+                query_str += " AND ST_Intersects(s.geom, ST_MakeEnvelope(:lng1, :lat1, :lng2, :lat2, 4326))"
+                params.update({"lng1": lng1, "lat1": lat1, "lng2": lng2, "lat2": lat2})
+        except ValueError:
+            pass
+
+    try:
+        with db_engine.connect() as conn:
+            result = conn.execute(text(query_str), params)
+            visits = []
+            for row in result:
+                row_dict = dict(row._mapping)
+                geom = json.loads(row_dict["geom_geojson"])
+                visits.append({
+                    "id": row_dict["id"],
+                    "segment_id": row_dict["segment_id"],
+                    "visited": row_dict["visited"],
+                    "visited_at": row_dict["visited_at"].isoformat(),
+                    "notes": row_dict["notes"],
+                    "source": row_dict["source"],
+                    "street_name": row_dict["street_name"],
+                    "length_m": float(row_dict["length_m"]) if row_dict["length_m"] else 0.0,
+                    "geometry": geom
+                })
+            return visits
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database operation failed: {e}")
+
+@app.post("/api/visits")
+def upsert_visit(visit: VisitCreate, user_id: str = Depends(get_current_user_id)):
+    """
+    Upsert individual user visit.
+    """
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+
+    try:
+        visited_at = datetime.fromisoformat(visit.visited_at.replace("Z", "+00:00"))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid visited_at timestamp format")
+
+    try:
+        with db_engine.connect() as conn:
+            query = text("""
+                INSERT INTO user_visits (user_id, segment_id, visited, visited_at, notes, source, synced)
+                VALUES (:user_id, :segment_id, :visited, :visited_at, :notes, :source, TRUE)
+                ON CONFLICT (user_id, segment_id) DO UPDATE SET
+                    visited = EXCLUDED.visited,
+                    visited_at = EXCLUDED.visited_at,
+                    notes = EXCLUDED.notes,
+                    source = EXCLUDED.source,
+                    synced = TRUE
+                RETURNING id
+            """)
+            result = conn.execute(query, {
+                "user_id": user_id,
+                "segment_id": visit.segment_id,
+                "visited": visit.visited,
+                "visited_at": visited_at,
+                "notes": visit.notes,
+                "source": visit.source
+            })
+            visit_id = result.fetchone()[0]
+            return {"status": "success", "visit_id": visit_id, "synced": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Database insert/update failed: {e}")
+
+@app.post("/api/sync/visits")
+def sync_visits(visits: List[VisitSyncItem], user_id: str = Depends(get_current_user_id)):
+    """
+    Sync offline visits. Implements conflict resolution by visited_at timestamp (last write wins).
+    Returns synced count and conflicts list with server state.
+    """
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+
+    synced_count = 0
+    conflicts = []
+
+    try:
+        with db_engine.connect() as conn:
+            for item in visits:
+                try:
+                    client_time = datetime.fromisoformat(item.visited_at.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+
+                # Check current server state
+                check_query = text("""
+                    SELECT visited, visited_at, notes
+                    FROM user_visits
+                    WHERE user_id = :user_id AND segment_id = :segment_id
+                """)
+                existing = conn.execute(check_query, {"user_id": user_id, "segment_id": item.segment_id}).fetchone()
+
+                if existing:
+                    server_visited, server_time, server_notes = existing
+                    if server_time > client_time:
+                        conflicts.append({
+                            "segment_id": item.segment_id,
+                            "client_visited": item.visited,
+                            "client_visited_at": item.visited_at,
+                            "server_visited": server_visited,
+                            "server_visited_at": server_time.isoformat(),
+                            "server_notes": server_notes
+                        })
+                        continue
+
+                # Otherwise, upsert client state
+                upsert_query = text("""
+                    INSERT INTO user_visits (user_id, segment_id, visited, visited_at, notes, source, synced)
+                    VALUES (:user_id, :segment_id, :visited, :visited_at, :notes, :source, TRUE)
+                    ON CONFLICT (user_id, segment_id) DO UPDATE SET
+                        visited = EXCLUDED.visited,
+                        visited_at = EXCLUDED.visited_at,
+                        notes = EXCLUDED.notes,
+                        source = EXCLUDED.source,
+                        synced = TRUE
+                """)
+                conn.execute(upsert_query, {
+                    "user_id": user_id,
+                    "segment_id": item.segment_id,
+                    "visited": item.visited,
+                    "visited_at": client_time,
+                    "notes": item.notes,
+                    "source": item.source
+                })
+                synced_count += 1
+            
+            return {
+                "synced": synced_count,
+                "conflicts": conflicts
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Sync process failed: {e}")
+
+@app.post("/api/routes")
+def create_route(route: RouteCreate, user_id: str = Depends(get_current_user_id)):
+    """
+    Creates a route by collecting the geometries of multiple street segments
+    and merging them into a single track using PostGIS ST_LineMerge.
+    """
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+
+    if not route.segment_ids:
+        raise HTTPException(status_code=400, detail="A route must contain at least one segment")
+
+    try:
+        with db_engine.connect() as conn:
+            # First collect the geometries of the segments and merge them
+            merge_query = text("""
+                INSERT INTO routes (user_id, name, geom)
+                VALUES (
+                    :user_id, 
+                    :name, 
+                    (
+                        SELECT ST_LineMerge(ST_Collect(geom))
+                        FROM street_segments
+                        WHERE id IN (:segment_ids)
+                    )
+                )
+                RETURNING id, ST_AsGeoJSON(geom) as geom_geojson
+            """)
+            
+            result = conn.execute(merge_query, {
+                "user_id": user_id,
+                "name": route.name,
+                "segment_ids": tuple(route.segment_ids) if len(route.segment_ids) > 1 else route.segment_ids[0]
+            })
+            
+            row = result.fetchone()
+            if not row or not row[1]:
+                raise HTTPException(status_code=400, detail="Could not construct route geometry. Make sure segment IDs exist.")
+            
+            route_id, geom_json = row
+            return {
+                "status": "success",
+                "route_id": route_id,
+                "name": route.name,
+                "geometry": json.loads(geom_json)
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create route: {e}")
+
+# ==============================================================================
+# MAIN METHOD
+# ==============================================================================
 if __name__ == "__main__":
     import uvicorn
     # Read config from environment variables
@@ -460,3 +920,4 @@ if __name__ == "__main__":
     host = os.environ.get("API_HOST", "0.0.0.0")
     print(f"Launching Rastreador CNPJ Backend API on http://{host}:{port}...")
     uvicorn.run("api:app", host=host, port=port, reload=True)
+

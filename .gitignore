@@ -48,3 +48,6 @@ Estabelecimentos*.csv
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Tooling
+.antigravitycli/
