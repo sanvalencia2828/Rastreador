@@ -1,8 +1,38 @@
 # ==============================================================================
-# pyproject.toml — Vercel Python Deployment Configuration
+# pyproject.toml — Build & Vercel Deployment Configuration
 # ==============================================================================
-# This configuration file helps Vercel's Python builder discover our core FastAPI
-# application entrypoint in api.py (variable 'app').
+# This file configures the Python build system and tells Vercel's Python builder
+# where to find the FastAPI app entrypoint (api.py → variable `app`).
+# Vercel injects $PORT dynamically; uvicorn must bind to it at runtime.
 
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "rastreador-cnpj"
+version = "1.0.0"
+description = "Plataforma analítica geoespacial para rastreo de comercios en Londrina, PR"
+requires-python = ">=3.11"
+dependencies = [
+    "pandas>=1.5.0",
+    "polars>=0.19.0",
+    "sqlalchemy>=1.4.0",
+    "psycopg2-binary>=2.9.0",
+    "fastapi>=0.100.0",
+    "uvicorn>=0.22.0",
+    "pydantic>=2.0",
+]
+
+# ==============================================================================
+# [tool.vercel] — Vercel Python Serverless Configuration
+#
+# - entrypoint : "api:app"  →  file api.py, variable app
+# - start_command: uvicorn binds to $PORT (injected by Vercel at runtime)
+# - runtime: python3.11
+# ==============================================================================
 [tool.vercel]
 entrypoint = "api:app"
+start_command = "uvicorn api:app --host 0.0.0.0 --port ${PORT}"
+runtime = "python3.11"
+max_lambda_size = "50mb"
