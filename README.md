@@ -92,6 +92,54 @@ npm run dev
 
 El dashboard se levanta en http://localhost:3000.
 
+## ☁️ Despliegue en Vercel
+
+El proyecto soporta despliegue en Vercel con el backend FastAPI como **serverless function** y el frontend Next.js como build estático.
+
+### Archivos de configuración
+
+| Archivo | Propósito |
+|---------|-----------|
+| [`vercel.json`](vercel.json) | Rutas: `/api/*` → `api.py`, `/` → frontend |
+| [`pyproject.toml`](pyproject.toml) | `[tool.vercel]` con entrypoint `api:app` |
+
+### Variables de entorno en Vercel
+
+En el panel de Vercel → *Settings → Environment Variables*, configurar:
+
+| Variable | Valor |
+|----------|-------|
+| `DATABASE_URL` | `postgresql://user:pass@host:5432/dbname` |
+| `NEXT_PUBLIC_API_URL` | `https://<tu-proyecto>.vercel.app` |
+
+> **Nota:** Vercel asigna `$PORT` dinámicamente. El comando de arranque es:
+> ```bash
+> uvicorn api:app --host 0.0.0.0 --port ${PORT}
+> ```
+
+### Verificar localmente antes de subir
+
+```bash
+# 1. Instalar Vercel CLI (una sola vez)
+npm i -g vercel
+
+# 2. Probar el build localmente
+vercel build
+
+# 3. Desplegar a producción
+vercel deploy --prod
+```
+
+### Confirmar el frontend apunta al backend desplegado
+
+En [`frontend/.env`](frontend/.env) (o en las variables de Vercel):
+
+```env
+NEXT_PUBLIC_API_URL=https://<tu-proyecto>.vercel.app
+```
+
+---
+
 ## 📊 Pipeline ETL
 
 ### Generar datos de muestra
