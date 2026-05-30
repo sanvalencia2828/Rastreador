@@ -68,7 +68,24 @@ const HUB_METADATA: Record<number, { name: string; zone: string; desc: string; d
   }
 };
 
-const NEXT_PUBLIC_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+const getApiUrl = (): string => {
+  const defaultUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+    try {
+      const url = new URL(defaultUrl);
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+        url.hostname = hostname;
+      }
+      return url.toString().replace(/\/$/, "");
+    } catch (e) {
+      return defaultUrl;
+    }
+  }
+  return defaultUrl;
+};
+
+const NEXT_PUBLIC_API_URL = getApiUrl();
 
 export default function MapView({
   heatmapData,
