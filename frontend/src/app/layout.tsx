@@ -29,6 +29,11 @@ export const metadata: Metadata = {
     "ETL",
   ],
   authors: [{ name: "Rastreador Comercial" }],
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export default function RootLayout({
@@ -41,8 +46,26 @@ export default function RootLayout({
       lang="es"
       className={`${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
     >
+      <head>
+        <meta name="theme-color" content="#09090b" />
+      </head>
       <body className="min-h-full flex flex-col font-[family-name:var(--font-inter)]">
         {children}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function() {
+                  navigator.serviceWorker.register('/service-worker.js').then(function(reg) {
+                    console.log('Service Worker registrado con éxito:', reg.scope);
+                  }).catch(function(err) {
+                    console.log('Fallo al registrar Service Worker:', err);
+                  });
+                });
+              }
+            `,
+          }}
+        />
       </body>
     </html>
   );

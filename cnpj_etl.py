@@ -44,8 +44,8 @@ load_env_file()
 
 
 
-# Londrina/PR IBGE code
-LONDRINA_IBGE_CODE = 4113700
+# Regional cities IBGE codes (Londrina, Cambé, Ibiporã, Apucarana, Jandaia do Sul)
+REGIONAL_IBGE_CODES = [4113700, 4103701, 4109807, 4101408, 4112108]
 
 # CNAE codes for retail and gastronomy (simplified list)
 RETAIL_CNAE_CODES = [
@@ -149,8 +149,8 @@ def filter_cnpj_data(df: pd.DataFrame) -> pd.DataFrame:
     df['codigo_municipio'] = pd.to_numeric(df['codigo_municipio'], errors='coerce')
     df['situacao_cadastral'] = pd.to_numeric(df['situacao_cadastral'], errors='coerce')
 
-    # Filter 1: Londrina/PR (IBGE code 4113700)
-    londrina_filter = df['codigo_municipio'] == LONDRINA_IBGE_CODE
+    # Filter 1: Regional cities (Londrina + nearby)
+    regional_filter = df['codigo_municipio'].isin(REGIONAL_IBGE_CODES)
 
     # Filter 2: Active businesses (situation code 2 = active)
     active_filter = df['situacao_cadastral'] == 2
@@ -159,14 +159,14 @@ def filter_cnpj_data(df: pd.DataFrame) -> pd.DataFrame:
     cnae_filter = df['cnae_fiscal_principal'].isin(VALID_CNAE_CODES)
 
     # Apply all filters
-    filtered_df = df[londrina_filter & active_filter & cnae_filter].copy()
+    filtered_df = df[regional_filter & active_filter & cnae_filter].copy()
 
     # Clean up the data
     if not filtered_df.empty:
         # Remove unnecessary columns to reduce size
         columns_to_keep = [
             'cnpj_basico', 'cnpj_ordem', 'cnpj_dv', 'nome_fantasia',
-            'cnae_fiscal_principal', 'logradouro', 'numero', 'bairro', 'cep', 'telefone_1', 'porte_empresa'
+            'cnae_fiscal_principal', 'logradouro', 'numero', 'bairro', 'cep', 'telefone_1', 'porte_empresa', 'municipio'
         ]
 
         # Only keep columns that exist in the dataframe

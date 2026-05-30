@@ -44,8 +44,8 @@ load_env_file()
 
 
 
-# Londrina/PR IBGE code
-LONDRINA_IBGE_CODE = 4113700
+# Regional cities IBGE codes (Londrina, Cambé, Ibiporã, Apucarana, Jandaia do Sul)
+REGIONAL_IBGE_CODES = [4113700, 4103701, 4109807, 4101408, 4112108]
 
 # CNAE codes for retail and gastronomy (simplified list)
 RETAIL_CNAE_CODES = [
@@ -136,15 +136,16 @@ def filter_cnpj_data_polars(df: pl.DataFrame) -> pl.DataFrame:
         filtered_df = df.with_columns(
             pl.col("cnae_fiscal_principal").cast(pl.Utf8, strict=False)
         ).filter(
-            (pl.col("codigo_municipio").cast(pl.Int64, strict=False) == LONDRINA_IBGE_CODE) &
+            (pl.col("codigo_municipio").cast(pl.Int64, strict=False).is_in(REGIONAL_IBGE_CODES)) &
             (pl.col("situacao_cadastral").cast(pl.Int64, strict=False) == 2) &
             (pl.col("cnae_fiscal_principal").is_in(VALID_CNAE_CODES))
         )
 
         print(f"Filtered data contains {len(filtered_df)} rows")
 
+        # Clean up columns and add categorizations if we have matches
         if len(filtered_df) > 0:
-            # Add classification column
+            # Classification: retail or gastronomy
             filtered_df = filtered_df.with_columns([
                 pl.when(pl.col("cnae_fiscal_principal").is_in(RETAIL_CNAE_CODES))
                 .then(pl.lit("retail"))
@@ -152,11 +153,11 @@ def filter_cnpj_data_polars(df: pl.DataFrame) -> pl.DataFrame:
                 .alias("business_type")
             ])
 
-            # Select only relevant columns
+            # Select only relevant columns (including municipio)
             columns_to_keep = [
                 "cnpj_basico", "cnpj_ordem", "cnpj_dv", "nome_fantasia",
                 "cnae_fiscal_principal", "logradouro", "numero", "bairro", "cep", "telefone_1",
-                "business_type", "porte_empresa"
+                "business_type", "porte_empresa", "municipio"
             ]
 
             # Only keep columns that exist in the dataframe

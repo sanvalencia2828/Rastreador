@@ -87,6 +87,24 @@ def autodetectar_tabla_lojas(conn: psycopg2.extensions.connection) -> str:
     """Autodetección de tabla que contiene datos de locales comerciales"""
     cursor = conn.cursor()
 
+    # Prioridad: Buscar tablas conocidas de locales comerciales
+    query_conocidas = """
+    SELECT table_name 
+    FROM information_schema.tables 
+    WHERE table_name IN ('londrina_businesses', 'estabelecimentos')
+    AND table_schema = 'public'
+    ORDER BY CASE table_name 
+        WHEN 'londrina_businesses' THEN 1 
+        WHEN 'estabelecimentos' THEN 2 
+    END;
+    """
+    cursor.execute(query_conocidas)
+    result = cursor.fetchone()
+    if result:
+        tabla = result[0]
+        logger.info(f"Tabla de locales preferida detectada: {tabla}")
+        return tabla
+
     # Buscar tablas que contengan columnas típicas de locales comerciales
     query = """
     SELECT table_name
@@ -143,6 +161,7 @@ def obtener_metadatos_postgis(conn: psycopg2.extensions.connection, tabla: str) 
         metadatos['srid'] = srid_result[0] if srid_result else 4326
         logger.info(f"SRID detectado: {metadatos['srid']}")
     except:
+        conn.rollback()
         metadatos['srid'] = 4326
         logger.warning("No se pudo obtener SRID, usando 4326 por defecto")
 
@@ -153,6 +172,7 @@ def obtener_metadatos_postgis(conn: psycopg2.extensions.connection, tabla: str) 
         metadatos['geometry_type'] = geom_type_result[0] if geom_type_result else 'POINT'
         logger.info(f"Tipo de geometría: {metadatos['geometry_type']}")
     except:
+        conn.rollback()
         metadatos['geometry_type'] = 'POINT'
         logger.warning("No se pudo obtener tipo de geometría, usando POINT por defecto")
 
@@ -163,6 +183,7 @@ def obtener_metadatos_postgis(conn: psycopg2.extensions.connection, tabla: str) 
         metadatos['extent'] = extent_result[0] if extent_result else None
         logger.info("Extent de la tabla obtenido")
     except:
+        conn.rollback()
         metadatos['extent'] = None
         logger.warning("No se pudo obtener el extent de la tabla")
 
@@ -357,6 +378,16 @@ def procesar_locales(conn: psycopg2.extensions.connection, tabla: str) -> None:
     """Procesa todos los locales comerciales y enriquece sus datos"""
     cursor = conn.cursor()
 
+    # Actualizar tabla con nueva columna si no existe
+    try:
+        cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS datos_enriquecidos JSONB;")
+        cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS enriquecido BOOLEAN DEFAULT FALSE;")
+        conn.commit()
+        logger.info("Columnas de enriquecimiento creadas o verificadas")
+    except Exception as e:
+        logger.error(f"Error al crear columnas de enriquecimiento: {e}")
+        conn.rollback()
+
     # Obtener todos los locales sin datos enriquecidos
     query = f"""
     SELECT id, ST_Y(geom) as lat, ST_X(geom) as lon
@@ -369,16 +400,6 @@ def procesar_locales(conn: psycopg2.extensions.connection, tabla: str) -> None:
     locales = cursor.fetchall()
 
     logger.info(f"Procesando {len(locales)} locales comerciales...")
-
-    # Actualizar tabla con nueva columna si no existe
-    try:
-        cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS datos_enriquecidos JSONB;")
-        cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS enriquecido BOOLEAN DEFAULT FALSE;")
-        conn.commit()
-        logger.info("Columnas de enriquecimiento creadas o verificadas")
-    except Exception as e:
-        logger.error(f"Error al crear columnas de enriquecimiento: {e}")
-        conn.rollback()
 
     locales_procesados = 0
 

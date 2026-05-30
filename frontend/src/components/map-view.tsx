@@ -1,12 +1,20 @@
+// frontend/src/components/map-view.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Map, { Source, Layer, Marker, NavigationControl, FullscreenControl, MapRef } from "react-map-gl/maplibre";
 import maplibregl from "maplibre-gl";
 import { Cluster } from "./sidebar";
-import { Radio, Flame, Sparkles, MapPin, Store, UtensilsCrossed, LayoutGrid, Locate } from "lucide-react";
+import { 
+  Radio, Flame, Sparkles, MapPin, Store, UtensilsCrossed, LayoutGrid, Locate,
+  Wifi, WifiOff, RefreshCw, Route, CheckSquare, Plus, Trash2, CheckCircle2, UserCheck, MessageSquare, AlertCircle
+} from "lucide-react";
+import { 
+  cacheSegments, getCachedSegments, savePendingVisit, getPendingVisits, 
+  clearPendingVisits, OfflineVisit 
+} from "../utils/indexedDB";
+import VisitModal from "./visit-modal";
 
-// Register maplibre-gl globally so react-map-gl uses it
 import "maplibre-gl/dist/maplibre-gl.css";
 
 interface MapViewProps {
@@ -22,7 +30,6 @@ interface MapViewProps {
   selectedType: "all" | "retail" | "gastronomy";
 }
 
-// Detailed geographical meta-data about the 5 Londrina hotspots
 const HUB_METADATA: Record<number, { name: string; zone: string; desc: string; densityLabel: string; typeBias: string }> = {
   1: {
     name: "Centro (Calçadão)",
@@ -34,32 +41,51 @@ const HUB_METADATA: Record<number, { name: string; zone: string; desc: string; d
   2: {
     name: "Gleba Palhano (Av. Ayrton Senna)",
     zone: "Zona Sur",
-    desc: "Polo de vanguardia arquitectónica con residenciales premium y oficinas ejecutivas.",
-    densityLabel: "Concentración premium de cafeterías de especialidad, restaurantes gourmet y boutiques de diseño.",
+    desc: "Polo de gastronomía y servicios ejecutivos premium.",
+    densityLabel: "Boutiques modernas, cafeterías y restaurantes premium.",
     typeBias: "Gastronomía Premium & Boutiques"
   },
   3: {
     name: "Jardim Guanabara (Av. Higienópolis)",
     zone: "Zona Centro-Sur",
-    desc: "Arteria comercial de gran dinamismo corporativo y polo de esparcimiento gastronómico.",
-    densityLabel: "Alta concentración de restaurantes gourmet, pubs ejecutivos y servicios financieros de alto nivel.",
+    desc: "Polo de gastronomía y servicios ejecutivos.",
+    densityLabel: "Restaurantes ejecutivos, bares premium y entidades financieras.",
     typeBias: "Gastronomía Ejecutiva y Servicios"
   },
   4: {
     name: "Zona Norte (Av. Saul Elkind)",
     zone: "Zona Norte",
-    desc: "El corazón comercial de la Zona Norte, caracterizado por su comercio local y conveniencia.",
-    densityLabel: "Volumen comercial masivo concentrado en supermercados, tiendas de calzado popular y conveniencia.",
-    typeBias: "Retail Popular y Tiendas de Conveniencia"
+    desc: "Gran concentración de retail masivo.",
+    densityLabel: "Tiendas de vestuario popular, centros de abastecimiento y retail regional.",
+    typeBias: "Retail Popular y Servicios"
   },
   5: {
     name: "Zona Leste (Av. Bandeirantes)",
     zone: "Zona Este",
-    desc: "Corredor estratégico interconectado con centros médicos y de salud de gran trayectoria.",
-    densityLabel: "Densidad intermedia compuesta por farmacias especializadas, clínicas y ofertas gastronómicas al paso.",
-    typeBias: "Salud, Estética y Alimentación de Paso"
+    desc: "Polo médico y comercial gastronómico de paso.",
+    densityLabel: "Clínicas médicas, farmacias especializadas y centros culinarios de paso.",
+    typeBias: "Salud y Gastronomía al paso"
   }
 };
+
+const getApiUrl = (): string => {
+  const defaultUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+  if (typeof window !== "undefined") {
+    const hostname = window.location.hostname;
+    try {
+      const url = new URL(defaultUrl);
+      if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
+        url.hostname = hostname;
+      }
+      return url.toString().replace(/\/$/, "");
+    } catch (e) {
+      return defaultUrl;
+    }
+  }
+  return defaultUrl;
+};
+
+const NEXT_PUBLIC_API_URL = getApiUrl();
 
 export default function MapView({
   heatmapData,
@@ -76,52 +102,400 @@ export default function MapView({
   const [viewState, setViewState] = useState({
     longitude: -51.1628,
     latitude: -23.3102,
-    zoom: 12.0,
-    pitch: 30, // Slight pitch for modern 2.5D visual depth
+    zoom: 13.5,
+    pitch: 20,
     bearing: 0,
   });
+
+  // Connection & Offline States
+  const [isOnline, setIsOnline] = useState(true);
+  const [pendingCount, setPendingCount] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+
+  // Authentication & Session
+  const [token, setToken] = useState<string | null>(null);
+  const [username, setUsername] = useState<string>("");
+  const [userId, setUserId] = useState<string>("");
+
+  // Segments and Visits States
+  const [segmentsData, setSegmentsData] = useState<any>(null);
+  const [selectedSegment, setSelectedSegment] = useState<any>(null);
+  const [isVisitModalOpen, setIsVisitModalOpen] = useState(false);
+  const [conflicts, setConflicts] = useState<any[]>([]);
+  const [showConflictsAlert, setShowConflictsAlert] = useState(false);
+
+  // Custom Routes Building
+  const [isRouteMode, setIsRouteMode] = useState(false);
+  const [selectedSegmentIds, setSelectedSegmentIds] = useState<Set<number>>(new Set());
+  const [routeName, setRouteName] = useState("");
+  const [isSavingRoute, setIsSavingRoute] = useState(false);
+
+  // Active visits list drawer
+  const [isVisitsDrawerOpen, setIsVisitsDrawerOpen] = useState(false);
+  const [myVisits, setMyVisits] = useState<any[]>([]);
 
   // Geolocation states
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
   const [isLocating, setIsLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
 
-  // Heatmap configuration layers style
-  const heatmapLayer: any = {
-    id: "heatmap-layer",
-    type: "heatmap",
-    paint: {
-      "heatmap-weight": 1.0,
-      "heatmap-intensity": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        0, 1.0,
-        9, 1.5,
-        15, 3.5
-      ],
-      "heatmap-color": [
-        "interpolate",
-        ["linear"],
-        ["heatmap-density"],
-        0, "rgba(0,0,50,0)",
-        0.15, "rgba(0, 128, 255, 0.25)",
-        0.35, "rgba(0, 242, 254, 0.6)",
-        0.6, "rgba(0, 255, 128, 0.8)",
-        0.8, "rgba(245, 166, 35, 0.9)",
-        0.95, "rgba(255, 90, 54, 1)",
-        1.0, "rgba(255, 235, 59, 1)"
-      ],
-      "heatmap-radius": [
-        "interpolate",
-        ["linear"],
-        ["zoom"],
-        0, 3,
-        9, 9,
-        15, 28
-      ],
-      "heatmap-opacity": 0.85
+  // ------------------------------------------------------------------------------
+  // AUTHENTICATION UTILS
+  // ------------------------------------------------------------------------------
+  const autoRegisterAnonymously = async () => {
+    if (typeof window === "undefined") return;
+    
+    const savedToken = localStorage.getItem("auth_token");
+    const savedUsername = localStorage.getItem("auth_username");
+    
+    if (savedToken && savedUsername) {
+      setToken(savedToken);
+      setUsername(savedUsername);
+      return;
     }
+
+    const anonUser = `mobile_${Math.floor(1000 + Math.random() * 9000)}`;
+    const anonPass = "londrina_secure_123";
+
+    try {
+      const res = await fetch(`${NEXT_PUBLIC_API_URL}/auth/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: anonUser, password: anonPass })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.setItem("auth_token", data.token);
+        localStorage.setItem("auth_username", data.username);
+        localStorage.setItem("auth_user_id", data.user_id);
+        setToken(data.token);
+        setUsername(data.username);
+        setUserId(data.user_id);
+      }
+    } catch (err) {
+      console.warn("Auto-register failed (development mode offline fallback):", err);
+      // Dummy credentials for offline preview
+      setToken("dummy_dev_token");
+      setUsername("offline_visitor");
+    }
+  };
+
+  // ------------------------------------------------------------------------------
+  // SEGMENTS LOADER
+  // ------------------------------------------------------------------------------
+  const fetchSegments = async (bboxStr: string) => {
+    const currentToken = token || localStorage.getItem("auth_token");
+    const headers: any = {};
+    if (currentToken) {
+      headers["Authorization"] = `Bearer ${currentToken}`;
+    }
+
+    if (!navigator.onLine) {
+      const cached = await getCachedSegments(bboxStr);
+      if (cached) {
+        // Apply selection highlights
+        const markedFeatures = cached.features.map((f: any) => ({
+          ...f,
+          properties: {
+            ...f.properties,
+            selected: selectedSegmentIds.has(f.properties.id)
+          }
+        }));
+        setSegmentsData({ ...cached, features: markedFeatures });
+      }
+      return;
+    }
+
+    try {
+      const res = await fetch(`${NEXT_PUBLIC_API_URL}/api/segments?bbox=${bboxStr}`, {
+        headers
+      });
+      if (res.ok) {
+        const geojson = await res.json();
+        
+        // Cache to IndexedDB for offline access
+        await cacheSegments(bboxStr, geojson);
+
+        // Highlight selected segments in real-time
+        const markedFeatures = geojson.features.map((f: any) => ({
+          ...f,
+          properties: {
+            ...f.properties,
+            selected: selectedSegmentIds.has(f.properties.id)
+          }
+        }));
+        setSegmentsData({ ...geojson, features: markedFeatures });
+      }
+    } catch (err) {
+      console.warn("Could not fetch segments, trying cache:", err);
+      const cached = await getCachedSegments(bboxStr);
+      if (cached) {
+        setSegmentsData(cached);
+      }
+    }
+  };
+
+  const reloadVisibleSegments = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const bounds = map.getBounds();
+    const bboxStr = `${bounds.getWest()},${bounds.getSouth()},${bounds.getEast()},${bounds.getNorth()}`;
+    fetchSegments(bboxStr);
+  };
+
+  // ------------------------------------------------------------------------------
+  // OFFLINE VISITS QUEUE SYNC
+  // ------------------------------------------------------------------------------
+  const syncPendingVisits = async () => {
+    if (!navigator.onLine || syncing) return;
+    
+    const pending = await getPendingVisits();
+    if (pending.length === 0) {
+      setPendingCount(0);
+      return;
+    }
+
+    const currentToken = token || localStorage.getItem("auth_token");
+    if (!currentToken) return;
+
+    setSyncing(true);
+    setSyncMessage("Sincronizando visitas pendientes...");
+
+    try {
+      const res = await fetch(`${NEXT_PUBLIC_API_URL}/api/sync/visits`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${currentToken}`
+        },
+        body: JSON.stringify(pending)
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        await clearPendingVisits();
+        setPendingCount(0);
+        setSyncMessage(`Sincronizados ${data.synced} registros.`);
+
+        if (data.conflicts && data.conflicts.length > 0) {
+          setConflicts(data.conflicts);
+          setShowConflictsAlert(true);
+        }
+
+        setTimeout(() => setSyncMessage(null), 3000);
+        reloadVisibleSegments();
+      } else {
+        setSyncMessage("Fallo al sincronizar. Reintentando luego.");
+        setTimeout(() => setSyncMessage(null), 3000);
+      }
+    } catch (err) {
+      setSyncMessage("Error de conexión al sincronizar.");
+      setTimeout(() => setSyncMessage(null), 3000);
+    } finally {
+      setSyncing(false);
+    }
+  };
+
+  // Check offline queue size
+  const checkPendingQueue = async () => {
+    const pending = await getPendingVisits();
+    setPendingCount(pending.length);
+  };
+
+  // Fetch my visits
+  const fetchMyVisits = async () => {
+    const currentToken = token || localStorage.getItem("auth_token");
+    if (!currentToken || !navigator.onLine) return;
+    
+    try {
+      const res = await fetch(`${NEXT_PUBLIC_API_URL}/api/visits`, {
+        headers: { "Authorization": `Bearer ${currentToken}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setMyVisits(data);
+      }
+    } catch (err) {
+      console.warn("Could not fetch visits:", err);
+    }
+  };
+
+  // Save visit handler
+  const handleSaveVisit = async (notes: string, visited: boolean) => {
+    if (!selectedSegment) return;
+
+    const currentToken = token || localStorage.getItem("auth_token");
+    const visitPayload: OfflineVisit = {
+      segment_id: selectedSegment.id,
+      visited,
+      visited_at: new Date().toISOString(),
+      notes,
+      source: "mobile"
+    };
+
+    if (!navigator.onLine) {
+      // Guardar localmente
+      await savePendingVisit(visitPayload);
+      await checkPendingQueue();
+      
+      // Update local layer in-memory instantly
+      if (segmentsData) {
+        const updatedFeatures = segmentsData.features.map((f: any) => {
+          if (f.properties.id === selectedSegment.id) {
+            return {
+              ...f,
+              properties: {
+                ...f.properties,
+                visited_by_user: visited,
+                notes
+              }
+            };
+          }
+          return f;
+        });
+        setSegmentsData({ ...segmentsData, features: updatedFeatures });
+      }
+      return;
+    }
+
+    try {
+      const res = await fetch(`${NEXT_PUBLIC_API_URL}/api/visits`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${currentToken}`
+        },
+        body: JSON.stringify(visitPayload)
+      });
+
+      if (res.ok) {
+        reloadVisibleSegments();
+        fetchMyVisits();
+      }
+    } catch (err) {
+      console.warn("API saving failed, writing to offline queue:", err);
+      await savePendingVisit(visitPayload);
+      await checkPendingQueue();
+    }
+  };
+
+  // ------------------------------------------------------------------------------
+  // ROUTE CREATOR
+  // ------------------------------------------------------------------------------
+  const handleCreateRoute = async () => {
+    if (selectedSegmentIds.size === 0) return;
+    if (!routeName.trim()) {
+      alert("Por favor introduce un nombre para la ruta");
+      return;
+    }
+
+    const currentToken = token || localStorage.getItem("auth_token");
+    if (!currentToken) return;
+
+    setIsSavingRoute(true);
+    try {
+      const res = await fetch(`${NEXT_PUBLIC_API_URL}/api/routes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${currentToken}`
+        },
+        body: JSON.stringify({
+          name: routeName,
+          segment_ids: Array.from(selectedSegmentIds)
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        alert(`¡Ruta "${data.name}" guardada con éxito en PostGIS!`);
+        setSelectedSegmentIds(new Set());
+        setRouteName("");
+        setIsRouteMode(false);
+        reloadVisibleSegments();
+      } else {
+        alert("Fallo al crear la ruta. Asegúrate de que las calles estén conectadas.");
+      }
+    } catch (err) {
+      alert("Error de conexión al crear la ruta.");
+    } finally {
+      setIsSavingRoute(false);
+    }
+  };
+
+  // ------------------------------------------------------------------------------
+  // INITIALIZATION AND CONTEXT EVENTS
+  // ------------------------------------------------------------------------------
+  useEffect(() => {
+    autoRegisterAnonymously();
+
+    // Set online/offline listeners
+    const handleOnline = () => {
+      setIsOnline(true);
+      syncPendingVisits();
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+    };
+
+    setIsOnline(navigator.onLine);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    // Check offline database queue
+    checkPendingQueue();
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  // When token or selection highlights change
+  useEffect(() => {
+    if (token) {
+      reloadVisibleSegments();
+      fetchMyVisits();
+    }
+  }, [token, selectedSegmentIds]);
+
+  // Handle map click
+  const handleMapClick = (event: any) => {
+    const features = event.features || [];
+    const segmentFeature = features.find((f: any) => f.layer.id === "street-segments-touch-layer");
+    
+    if (segmentFeature) {
+      const props = segmentFeature.properties;
+      const segmentId = props.id;
+      
+      if (isRouteMode) {
+        setSelectedSegmentIds(prev => {
+          const next = new Set(prev);
+          if (next.has(segmentId)) {
+            next.delete(segmentId);
+          } else {
+            next.add(segmentId);
+          }
+          return next;
+        });
+      } else {
+        setSelectedSegment({
+          id: segmentId,
+          name: props.name,
+          length_m: props.length_m,
+          visited_by_user: props.visited_by_user === "true" || props.visited_by_user === true,
+          notes: props.notes
+        });
+        setIsVisitModalOpen(true);
+      }
+    }
+  };
+
+  // Map moves ended
+  const handleMoveEnd = (evt: any) => {
+    setViewState(evt.viewState);
+    reloadVisibleSegments();
   };
 
   // Find active cluster details for the overlay HUD
@@ -130,23 +504,15 @@ export default function MapView({
 
   // Custom calculation for density label based on selected sector
   const getSectorDensityLabel = (lojasCount: number) => {
-    if (lojasCount === 0) {
-      return "Sin comercios activos detectados para este sector en esta zona.";
-    }
-
-    if (selectedType === "all") {
-      return activeMeta?.densityLabel || `Zona comercial consolidada con ${lojasCount} establecimientos activos.`;
-    } else if (selectedType === "retail") {
-      return `Alta densidad de locales comerciales y tiendas de vestuario (${lojasCount} locales de venta al público en funcionamiento).`;
-    } else {
-      return `Alta concentración de establecimientos de gastronomía, bares y locales de comida (${lojasCount} puntos culinarios activos).`;
-    }
+    if (lojasCount === 0) return "Sin comercios activos detectados en esta zona.";
+    if (selectedType === "all") return activeMeta?.densityLabel || `Zona comercial consolidada con ${lojasCount} locales.`;
+    return `${selectedType === "retail" ? "Comercio" : "Gastronomía"} en funcionamiento: ${lojasCount} puntos culinarios activos.`;
   };
 
   // Geolocation function
   const locateUser = () => {
     if (!navigator.geolocation) {
-      setLocationError("Geolocalización no soportada por este navegador");
+      setLocationError("Geolocalización no soportada por tu dispositivo");
       setTimeout(() => setLocationError(null), 3000);
       return;
     }
@@ -165,285 +531,413 @@ export default function MapView({
           mapRef.current.flyTo({
             center: [longitude, latitude],
             zoom: 15,
-            duration: 2000,
+            duration: 1500,
           });
         }
       },
       (error) => {
         setIsLocating(false);
-        let errorMessage = "";
-        switch (error.code) {
-          case error.PERMISSION_DENIED:
-            errorMessage = "Permiso de ubicación denegado";
-            break;
-          case error.POSITION_UNAVAILABLE:
-            errorMessage = "Información de ubicación no disponible";
-            break;
-          case error.TIMEOUT:
-            errorMessage = "Tiempo de espera agotado para obtener ubicación";
-            break;
-          default:
-            errorMessage = "Error desconocido al obtener ubicación";
-            break;
-        }
-        setLocationError(errorMessage);
+        setLocationError("Ubicación denegada o señal GPS inestable.");
         setTimeout(() => setLocationError(null), 3000);
       },
       {
         enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 300000, // 5 minutes
+        timeout: 8000,
+        maximumAge: 120000,
       }
     );
   };
 
   return (
-    <div className="flex-1 h-screen w-full relative animate-fade-in">
-      <Map
-        ref={mapRef}
-        {...viewState}
-        onMove={(evt: any) => setViewState(evt.viewState)}
-        mapLib={maplibregl}
-        mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
-        style={{ width: "100%", height: "100%" }}
-        maxZoom={18}
-        minZoom={9}
-      >
-        {/* Map Control Primitives */}
-        <div className="absolute right-4 top-4 z-20 flex flex-col gap-2">
-          <NavigationControl position="top-right" showCompass={true} />
-          <FullscreenControl position="top-right" />
-        </div>
+    <div className="flex-1 h-screen w-full relative overflow-hidden bg-zinc-950 flex flex-col">
+      {/* MAP VIEW WRAPPER */}
+      <div className="flex-1 w-full relative">
+        <Map
+          ref={mapRef}
+          {...viewState}
+          onMove={(evt: any) => setViewState(evt.viewState)}
+          onMoveEnd={handleMoveEnd}
+          onClick={handleMapClick}
+          mapLib={maplibregl}
+          mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+          style={{ width: "100%", height: "100%" }}
+          maxZoom={18}
+          minZoom={9}
+          interactiveLayerIds={["street-segments-touch-layer"]}
+        >
+          {/* Controls */}
+          <div className="absolute right-4 top-4 z-20 flex flex-col gap-2">
+            <NavigationControl position="top-right" showCompass={true} />
+            <FullscreenControl position="top-right" />
+          </div>
 
-        {/* User Location Marker */}
-        {userLocation && (
-          <Marker
-            longitude={userLocation[0]}
-            latitude={userLocation[1]}
-            anchor="center"
-          >
-            <div className="relative">
-              {/* Pulsing blue circle */}
-              <div className="absolute inset-0 rounded-full bg-blue-500/30 animate-ping" style={{ width: '20px', height: '20px', margin: '-10px' }}></div>
-              <div className="absolute inset-0 rounded-full bg-blue-500/50" style={{ width: '16px', height: '16px', margin: '-8px' }}></div>
-              {/* Center dot */}
-              <div className="w-3 h-3 rounded-full bg-blue-500 border-2 border-white shadow-lg"></div>
-            </div>
-          </Marker>
-        )}
-
-        {/* 1. Heatmap Source and Layer */}
-        {showHeatmap && heatmapData && (
-          <Source type="geojson" data={heatmapData}>
-            <Layer {...heatmapLayer} />
-          </Source>
-        )}
-
-        {/* 2. Interactive Markers for Clusters */}
-        {showClusters && clusters.map((cluster) => {
-          const [lng, lat] = cluster.center_geom.coordinates;
-          const isActive = activeClusterId === cluster.cluster_id;
-          const isHovered = hoveredClusterId === cluster.cluster_id;
-
-          // Skip rendering if no stores in this cluster for the current sector filter
-          if (cluster.total_lojas === 0) return null;
-
-          return (
-            <Marker
-              key={cluster.cluster_id}
-              longitude={lng}
-              latitude={lat}
-              anchor="center"
-              onClick={(e: any) => {
-                e.originalEvent.stopPropagation();
-                setActiveClusterId(cluster.cluster_id);
-                if (mapRef.current) {
-                  mapRef.current.flyTo({
-                    center: [lng, lat],
-                    zoom: 14.5,
-                    duration: 1500,
-                  });
-                }
-              }}
-            >
-              <div
-                onMouseEnter={() => setHoveredClusterId(cluster.cluster_id)}
-                onMouseLeave={() => setHoveredClusterId(null)}
-                className={`relative flex items-center justify-center cursor-pointer transition-all duration-300 ${
-                  isActive ? "scale-125 z-40" : isHovered ? "scale-110 z-30" : "scale-100 z-20"
-                }`}
-              >
-                {/* Ring Outer Radar Glow */}
-                <div
-                  className={`absolute inset-0 rounded-full transition-all duration-500 ${
-                    isActive
-                      ? "w-12 h-12 -m-2.5 bg-primary/25 border-2 border-primary/50 animate-ping"
-                      : isHovered
-                      ? "w-10 h-10 -m-1.5 bg-primary/15 border border-primary/30"
-                      : "w-8 h-8 bg-transparent"
-                  }`}
-                />
-
-                {/* Blinking wave pulse */}
-                <span className="absolute flex h-7 w-7">
-                  <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-65 ${
-                    isActive ? "bg-amber-400" : "bg-primary"
-                  }`}></span>
-                </span>
-
-                {/* Cluster Circle Center */}
-                <div
-                  className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-black text-[10px] shadow-lg transition-all ${
-                    isActive
-                      ? "bg-amber-500 border-white text-black font-extrabold shadow-[0_0_15px_rgba(245,166,35,0.6)]"
-                      : isHovered
-                      ? "bg-primary border-white text-white shadow-[0_0_12px_rgba(255,90,54,0.5)]"
-                      : "bg-zinc-900 border-primary text-primary hover:bg-primary hover:text-white"
-                  }`}
-                >
-                  {cluster.total_lojas}
-                </div>
-
-                {/* Floating Micro-Badge for top clusters when active */}
-                {isActive && (
-                  <div className="absolute -top-6 bg-amber-500 border border-white text-[7px] text-black font-extrabold px-1 py-0.5 rounded shadow-md uppercase tracking-wider whitespace-nowrap">
-                    Polo #{cluster.cluster_id}
-                  </div>
-                )}
+          {/* User Location */}
+          {userLocation && (
+            <Marker longitude={userLocation[0]} latitude={userLocation[1]} anchor="center">
+              <div className="relative">
+                <div className="absolute inset-0 rounded-full bg-blue-500/30 animate-ping" style={{ width: '24px', height: '24px', margin: '-12px' }} />
+                <div className="w-4 h-4 rounded-full bg-blue-500 border-2 border-white shadow-lg" />
               </div>
             </Marker>
-          );
-        })}
-      </Map>
+          )}
 
-      {/* FLOATING OVERLAYS (HUD) */}
-      
-      {/* Heatmap Legend */}
-      {showHeatmap && (
-        <div className="absolute left-6 bottom-8 z-10 glass-panel px-4 py-3 rounded-2xl flex flex-col gap-1.5 shadow-2xl pointer-events-none select-none max-w-[200px]">
-          <span className="text-[9px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1">
-            <Flame className="w-3.5 h-3.5 text-primary animate-pulse" /> Densidad de Lojas
-          </span>
-          <div className="w-full h-2.5 rounded-full bg-gradient-to-r from-blue-500 via-teal-400 via-green-400 via-amber-400 to-red-500 border border-white/5" />
-          <div className="flex items-center justify-between text-[8px] text-muted-foreground font-bold uppercase mt-0.5">
-            <span>Bajo</span>
-            <span>Avenidas Hot</span>
+          {/* 1. Heatmap */}
+          {showHeatmap && heatmapData && (
+            <Source type="geojson" data={heatmapData}>
+              <Layer
+                id="heatmap-layer"
+                type="heatmap"
+                paint={{
+                  "heatmap-weight": 1.0,
+                  "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 0, 1.0, 9, 1.5, 15, 3.5],
+                  "heatmap-color": [
+                    "interpolate",
+                    ["linear"],
+                    ["heatmap-density"],
+                    0, "rgba(0,0,50,0)",
+                    0.15, "rgba(0, 128, 255, 0.25)",
+                    0.35, "rgba(0, 242, 254, 0.6)",
+                    0.6, "rgba(0, 255, 128, 0.8)",
+                    0.8, "rgba(245, 166, 35, 0.9)",
+                    0.95, "rgba(255, 90, 54, 1)",
+                    1.0, "rgba(255, 235, 59, 1)"
+                  ],
+                  "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 3, 9, 9, 15, 28],
+                  "heatmap-opacity": 0.85
+                }}
+              />
+            </Source>
+          )}
+
+          {/* 2. Street Segments Layer */}
+          {segmentsData && (
+            <Source type="geojson" data={segmentsData}>
+              <Layer
+                id="street-segments-layer"
+                type="line"
+                paint={{
+                  "line-width": [
+                    "interpolate",
+                    ["linear"],
+                    ["zoom"],
+                    11, 1.5,
+                    14, 3.5,
+                    17, 8
+                  ],
+                  "line-color": [
+                    "case",
+                    ["boolean", ["get", "selected"], false],
+                    "#f59e0b", // Orange selected for route building
+                    ["boolean", ["get", "visited_by_user"], false],
+                    "#10b981", // Bright green if visited
+                    "#4b5563"  // Grey otherwise
+                  ],
+                  "line-opacity": 0.9
+                }}
+              />
+              {/* Invisible, wider layer for mobile touch targeting */}
+              <Layer
+                id="street-segments-touch-layer"
+                type="line"
+                paint={{
+                  "line-width": 18,
+                  "line-color": "transparent"
+                }}
+              />
+            </Source>
+          )}
+
+          {/* 3. Cluster Markers */}
+          {showClusters && clusters.map((cluster) => {
+            const [lng, lat] = cluster.center_geom.coordinates;
+            const isActive = activeClusterId === cluster.cluster_id;
+            const isHovered = hoveredClusterId === cluster.cluster_id;
+
+            if (cluster.total_lojas === 0) return null;
+
+            return (
+              <Marker
+                key={cluster.cluster_id}
+                longitude={lng}
+                latitude={lat}
+                anchor="center"
+                onClick={(e: any) => {
+                  e.originalEvent.stopPropagation();
+                  setActiveClusterId(cluster.cluster_id);
+                  if (mapRef.current) {
+                    mapRef.current.flyTo({
+                      center: [lng, lat],
+                      zoom: 14.5,
+                      duration: 1200,
+                    });
+                  }
+                }}
+              >
+                <div
+                  onMouseEnter={() => setHoveredClusterId(cluster.cluster_id)}
+                  onMouseLeave={() => setHoveredClusterId(null)}
+                  className={`relative flex items-center justify-center cursor-pointer transition-all duration-300 ${
+                    isActive ? "scale-125 z-40" : isHovered ? "scale-110 z-30" : "scale-100 z-20"
+                  }`}
+                >
+                  <div className={`absolute inset-0 rounded-full transition-all duration-500 ${
+                    isActive ? "w-12 h-12 -m-2.5 bg-primary/25 border-2 border-primary/50 animate-ping" : "w-8 h-8 bg-transparent"
+                  }`} />
+                  <span className="absolute flex h-7 w-7">
+                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-65 ${
+                      isActive ? "bg-amber-400" : "bg-primary"
+                    }`}></span>
+                  </span>
+                  <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center font-black text-[10px] shadow-lg transition-all ${
+                    isActive ? "bg-amber-500 border-white text-black" : "bg-zinc-900 border-primary text-primary"
+                  }`}>
+                    {cluster.total_lojas}
+                  </div>
+                </div>
+              </Marker>
+            );
+          })}
+        </Map>
+
+        {/* FLOATING STATUS HUD */}
+        <div className="absolute top-4 left-4 z-20 flex flex-col gap-2">
+          {/* Geolocation trigger */}
+          <button
+            onClick={locateUser}
+            disabled={isLocating}
+            className="w-12 h-12 rounded-full bg-zinc-950/90 border border-zinc-800 flex items-center justify-center text-white hover:bg-zinc-900 transition-all shadow-xl pointer-events-auto"
+          >
+            {isLocating ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Locate className="w-5 h-5" />}
+          </button>
+
+          {/* Connection Status Badge */}
+          <div className="glass-panel px-3 py-2 rounded-2xl flex items-center gap-2 shadow-2xl text-[10px] font-bold text-white max-w-fit">
+            {isOnline ? (
+              <>
+                <Wifi className="w-4 h-4 text-emerald-400" />
+                <span className="text-zinc-200">Online | {username}</span>
+              </>
+            ) : (
+              <>
+                <WifiOff className="w-4 h-4 text-amber-500" />
+                <span className="text-amber-500">Offline (Local Cache)</span>
+              </>
+            )}
           </div>
-        </div>
-      )}
 
-      {/* Active Cluster detail card HUD overlay (Bottom Right Floating Drawer) */}
-      {activeClusterDetails && activeMeta && (
-        <div className="absolute right-6 bottom-8 z-10 glass-panel p-5 rounded-2xl flex flex-col gap-3 shadow-2xl border border-slate-800/80 bg-gradient-to-b from-slate-900/95 to-slate-950/98 max-w-[320px] animate-fade-in">
-          {/* Header */}
-          <div className="flex items-start justify-between gap-6">
-            <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center shadow-[0_0_12px_rgba(245,166,35,0.1)]">
-                <Radio className="w-4.5 h-4.5 text-amber-500 animate-pulse" />
-              </div>
-              <div>
-                <h3 className="text-xs font-black text-white leading-none flex items-center gap-1.5">
-                  Polo #{activeClusterDetails.cluster_id}
-                </h3>
-                <span className="text-[9px] font-bold text-amber-500 uppercase tracking-widest mt-0.5 block leading-none">
-                  {activeMeta.zone}
-                </span>
-              </div>
+          {/* Sync Messages */}
+          {syncMessage && (
+            <div className="glass-panel px-3 py-2 rounded-2xl flex items-center gap-2 shadow-2xl text-[10px] font-bold text-white animate-fade-in bg-zinc-900 border border-zinc-800">
+              <RefreshCw className="w-3.5 h-3.5 text-primary animate-spin" />
+              <span>{syncMessage}</span>
             </div>
+          )}
+
+          {/* Pending Sync Queue Alert */}
+          {pendingCount > 0 && (
             <button
-              onClick={() => setActiveClusterId(null)}
-              className="text-[9px] font-bold text-muted-foreground hover:text-white transition-all bg-white/5 hover:bg-white/10 px-2 py-1 rounded-lg border border-white/5 cursor-pointer"
+              onClick={syncPendingVisits}
+              disabled={syncing || !isOnline}
+              className="glass-panel px-3 py-2 rounded-2xl flex items-center gap-2 shadow-2xl text-[10px] font-extrabold bg-amber-500 text-black hover:bg-amber-400 transition-all text-left max-w-fit cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
+              <span>Sincronizar {pendingCount} visitas pendientes</span>
+            </button>
+          )}
+        </div>
+
+        {/* Route Building Overlay HUD */}
+        {isRouteMode && (
+          <div className="absolute top-4 left-1/2 transform -translate-x-1/2 z-20 w-11/12 max-w-sm glass-panel p-4 rounded-2xl shadow-2xl border border-amber-500/20 bg-zinc-950/98 animate-slide-down">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Route className="w-4 h-4 text-amber-500" />
+                <h4 className="text-xs font-black text-white">Construcción de Ruta</h4>
+              </div>
+              <button 
+                onClick={() => {
+                  setSelectedSegmentIds(new Set());
+                  setIsRouteMode(false);
+                }} 
+                className="text-[9px] font-extrabold text-zinc-400 hover:text-white"
+              >
+                Cancelar
+              </button>
+            </div>
+            <p className="text-[10px] text-zinc-400 mt-1 leading-tight">
+              Toca las calles en el mapa para agregarlas a la ruta ({selectedSegmentIds.size} seleccionadas).
+            </p>
+            {selectedSegmentIds.size > 0 && (
+              <div className="flex flex-col gap-2 mt-3 animate-fade-in">
+                <input
+                  type="text"
+                  placeholder="Nombre de la ruta (Ej: Ruta Norte 1)"
+                  value={routeName}
+                  onChange={(e) => setRouteName(e.target.value)}
+                  className="w-full bg-zinc-900 border border-zinc-800 rounded-xl px-3 py-2 text-xs text-white placeholder-zinc-500 focus:outline-none"
+                />
+                <button
+                  onClick={handleCreateRoute}
+                  disabled={isSavingRoute}
+                  className="w-full py-2 bg-amber-500 hover:bg-amber-400 text-black font-extrabold text-xs rounded-xl shadow-lg transition-all"
+                >
+                  {isSavingRoute ? "Guardando en PostGIS..." : "Guardar Ruta"}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Active Cluster HUD Card */}
+        {activeClusterDetails && activeMeta && !isRouteMode && (
+          <div className="absolute right-6 bottom-24 z-10 glass-panel p-5 rounded-2xl flex flex-col gap-3 shadow-2xl border border-slate-800/80 bg-zinc-950/98 max-w-[300px] animate-fade-in">
+            <div className="flex items-start justify-between">
+              <div>
+                <h3 className="text-xs font-black text-white leading-none">Polo #{activeClusterDetails.cluster_id}</h3>
+                <span className="text-[9px] font-bold text-amber-500 uppercase tracking-widest mt-0.5 block">{activeMeta.zone}</span>
+              </div>
+              <button onClick={() => setActiveClusterId(null)} className="text-[8px] font-extrabold text-zinc-500 hover:text-white">Cerrar</button>
+            </div>
+            <p className="text-[10px] text-zinc-300 font-semibold leading-tight">{activeMeta.name}</p>
+            <div className="space-y-1 bg-black/40 p-2.5 rounded-xl border border-white/5 text-[9px] text-zinc-400">
+              {getSectorDensityLabel(activeClusterDetails.total_lojas)}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* MOBILE BOTTOM NAVIGATION BAR */}
+      <div className="w-full bg-zinc-950 border-t border-zinc-900 px-4 py-3 pb-6 flex items-center justify-around gap-2 z-25">
+        <button
+          onClick={() => {
+            setIsRouteMode(false);
+            setIsVisitsDrawerOpen(false);
+          }}
+          className={`flex-1 flex flex-col items-center gap-1 py-1 px-2 rounded-xl transition-all cursor-pointer ${
+            !isRouteMode && !isVisitsDrawerOpen ? "text-primary bg-primary/10" : "text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          <LayoutGrid className="w-5 h-5" />
+          <span className="text-[9px] font-bold">Mapa</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setIsRouteMode(true);
+            setIsVisitsDrawerOpen(false);
+          }}
+          className={`flex-1 flex flex-col items-center gap-1 py-1 px-2 rounded-xl transition-all cursor-pointer ${
+            isRouteMode ? "text-amber-500 bg-amber-500/10" : "text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          <Route className="w-5 h-5" />
+          <span className="text-[9px] font-bold">Crear Ruta</span>
+        </button>
+
+        <button
+          onClick={() => {
+            fetchMyVisits();
+            setIsVisitsDrawerOpen(true);
+            setIsRouteMode(false);
+          }}
+          className={`flex-1 flex flex-col items-center gap-1 py-1 px-2 rounded-xl transition-all cursor-pointer ${
+            isVisitsDrawerOpen ? "text-emerald-400 bg-emerald-500/10" : "text-zinc-500 hover:text-zinc-300"
+          }`}
+        >
+          <CheckSquare className="w-5 h-5" />
+          <span className="text-[9px] font-bold">Mis Visitas</span>
+        </button>
+      </div>
+
+      {/* DRAWER FOR MY VISITS */}
+      {isVisitsDrawerOpen && (
+        <div className="fixed inset-x-0 bottom-0 z-40 bg-zinc-950 border-t border-zinc-900 rounded-t-3xl shadow-2xl p-6 flex flex-col gap-4 animate-slide-up max-h-[60%] overflow-y-auto">
+          <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+            <div className="flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+              <h3 className="text-sm font-extrabold text-white">Calles Visitadas por Mí</h3>
+            </div>
+            <button 
+              onClick={() => setIsVisitsDrawerOpen(false)}
+              className="text-xs font-bold text-zinc-500 hover:text-white"
             >
               Cerrar
             </button>
           </div>
 
-          <div className="h-px bg-white/5" />
-
-          {/* Description */}
-          <div className="space-y-1">
-            <h4 className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider leading-none">
-              Identidad de Zona
-            </h4>
-            <p className="text-[11px] text-zinc-300 font-semibold leading-relaxed">
-              {activeMeta.name} — <span className="text-zinc-400 font-medium">{activeMeta.desc}</span>
-            </p>
+          <div className="flex flex-col gap-2.5">
+            {myVisits.length === 0 ? (
+              <div className="text-center py-6 text-xs text-zinc-500">
+                Aún no has marcado calles como visitadas de forma online.
+              </div>
+            ) : (
+              myVisits.map((visit) => (
+                <div key={visit.id} className="p-3 bg-zinc-900 border border-zinc-800 rounded-2xl flex items-start justify-between gap-3">
+                  <div>
+                    <h4 className="text-xs font-extrabold text-white">{visit.street_name}</h4>
+                    <span className="text-[9px] text-zinc-500 block mt-0.5">
+                      Fecha: {new Date(visit.visited_at).toLocaleDateString()} | Disp: {visit.source}
+                    </span>
+                    {visit.notes && (
+                      <p className="text-[10px] text-zinc-400 mt-1.5 flex items-start gap-1">
+                        <MessageSquare className="w-3.5 h-3.5 text-zinc-500 shrink-0 mt-0.5" />
+                        <span>{visit.notes}</span>
+                      </p>
+                    )}
+                  </div>
+                  <div className="bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded text-[8px] font-black text-emerald-400 uppercase">
+                    Visitada
+                  </div>
+                </div>
+              ))
+            )}
           </div>
-
-          {/* Local Sector Density Calculations */}
-          <div className="space-y-1 bg-black/40 border border-white/5 p-3 rounded-xl">
-            <span className="text-[9px] uppercase font-extrabold text-primary tracking-widest flex items-center gap-1">
-              {selectedType === "all" ? (
-                <LayoutGrid className="w-3 h-3" />
-              ) : selectedType === "retail" ? (
-                <Store className="w-3 h-3" />
-              ) : (
-                <UtensilsCrossed className="w-3 h-3" />
-              )}
-              Estimación de Densidad ({selectedType === "all" ? "Total" : selectedType === "retail" ? "Retail" : "Gastronomía"})
-            </span>
-            <p className="text-[10px] text-zinc-300 font-medium leading-normal mt-1">
-              {getSectorDensityLabel(activeClusterDetails.total_lojas)}
-            </p>
-          </div>
-
-          {/* Coordinates and Numeric KPIs */}
-          <div className="grid grid-cols-2 gap-3 text-[10px] mt-1">
-            <div>
-              <span className="text-muted-foreground font-medium text-[9px] block uppercase tracking-wider">Total Lojas</span>
-              <span className="text-white font-extrabold text-xs mt-0.5 block">
-                {activeClusterDetails.total_lojas} tiendas
-              </span>
-            </div>
-            <div>
-              <span className="text-muted-foreground font-medium text-[9px] block uppercase tracking-wider">Centroide GIS</span>
-              <span className="text-[10px] text-zinc-300 font-mono font-bold mt-1 flex items-center gap-0.5 leading-none">
-                <MapPin className="w-3 h-3 text-muted-foreground/60" />
-                {activeClusterDetails.center_geom.coordinates[0].toFixed(4)}, {activeClusterDetails.center_geom.coordinates[1].toFixed(4)}
-              </span>
-            </div>
-          </div>
-
-          <div className="h-px bg-white/5" />
-
-          {/* Action Button to zoom directly to this active cluster center */}
-          <button
-            onClick={() => {
-              const [lng, lat] = activeClusterDetails.center_geom.coordinates;
-              if (mapRef.current) {
-                mapRef.current.flyTo({
-                  center: [lng, lat],
-                  zoom: 16.0,
-                  duration: 1800,
-                  essential: true
-                });
-              }
-            }}
-            className="w-full mt-1 py-2.5 px-4 rounded-xl bg-primary hover:bg-primary/95 text-white font-extrabold text-xs shadow-lg shadow-primary/20 hover:shadow-primary/30 transition-all hover:scale-[1.02] flex items-center justify-center gap-1.5 cursor-pointer"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-white animate-pulse" />
-            Hacer zoom a este polo
-          </button>
         </div>
       )}
 
-      {/* Geolocation Button */}
-      <button
-        onClick={locateUser}
-        disabled={isLocating}
-        className="absolute left-4 top-4 z-20 w-12 h-12 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 flex items-center justify-center text-white hover:bg-white/20 transition-all duration-300 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {isLocating ? (
-          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-        ) : (
-          <Locate className="w-5 h-5" />
-        )}
-      </button>
+      {/* MODALS */}
+      <VisitModal
+        isOpen={isVisitModalOpen}
+        onClose={() => {
+          setIsVisitModalOpen(false);
+          setSelectedSegment(null);
+        }}
+        segmentData={selectedSegment}
+        onSave={handleSaveVisit}
+        isOffline={!isOnline}
+      />
 
-      {/* Location Error Message */}
-      {locationError && (
-        <div className="absolute left-1/2 top-4 z-20 transform -translate-x-1/2 bg-red-500/90 backdrop-blur-sm text-white text-xs font-bold px-4 py-2 rounded-lg shadow-lg animate-fade-in">
-          {locationError}
+      {/* CONFLICTS DIALOG */}
+      {showConflictsAlert && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-sm">
+          <div className="w-full max-w-md bg-zinc-950 border border-zinc-800 rounded-3xl p-6 shadow-2xl flex flex-col gap-4">
+            <div className="flex items-center gap-2.5 border-b border-zinc-900 pb-3">
+              <AlertCircle className="w-5 h-5 text-amber-500" />
+              <h3 className="text-sm font-extrabold text-white">Resolución de Conflictos</h3>
+            </div>
+            <p className="text-[11px] text-zinc-400 leading-normal">
+              Algunos registros se guardaron offline pero el servidor tiene marcas de fecha posteriores. 
+              El servidor mantuvo su estado según la política de "última escritura gana":
+            </p>
+            <div className="flex flex-col gap-2 max-h-[150px] overflow-y-auto pr-1">
+              {conflicts.map((c, i) => (
+                <div key={i} className="p-2.5 bg-zinc-900 rounded-xl border border-zinc-800 text-[10px]">
+                  <span className="font-extrabold text-white block">Segmento #{c.segment_id}</span>
+                  <span className="text-zinc-500 block mt-0.5">Local: {c.client_visited ? "Visitado" : "No Visitado"} ({new Date(c.client_visited_at).toLocaleDateString()})</span>
+                  <span className="text-amber-500 block">Servidor: {c.server_visited ? "Visitado" : "No Visitado"} ({new Date(c.server_visited_at).toLocaleDateString()})</span>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => {
+                setShowConflictsAlert(false);
+                setConflicts([]);
+              }}
+              className="w-full py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white font-extrabold text-xs rounded-xl border border-zinc-800 transition-all cursor-pointer"
+            >
+              Entendido
+            </button>
+          </div>
         </div>
       )}
     </div>
