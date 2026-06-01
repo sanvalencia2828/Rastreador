@@ -25,8 +25,8 @@ export default function DashboardPage() {
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showClusters, setShowClusters] = useState(true);
 
-  // Sector filter state ("all" | "retail" | "gastronomy")
-  const [selectedType, setSelectedType] = useState<"all" | "retail" | "gastronomy">("all");
+  // Sector filter state ("all" | "retail" | "gastronomy" | "tech")
+  const [selectedType, setSelectedType] = useState<"all" | "retail" | "gastronomy" | "tech">("all");
 
   // State for mobile view toggle ("map" | "list")
   const [mobileView, setMobileView] = useState<"map" | "list">("map");

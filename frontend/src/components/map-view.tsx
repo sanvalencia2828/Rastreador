@@ -27,7 +27,7 @@ interface MapViewProps {
   mapRef: React.RefObject<MapRef | null>;
   showHeatmap: boolean;
   showClusters: boolean;
-  selectedType: "all" | "retail" | "gastronomy";
+  selectedType: "all" | "retail" | "gastronomy" | "tech";
 }
 
 const HUB_METADATA: Record<number, { name: string; zone: string; desc: string; densityLabel: string; typeBias: string }> = {
@@ -506,7 +506,9 @@ export default function MapView({
   const getSectorDensityLabel = (lojasCount: number) => {
     if (lojasCount === 0) return "Sin comercios activos detectados en esta zona.";
     if (selectedType === "all") return activeMeta?.densityLabel || `Zona comercial consolidada con ${lojasCount} locales.`;
-    return `${selectedType === "retail" ? "Comercio" : "Gastronomía"} en funcionamiento: ${lojasCount} puntos culinarios activos.`;
+    const typeLabel = selectedType === "retail" ? "Comercio" : selectedType === "gastronomy" ? "Gastronomía" : "Tecnología";
+    const nounLabel = selectedType === "tech" ? "empresas tecnológicas activas" : "puntos culinarios activos";
+    return `${typeLabel} en funcionamiento: ${lojasCount} ${nounLabel}.`;
   };
 
   // Geolocation function

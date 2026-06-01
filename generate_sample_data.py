@@ -8,13 +8,16 @@ import random
 from datetime import datetime
 
 # Sample data for testing
+# Sample data for testing
 SAMPLE_CNAE_CODES = [
     # Retail
     '4711301', '4712100', '4721101', '4722901', '4751201', '4761001', '4771701', '4781400',
     # Gastronomy
     '5611201', '5612100', '5620101',
+    # Technology
+    '6201501', '6202300', '6203100', '6204000', '6209100', '6311900', '6319400',
     # Others (should be filtered out)
-    '6201501', '6411100', '8511101'
+    '6411100', '8511101'
 ]
 
 SAMPLE_MUNICIPALITIES = [
@@ -38,7 +41,12 @@ SAMPLE_BUSINESS_NAMES = [
     'Academia Fitness Center',
     'Oficina Mecânica Auto Peças',
     'Clínica Médica Saúde Total',
-    'Escola Infantil Sonho Meu'
+    'Escola Infantil Sonho Meu',
+    'Londrina Tech Software ME',
+    'ByteCraft Consultoria TI',
+    'Paraná Cloud Services',
+    'SoftSoluções Desenvolvimento',
+    'WebFlow Portais e Mídia'
 ]
 
 SAMPLE_STREETS = [
@@ -138,12 +146,16 @@ def main():
     target_cities_codes = [4113700, 4103701, 4109807, 4101408, 4112108]
     metro_count = len(df[df['codigo_municipio'].isin(target_cities_codes)])
     active_count = len(df[df['situacao_cadastral'] == 2])
-    retail_gastronomy_count = len(df[df['cnae_fiscal_principal'].isin(SAMPLE_CNAE_CODES[:11])])
+    retail_count = len(df[df['cnae_fiscal_principal'].isin(SAMPLE_CNAE_CODES[:8])])
+    gastronomy_count = len(df[df['cnae_fiscal_principal'].isin(SAMPLE_CNAE_CODES[8:11])])
+    tech_count = len(df[df['cnae_fiscal_principal'].isin(SAMPLE_CNAE_CODES[11:18])])
 
     print(f"\nStatistics:")
     print(f"- Target regional businesses (Londrina + nearby): {metro_count}")
     print(f"- Active businesses: {active_count}")
-    print(f"- Retail/Gastronomy businesses: {retail_gastronomy_count}")
+    print(f"- Retail businesses: {retail_count}")
+    print(f"- Gastronomy businesses: {gastronomy_count}")
+    print(f"- Technology businesses: {tech_count}")
 
 if __name__ == "__main__":
     main()

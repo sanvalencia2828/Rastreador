@@ -68,8 +68,13 @@ GASTRONOMY_CNAE_CODES = [
     '5620101', '5620102', '5620103', '5620104'
 ]
 
+TECH_CNAE_CODES = [
+    # IT Services and Information Services
+    '6201501', '6202300', '6203100', '6204000', '6209100', '6311900', '6319400'
+]
+
 # Combine all valid CNAE codes
-VALID_CNAE_CODES = RETAIL_CNAE_CODES + GASTRONOMY_CNAE_CODES
+VALID_CNAE_CODES = RETAIL_CNAE_CODES + GASTRONOMY_CNAE_CODES + TECH_CNAE_CODES
 
 
 def load_cnpj_data_polars(file_path: str, chunk_size: int = 50000) -> pl.DataFrame:
@@ -145,9 +150,11 @@ def filter_cnpj_data_polars(df: pl.DataFrame) -> pl.DataFrame:
 
         # Clean up columns and add categorizations if we have matches
         if len(filtered_df) > 0:
-            # Classification: retail or gastronomy
+            # Classification: tech, retail or gastronomy
             filtered_df = filtered_df.with_columns([
-                pl.when(pl.col("cnae_fiscal_principal").is_in(RETAIL_CNAE_CODES))
+                pl.when(pl.col("cnae_fiscal_principal").is_in(TECH_CNAE_CODES))
+                .then(pl.lit("tech"))
+                .when(pl.col("cnae_fiscal_principal").is_in(RETAIL_CNAE_CODES))
                 .then(pl.lit("retail"))
                 .otherwise(pl.lit("gastronomy"))
                 .alias("business_type")

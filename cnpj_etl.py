@@ -68,8 +68,13 @@ GASTRONOMY_CNAE_CODES = [
     '5620101', '5620102', '5620103', '5620104'
 ]
 
+TECH_CNAE_CODES = [
+    # IT Services and Information Services
+    '6201501', '6202300', '6203100', '6204000', '6209100', '6311900', '6319400'
+]
+
 # Combine all valid CNAE codes
-VALID_CNAE_CODES = RETAIL_CNAE_CODES + GASTRONOMY_CNAE_CODES
+VALID_CNAE_CODES = RETAIL_CNAE_CODES + GASTRONOMY_CNAE_CODES + TECH_CNAE_CODES
 
 
 def load_cnpj_data(file_path: str, chunk_size: int = 10000) -> pd.DataFrame:
@@ -175,7 +180,7 @@ def filter_cnpj_data(df: pd.DataFrame) -> pd.DataFrame:
 
         # Add classification column
         filtered_df['business_type'] = filtered_df['cnae_fiscal_principal'].apply(
-            lambda x: 'retail' if x in RETAIL_CNAE_CODES else 'gastronomy'
+            lambda x: 'tech' if x in TECH_CNAE_CODES else ('retail' if x in RETAIL_CNAE_CODES else 'gastronomy')
         )
 
     return filtered_df

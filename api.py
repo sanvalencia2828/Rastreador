@@ -224,6 +224,8 @@ def assign_geographic_coords(cnpj: str, business_type: str, municipio: Optional[
     # Determine Hub index (1-5) based on hash and business type bias
     if business_type == "gastronomy":
         hub_idx = [2, 3, 5, 1, 4][hash_val % 5]
+    elif business_type == "tech":
+        hub_idx = [3, 2, 1, 5, 4][hash_val % 5]
     else:
         hub_idx = [1, 4, 2, 3, 5][hash_val % 5]
 
@@ -331,6 +333,8 @@ def get_emergent_clusters():
         
         if biz_type == "gastronomy":
             hub_idx = [2, 3, 5, 1, 4][hash_val % 5]
+        elif biz_type == "tech":
+            hub_idx = [3, 2, 1, 5, 4][hash_val % 5]
         else:
             hub_idx = [1, 4, 2, 3, 5][hash_val % 5]
             

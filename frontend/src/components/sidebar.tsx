@@ -13,7 +13,8 @@ import {
   Sparkles, 
   HelpCircle,
   UtensilsCrossed,
-  LayoutGrid
+  LayoutGrid,
+  Cpu
 } from "lucide-react";
 
 export interface ClusterPoint {
@@ -40,8 +41,8 @@ interface SidebarProps {
   setShowHeatmap: (show: boolean) => void;
   showClusters: boolean;
   setShowClusters: (show: boolean) => void;
-  selectedType: "all" | "retail" | "gastronomy";
-  setSelectedType: (type: "all" | "retail" | "gastronomy") => void;
+  selectedType: "all" | "retail" | "gastronomy" | "tech";
+  setSelectedType: (type: "all" | "retail" | "gastronomy" | "tech") => void;
 }
 
 export default function Sidebar({
@@ -168,7 +169,7 @@ export default function Sidebar({
           <h2 className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
             <Store className="w-3.5 h-3.5 text-primary/70" /> Filtrar por Sector
           </h2>
-          <div className="grid grid-cols-3 gap-1 p-1 bg-zinc-950/60 border border-slate-800/80 rounded-xl relative">
+          <div className="grid grid-cols-4 gap-1 p-1 bg-zinc-950/60 border border-slate-800/80 rounded-xl relative">
             <button
               onClick={() => setSelectedType("all")}
               className={`py-2 px-1 rounded-lg text-[9px] font-black tracking-wide uppercase transition-all duration-300 cursor-pointer flex flex-col items-center justify-center gap-1 ${
@@ -201,6 +202,17 @@ export default function Sidebar({
             >
               <UtensilsCrossed className="w-3.5 h-3.5" />
               <span>Gastronomía</span>
+            </button>
+            <button
+              onClick={() => setSelectedType("tech")}
+              className={`py-2 px-1 rounded-lg text-[9px] font-black tracking-wide uppercase transition-all duration-300 cursor-pointer flex flex-col items-center justify-center gap-1 ${
+                selectedType === "tech"
+                  ? "bg-primary text-white shadow-[0_0_12px_rgba(255,90,54,0.35)]"
+                  : "text-muted-foreground hover:text-white hover:bg-white/5"
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span>Tecnología</span>
             </button>
           </div>
         </div>
