@@ -173,6 +173,7 @@ export default function DashboardPage() {
           setShowClusters={setShowClusters}
           selectedType={selectedType}
           setSelectedType={setSelectedType}
+          apiBaseUrl={apiBaseUrl}
         />
       </div>
 

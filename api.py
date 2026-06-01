@@ -456,6 +456,106 @@ def get_commercial_streets_analytics():
 
 
 # ==============================================================================
+# TECH BUSINESSES ENDPOINT
+# ==============================================================================
+
+# CNAE prefix → tech subcategory mapping
+TECH_CNAE_SUBCATEGORY: Dict[str, Dict[str, str]] = {
+    "62": {"label": "Software & TI",       "icon": "💻"},
+    "63": {"label": "Data & Servicios Web", "icon": "🌐"},
+    "26": {"label": "Electrónica",          "icon": "🖥️"},
+    "27": {"label": "Electrodomésticos",    "icon": "⚡"},
+    "61": {"label": "Telecomunicaciones",   "icon": "📡"},
+    "95": {"label": "Reparación TI",       "icon": "🔧"},
+    "46": {"label": "Comercio Mayorista TI","icon": "📦"},
+    "47": {"label": "Retail de Tecnología", "icon": "🏪"},
+    "70": {"label": "Consultoría TI",      "icon": "🤝"},
+    "71": {"label": "Ingeniería & P&D",    "icon": "🔬"},
+    "72": {"label": "Investigación",       "icon": "🔭"},
+    "85": {"label": "Educación TI",        "icon": "🎓"},
+}
+
+class TechBusiness(BaseModel):
+    cnpj: str
+    nome_fantasia: str
+    cnae: str
+    cnae_label: str
+    cnae_icon: str
+    bairro: str
+    logradouro: str
+    municipio: str
+    business_type: str
+
+class TechBusinessesResponse(BaseModel):
+    total: int
+    offset: int
+    limit: int
+    items: List[TechBusiness]
+
+@app.get("/api/businesses/tech", response_model=TechBusinessesResponse)
+def get_tech_businesses(
+    limit: int = 50,
+    offset: int = 0,
+    search: str = ""
+):
+    """
+    Returns paginated tech businesses with enriched CNAE subcategory data.
+    Supports full-text search by name, CNAE or neighborhood.
+    - limit: max items per page (default 50)
+    - offset: pagination offset (default 0)
+    - search: filter by nome_fantasia, cnae or bairro (case-insensitive)
+    """
+    businesses = load_businesses()
+
+    # Filter only tech businesses
+    tech_businesses = [b for b in businesses if b.get("business_type") == "tech"]
+
+    # Apply search filter
+    search_lower = search.strip().lower()
+    if search_lower:
+        tech_businesses = [
+            b for b in tech_businesses
+            if search_lower in (b.get("nome_fantasia") or "").lower()
+            or search_lower in str(b.get("cnae_fiscal_principal") or "").lower()
+            or search_lower in (b.get("bairro") or "").lower()
+            or search_lower in (b.get("logradouro") or "").lower()
+        ]
+
+    total = len(tech_businesses)
+
+    # Paginate
+    paginated = tech_businesses[offset: offset + limit]
+
+    items = []
+    for biz in paginated:
+        cnpj = (
+            biz.get("cnpj_basico", "00000000")
+            + biz.get("cnpj_ordem", "0000")
+            + biz.get("cnpj_dv", "00")
+        )
+        cnae_raw = str(biz.get("cnae_fiscal_principal") or "")
+        prefix = cnae_raw[:2]
+        sub = TECH_CNAE_SUBCATEGORY.get(prefix, {"label": "Tecnología", "icon": "💡"})
+
+        items.append(
+            TechBusiness(
+                cnpj=cnpj,
+                nome_fantasia=biz.get("nome_fantasia") or f"Empresa Tech {cnpj[:8]}",
+                cnae=cnae_raw,
+                cnae_label=sub["label"],
+                cnae_icon=sub["icon"],
+                bairro=biz.get("bairro") or "Centro",
+                logradouro=biz.get("logradouro") or "",
+                municipio=biz.get("municipio") or "Londrina",
+                business_type="tech",
+            )
+        )
+
+    print(f"Returning {len(items)} tech businesses (total={total}, offset={offset}, search='{search}').")
+    return TechBusinessesResponse(total=total, offset=offset, limit=limit, items=items)
+
+
+# ==============================================================================
 # MAIN METHOD
 # ==============================================================================
 # ==============================================================================

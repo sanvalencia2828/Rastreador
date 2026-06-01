@@ -16,6 +16,7 @@ import {
   LayoutGrid,
   Cpu
 } from "lucide-react";
+import TechBusinessPanel from "./tech-business-panel";
 
 export interface ClusterPoint {
   type: "Point";
@@ -43,6 +44,7 @@ interface SidebarProps {
   setShowClusters: (show: boolean) => void;
   selectedType: "all" | "retail" | "gastronomy" | "tech";
   setSelectedType: (type: "all" | "retail" | "gastronomy" | "tech") => void;
+  apiBaseUrl: string;
 }
 
 export default function Sidebar({
@@ -60,6 +62,7 @@ export default function Sidebar({
   setShowClusters,
   selectedType,
   setSelectedType,
+  apiBaseUrl,
 }: SidebarProps) {
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -216,6 +219,11 @@ export default function Sidebar({
             </button>
           </div>
         </div>
+
+        {/* Tech Business Panel — visible only when Tech sector is selected */}
+        {selectedType === "tech" && (
+          <TechBusinessPanel apiBaseUrl={apiBaseUrl} />
+        )}
 
         {/* Analytic Card: "Top Polos Emergentes" */}
         <div className="glass-card rounded-2xl p-4 relative overflow-hidden group border border-slate-800/80 bg-gradient-to-b from-slate-900 to-slate-950 transition-all duration-300 hover:scale-[1.02] animate-fade-in shadow-xl">
