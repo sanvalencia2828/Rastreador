@@ -877,6 +877,7 @@ def create_route(route: RouteCreate, user_id: str = Depends(get_current_user_id)
     try:
         with db_engine.connect() as conn:
             # First collect the geometries of the segments and merge them
+            from sqlalchemy import bindparam
             merge_query = text("""
                 INSERT INTO routes (user_id, name, geom)
                 VALUES (
@@ -885,16 +886,16 @@ def create_route(route: RouteCreate, user_id: str = Depends(get_current_user_id)
                     (
                         SELECT ST_LineMerge(ST_Collect(geom))
                         FROM street_segments
-                        WHERE id IN (:segment_ids)
+                        WHERE id IN :segment_ids
                     )
                 )
                 RETURNING id, ST_AsGeoJSON(geom) as geom_geojson
-            """)
+            """).bindparams(bindparam("segment_ids", expanding=True))
             
             result = conn.execute(merge_query, {
                 "user_id": user_id,
                 "name": route.name,
-                "segment_ids": tuple(route.segment_ids) if len(route.segment_ids) > 1 else route.segment_ids[0]
+                "segment_ids": route.segment_ids
             })
             
             row = result.fetchone()
