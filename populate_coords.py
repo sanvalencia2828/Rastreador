@@ -46,7 +46,7 @@ def assign_geographic_coords(cnpj: str, business_type: str, municipio: str = Non
     h = hashlib.md5(cnpj.encode('utf-8')).hexdigest()
     hash_val = int(h, 16)
 
-    city_key = str(municipio).strip().lower() if municipio else ""
+    city_key = municipio.strip().lower() if municipio else ""
 
     # Determine centroid based on prefix to prevent encoding conflicts (e.g. UTF-8 vs Latin1)
     center_lng, center_lat = None, None

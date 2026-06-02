@@ -73,8 +73,13 @@ TECH_CNAE_CODES = [
     '6201501', '6202300', '6203100', '6204000', '6209100', '6311900', '6319400'
 ]
 
+REPAIRS_CNAE_CODES = [
+    # Technical Assistance & Repairs (computers, cellphones, electronics, appliances)
+    '9511800', '9512600', '9521500', '9529104', '9529199'
+]
+
 # Combine all valid CNAE codes
-VALID_CNAE_CODES = RETAIL_CNAE_CODES + GASTRONOMY_CNAE_CODES + TECH_CNAE_CODES
+VALID_CNAE_CODES = RETAIL_CNAE_CODES + GASTRONOMY_CNAE_CODES + TECH_CNAE_CODES + REPAIRS_CNAE_CODES
 
 
 def load_cnpj_data_polars(file_path: str, chunk_size: int = 50000) -> pl.DataFrame:
@@ -150,12 +155,14 @@ def filter_cnpj_data_polars(df: pl.DataFrame) -> pl.DataFrame:
 
         # Clean up columns and add categorizations if we have matches
         if len(filtered_df) > 0:
-            # Classification: tech, retail or gastronomy
+            # Classification: tech, retail, gastronomy or repairs
             filtered_df = filtered_df.with_columns([
                 pl.when(pl.col("cnae_fiscal_principal").is_in(TECH_CNAE_CODES))
                 .then(pl.lit("tech"))
                 .when(pl.col("cnae_fiscal_principal").is_in(RETAIL_CNAE_CODES))
                 .then(pl.lit("retail"))
+                .when(pl.col("cnae_fiscal_principal").is_in(REPAIRS_CNAE_CODES))
+                .then(pl.lit("repairs"))
                 .otherwise(pl.lit("gastronomy"))
                 .alias("business_type")
             ])
@@ -219,14 +226,19 @@ def export_to_postgresql_polars(df: pl.DataFrame, connection_string: str, table_
         print(f"Error exporting to PostgreSQL: {e}")
 
 
-def main():
+def main(input_file=None):
     """
     Main function to run the ETL process with Polars
+
+    Args:
+        input_file (str, optional): Path to the input CSV file. If not provided,
+                                   will use default files.
     """
     # Example usage - modify these paths according to your setup
-    input_file = "Estabelecimentos0.csv"  # Replace with actual path to your CNPJ data file
-    if not os.path.exists(input_file) and os.path.exists("sample_estabelecimentos.csv"):
-        input_file = "sample_estabelecimentos.csv"
+    if input_file is None:
+        input_file = "Estabelecimentos0.csv"  # Replace with actual path to your CNPJ data file
+        if not os.path.exists(input_file) and os.path.exists("sample_estabelecimentos.csv"):
+            input_file = "sample_estabelecimentos.csv"
     output_json = "londrina_businesses.json"
 
     # Check if input file exists

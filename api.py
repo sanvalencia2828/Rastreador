@@ -197,7 +197,7 @@ def assign_geographic_coords(cnpj: str, business_type: str, municipio: Optional[
     h = hashlib.md5(cnpj.encode('utf-8')).hexdigest()
     hash_val = int(h, 16)
 
-    city_key = str(municipio).strip().lower() if municipio else ""
+    city_key = municipio.strip().lower() if municipio else ""
     
     # Determine centroid based on prefix to prevent encoding conflicts (e.g. UTF-8 vs Latin1)
     center_lng, center_lat = None, None
@@ -241,6 +241,10 @@ def assign_geographic_coords(cnpj: str, business_type: str, municipio: Optional[
     lng_offset = (lng_factor ** 3) * 0.0075
     lat_offset = (lat_factor ** 3) * 0.0075
 
+    # Ensure coordinates are floats before addition
+    center_lng = float(center_lng)
+    center_lat = float(center_lat)
+
     return [center_lng + lng_offset, center_lat + lat_offset]
 
 # ==============================================================================
@@ -270,8 +274,7 @@ def get_heatmap_geojson():
             
             # Create a mock CSV if we don't have it
             if os.path.exists("sample_estabelecimentos.csv"):
-                cnpj_etl_polars.input_file = "sample_estabelecimentos.csv"
-                cnpj_etl_polars.main()
+                cnpj_etl_polars.main("sample_estabelecimentos.csv")
                 businesses = load_businesses()
         except Exception as e:
             print(f"Failed to auto-generate data: {e}")
@@ -706,7 +709,10 @@ def register_user(user: UserRegister):
                 text("INSERT INTO users (username, password_hash) VALUES (:username, :pw_hash) RETURNING id"),
                 {"username": user.username, "pw_hash": pw_hash}
             )
-            user_id = result.fetchone()[0]
+            row = result.fetchone()
+            if not row:
+                raise HTTPException(status_code=500, detail="User creation failed")
+            user_id = row[0]
             token = create_jwt_token({"user_id": str(user_id), "username": user.username})
             return {"user_id": str(user_id), "username": user.username, "token": token}
     except Exception as e:
@@ -824,7 +830,7 @@ def get_user_visits(user_id: Optional[str] = None, bbox: Optional[str] = None, c
         JOIN street_segments s ON v.segment_id = s.id
         WHERE v.user_id = :user_id
     """
-    params = {"user_id": target_user_id}
+    params: Dict[str, Any] = {"user_id": target_user_id}
 
     if bbox:
         try:
@@ -892,7 +898,10 @@ def upsert_visit(visit: VisitCreate, user_id: str = Depends(get_current_user_id)
                 "notes": visit.notes,
                 "source": visit.source
             })
-            visit_id = result.fetchone()[0]
+            row = result.fetchone()
+            if not row:
+                raise HTTPException(status_code=500, detail="Database did not return the visit ID")
+            visit_id = row[0]
             return {"status": "success", "visit_id": visit_id, "synced": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database insert/update failed: {e}")

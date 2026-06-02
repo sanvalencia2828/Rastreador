@@ -16,6 +16,8 @@ SAMPLE_CNAE_CODES = [
     '5611201', '5612100', '5620101',
     # Technology
     '6201501', '6202300', '6203100', '6204000', '6209100', '6311900', '6319400',
+    # Technical Assistance & Repairs (Support)
+    '9511800', '9512600', '9521500', '9529104', '9529199',
     # Others (should be filtered out)
     '6411100', '8511101'
 ]
@@ -46,7 +48,12 @@ SAMPLE_BUSINESS_NAMES = [
     'ByteCraft Consultoria TI',
     'Paraná Cloud Services',
     'SoftSoluções Desenvolvimento',
-    'WebFlow Portais e Mídia'
+    'WebFlow Portais e Mídia',
+    'Assistência Técnica Central Londrina',
+    'Conserto de Celular & Tablets ME',
+    'Reparação de Notebooks e PCs Eireli',
+    'Oficina Eletromóveis Paraná',
+    'Suporte Técnico & Informática'
 ]
 
 SAMPLE_STREETS = [
@@ -149,13 +156,15 @@ def main():
     retail_count = len(df[df['cnae_fiscal_principal'].isin(SAMPLE_CNAE_CODES[:8])])
     gastronomy_count = len(df[df['cnae_fiscal_principal'].isin(SAMPLE_CNAE_CODES[8:11])])
     tech_count = len(df[df['cnae_fiscal_principal'].isin(SAMPLE_CNAE_CODES[11:18])])
-
+    repairs_count = len(df[df['cnae_fiscal_principal'].isin(SAMPLE_CNAE_CODES[18:23])])
+ 
     print(f"\nStatistics:")
     print(f"- Target regional businesses (Londrina + nearby): {metro_count}")
     print(f"- Active businesses: {active_count}")
     print(f"- Retail businesses: {retail_count}")
     print(f"- Gastronomy businesses: {gastronomy_count}")
     print(f"- Technology businesses: {tech_count}")
+    print(f"- Technical Assistance (Repairs): {repairs_count}")
 
 if __name__ == "__main__":
     main()

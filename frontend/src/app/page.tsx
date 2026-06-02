@@ -26,7 +26,7 @@ export default function DashboardPage() {
   const [showClusters, setShowClusters] = useState(true);
 
   // Sector filter state ("all" | "retail" | "gastronomy" | "tech")
-  const [selectedType, setSelectedType] = useState<"all" | "retail" | "gastronomy" | "tech">("all");
+  const [selectedType, setSelectedType] = useState<"all" | "retail" | "gastronomy" | "tech" | "repairs">("all");
 
   // State for mobile view toggle ("map" | "list")
   const [mobileView, setMobileView] = useState<"map" | "list">("map");

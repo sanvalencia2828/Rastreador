@@ -58,7 +58,7 @@ def run_kde(input_path: str, out_dir: str, resolution: float, bandwidths: list):
     def assign_geographic_coords(cnpj: str, business_type: str, municipio: str = None) -> list:
         h = hashlib.md5(cnpj.encode('utf-8')).hexdigest()
         hash_val = int(h, 16)
-        city_key = str(municipio).strip().lower() if municipio else ""
+        city_key = municipio.strip().lower() if municipio else ""
         
         center_lng, center_lat = None, None
         if city_key.startswith("camb"):
