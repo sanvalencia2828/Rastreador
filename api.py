@@ -56,6 +56,30 @@ app.add_middleware(
 )
 
 # ==============================================================================
+# IN-MEMORY CACHE HELPER (ZERO-DEPENDENCY)
+# ==============================================================================
+import time
+_RESPONSE_CACHE = {}
+
+def get_cached_response(key: str) -> Optional[Any]:
+    """Gets a cached response if it exists and has not expired."""
+    if key in _RESPONSE_CACHE:
+        val, expiry = _RESPONSE_CACHE[key]
+        if time.time() < expiry:
+            return val
+        else:
+            del _RESPONSE_CACHE[key]
+    return None
+
+def set_cached_response(key: str, value: Any, ttl: int = 300) -> None:
+    """Sets a cached response with an expiration time."""
+    _RESPONSE_CACHE[key] = (value, time.time() + ttl)
+
+def clear_response_cache() -> None:
+    """Clears the entire response cache."""
+    _RESPONSE_CACHE.clear()
+
+# ==============================================================================
 # GEOGRAPHIC CONSTANTS - LONDRINA HOTSPOTS
 # ==============================================================================
 # 5 main commercial hubs in Londrina with coordinates [lng, lat]
@@ -261,6 +285,12 @@ def get_heatmap_geojson():
     Returns a GeoJSON FeatureCollection of all businesses.
     This endpoint is used by the frontend to render the beautiful MapLibre Heatmap layer.
     """
+    cache_key = "heatmap_geojson"
+    cached = get_cached_response(cache_key)
+    if cached is not None:
+        print("Returning cached heatmap GeoJSON.")
+        return cached
+
     businesses = load_businesses()
     
     # If empty, try to generate sample data and run polars ETL to auto-populate!
@@ -305,10 +335,12 @@ def get_heatmap_geojson():
         features.append(feature)
 
     print(f"Returning {len(features)} points as GeoJSON.")
-    return {
+    result = {
         "type": "FeatureCollection",
         "features": features
     }
+    set_cached_response(cache_key, result, ttl=300)
+    return result
 
 @app.get("/api/clusters/emergentes", response_model=List[Cluster])
 def get_emergent_clusters():
@@ -317,6 +349,12 @@ def get_emergent_clusters():
     and returns them as ranked clusters.
     Used by the sidebar list ranking and interactive map markers.
     """
+    cache_key = "emergent_clusters"
+    cached = get_cached_response(cache_key)
+    if cached is not None:
+        print("Returning cached emergent clusters.")
+        return cached
+
     businesses = load_businesses()
     
     # If empty and we have no data, return empty list
@@ -357,6 +395,7 @@ def get_emergent_clusters():
         
     # Sort by density descending
     clusters.sort(key=lambda c: c.total_lojas, reverse=True)
+    set_cached_response(cache_key, clusters, ttl=300)
     return clusters
 
 @app.get("/api/analytics/streets", response_model=List[StreetAnalytics])

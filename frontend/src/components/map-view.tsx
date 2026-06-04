@@ -9,6 +9,7 @@ import {
   Radio, Flame, Sparkles, MapPin, Store, UtensilsCrossed, LayoutGrid, Locate,
   Wifi, WifiOff, RefreshCw, Route, CheckSquare, Plus, Trash2, CheckCircle2, UserCheck, MessageSquare, AlertCircle
 } from "lucide-react";
+import { Map as MapIcon } from "lucide-react";
 import { 
   cacheSegments, getCachedSegments, savePendingVisit, getPendingVisits, 
   clearPendingVisits, OfflineVisit 
@@ -99,6 +100,24 @@ export default function MapView({
   showClusters,
   selectedType,
 }: MapViewProps) {
+  const MAP_STYLES = {
+    dark: {
+      name: "Modo Oscuro",
+      url: "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+    },
+    light: {
+      name: "Modo Claro",
+      url: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
+    },
+    voyager: {
+      name: "Navegación",
+      url: "https://basemaps.cartocdn.com/gl/voyager-gl-style/style.json",
+    }
+  };
+
+  const [mapStyleKey, setMapStyleKey] = useState<"dark" | "light" | "voyager">("dark");
+  const [showStyleMenu, setShowStyleMenu] = useState(false);
+
   const [viewState, setViewState] = useState({
     longitude: -51.1628,
     latitude: -23.3102,
@@ -573,7 +592,7 @@ export default function MapView({
           onMoveEnd={handleMoveEnd}
           onClick={handleMapClick}
           mapLib={maplibregl}
-          mapStyle="https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json"
+          mapStyle={MAP_STYLES[mapStyleKey].url}
           style={{ width: "100%", height: "100%" }}
           maxZoom={18}
           minZoom={9}
@@ -723,6 +742,39 @@ export default function MapView({
           >
             {isLocating ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Locate className="w-5 h-5" />}
           </button>
+
+          {/* Map style toggle */}
+          <div className="relative">
+            <button
+              onClick={() => setShowStyleMenu(!showStyleMenu)}
+              className="w-12 h-12 rounded-full bg-zinc-950/90 border border-zinc-800 flex items-center justify-center text-white hover:bg-zinc-900 transition-all shadow-xl pointer-events-auto cursor-pointer"
+              title="Cambiar estilo del mapa"
+            >
+              <MapIcon className="w-5 h-5 text-primary" />
+            </button>
+            {showStyleMenu && (
+              <div className="absolute left-14 top-0 bg-zinc-950/95 border border-zinc-800 rounded-xl p-2 shadow-2xl flex flex-col gap-1 z-30 min-w-[120px] animate-fade-in pointer-events-auto">
+                <button
+                  onClick={() => { setMapStyleKey("dark"); setShowStyleMenu(false); }}
+                  className={`px-3 py-1.5 rounded-lg text-left text-xs font-bold transition-all cursor-pointer ${mapStyleKey === "dark" ? "bg-primary text-white" : "text-zinc-400 hover:text-white hover:bg-white/5"}`}
+                >
+                  🌌 Oscuro
+                </button>
+                <button
+                  onClick={() => { setMapStyleKey("light"); setShowStyleMenu(false); }}
+                  className={`px-3 py-1.5 rounded-lg text-left text-xs font-bold transition-all cursor-pointer ${mapStyleKey === "light" ? "bg-primary text-white" : "text-zinc-400 hover:text-white hover:bg-white/5"}`}
+                >
+                  ☀️ Claro
+                </button>
+                <button
+                  onClick={() => { setMapStyleKey("voyager"); setShowStyleMenu(false); }}
+                  className={`px-3 py-1.5 rounded-lg text-left text-xs font-bold transition-all cursor-pointer ${mapStyleKey === "voyager" ? "bg-primary text-white" : "text-zinc-400 hover:text-white hover:bg-white/5"}`}
+                >
+                  🗺️ Voyager
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Connection Status Badge */}
           <div className="glass-panel px-3 py-2 rounded-2xl flex items-center gap-2 shadow-2xl text-[10px] font-bold text-white max-w-fit">

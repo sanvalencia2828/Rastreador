@@ -174,6 +174,7 @@ export default function DashboardPage() {
           selectedType={selectedType}
           setSelectedType={setSelectedType}
           apiBaseUrl={apiBaseUrl}
+          heatmapData={filteredHeatmapData}
         />
       </div>
 

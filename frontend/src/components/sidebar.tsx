@@ -46,6 +46,7 @@ interface SidebarProps {
   selectedType: "all" | "retail" | "gastronomy" | "tech" | "repairs";
   setSelectedType: (type: "all" | "retail" | "gastronomy" | "tech" | "repairs") => void;
   apiBaseUrl: string;
+  heatmapData?: any;
 }
 
 export default function Sidebar({
@@ -64,6 +65,7 @@ export default function Sidebar({
   selectedType,
   setSelectedType,
   apiBaseUrl,
+  heatmapData,
 }: SidebarProps) {
   const [searchTerm, setSearchTerm] = useState("");
 
@@ -83,15 +85,36 @@ export default function Sidebar({
     };
   }, [clusters]);
 
-  // Filtered clusters based on search query
+  // Filtered clusters based on search query (only if searching for a specific polo)
   const filteredClusters = useMemo(() => {
     if (!clusters) return [];
-    return clusters.filter(
-      (c) =>
-        c.cluster_id.toString().includes(searchTerm) ||
-        `polo ${c.cluster_id}`.toLowerCase().includes(searchTerm.toLowerCase())
-    );
+    const query = searchTerm.toLowerCase().trim();
+    if (!query) return clusters;
+    if (query.startsWith("polo ") || /^\d+$/.test(query)) {
+      const numStr = query.replace("polo ", "");
+      return clusters.filter((c) => c.cluster_id.toString().includes(numStr));
+    }
+    return clusters;
   }, [clusters, searchTerm]);
+
+  // Find matching businesses from heatmapData features
+  const matchingBusinesses = useMemo(() => {
+    if (!heatmapData || !heatmapData.features || searchTerm.length < 2) return [];
+    const query = searchTerm.toLowerCase().trim();
+    // Do not show results if they are searching for a specific polo
+    if (query.startsWith("polo ") || /^\d+$/.test(query)) return [];
+    
+    return heatmapData.features
+      .filter((feat: any) => {
+        const props = feat.properties || {};
+        const name = (props.nome_fantasia || "").toLowerCase();
+        const cnpj = (props.cnpj || "").toLowerCase();
+        const street = (props.logradouro || "").toLowerCase();
+        const neighborhood = (props.bairro || "").toLowerCase();
+        return name.includes(query) || cnpj.includes(query) || street.includes(query) || neighborhood.includes(query);
+      })
+      .slice(0, 10); // limit to 10 results for visual performance
+  }, [heatmapData, searchTerm]);
 
   // Format decimal numbers for coordinates
   const formatCoord = (val: number) => val.toFixed(4);
@@ -271,15 +294,53 @@ export default function Sidebar({
         </div>
 
         {/* Interactive Search Field */}
-        <div className="relative">
-          <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            placeholder="Filtrar por ID de Polo..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-xs text-white placeholder-muted-foreground focus:outline-none focus:border-primary/50 focus:bg-white/10 transition-all font-semibold"
-          />
+        <div className="relative space-y-1.5">
+          <div className="relative">
+            <Search className="w-4 h-4 text-muted-foreground absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Buscar por nombre, CNPJ o calle..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 pl-10 pr-4 text-xs text-white placeholder-muted-foreground focus:outline-none focus:border-primary/50 focus:bg-white/10 transition-all font-semibold"
+            />
+          </div>
+          {/* Autocomplete Results list */}
+          {searchTerm.length >= 2 && matchingBusinesses.length > 0 && (
+            <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-950/98 border border-slate-800 rounded-xl max-h-[220px] overflow-y-auto z-50 shadow-2xl p-1.5 space-y-1">
+              {matchingBusinesses.map((biz: any, idx: number) => {
+                const props = biz.properties || {};
+                const [lng, lat] = biz.geometry.coordinates;
+                return (
+                  <div
+                    key={props.cnpj || idx}
+                    onClick={() => {
+                      onFlyTo(lng, lat, 17);
+                      setSearchTerm(""); // clear search to hide popup
+                    }}
+                    className="p-2 rounded-lg bg-white/2 hover:bg-primary/10 border border-transparent hover:border-primary/20 cursor-pointer transition-all flex flex-col gap-0.5 text-left text-[11px]"
+                  >
+                    <span className="font-bold text-white leading-tight truncate">
+                      {props.nome_fantasia || "Establecimiento"}
+                    </span>
+                    <div className="flex items-center justify-between text-[9px] text-muted-foreground gap-2">
+                      <span className="truncate flex-1 font-medium">
+                        {props.logradouro || "Sin dirección"}
+                      </span>
+                      <span className="bg-white/5 px-1 py-0.2 rounded text-primary text-[8px] font-black uppercase flex-shrink-0">
+                        {props.business_type || "comercio"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {searchTerm.length >= 2 && matchingBusinesses.length === 0 && (
+            <div className="absolute left-0 right-0 top-full mt-1 bg-zinc-950/98 border border-slate-800 rounded-xl p-3 z-50 shadow-2xl text-center text-[10px] text-muted-foreground">
+              No se encontraron comercios que coincidan.
+            </div>
+          )}
         </div>
 
         {/* Ranking List Section */}

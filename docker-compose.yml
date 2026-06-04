@@ -70,6 +70,12 @@ services:
     ports:
       # Producción mapea 3000:3000. Si cambias a 'development', usa 3000:3001 (debido al script dev en package.json)
       - "${PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => { if (r.statusCode === 200) process.exit(0); else process.exit(1); }).on('error', () => process.exit(1))"]
+      interval: 15s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
     # Para desarrollo local con hot-reload, descomenta las siguientes líneas:
     # volumes:
     #   - ./frontend:/app
