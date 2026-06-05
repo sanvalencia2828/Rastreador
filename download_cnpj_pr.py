@@ -56,7 +56,12 @@ GASTRONOMY_CNAE_CODES = {
 TECH_CNAE_CODES = {
     6201501, 6202300, 6203100, 6204000, 6209100, 6311900, 6319400,
     6120501, 6120502, 6190601, 6190699,
-    4651601, 4651602, 4661300, 2621300, 2622100
+    4651601, 4651602, 4661300, 2621300, 2622100,
+    4751201, 4751202, 4752100, 4753900,
+    4651400, 4652200, 4652201, 4652202,
+    6110801, 6110802, 6110803, 6130200, 6190602,
+    9511800, 9512600,
+    8599603
 }
 
 REPAIRS_CNAE_CODES = {
@@ -136,11 +141,12 @@ def main():
         e.bairro,
         e.cep,
         e.telefone_1,
-        e.porte_empresa,
+        emp.codigo_porte_empresa as porte_empresa,
         upper(trim(m.descricao)) as municipio_name,
         e.codigo_cnae_fiscal_principal
     FROM estabelecimentos e
     JOIN municipios m ON e.codigo_municipio = m.codigo
+    LEFT JOIN empresas emp ON e.cnpj_basico = emp.cnpj_basico
     WHERE e.uf = 'PR'
       AND e.codigo_situacao_cadastral = 2
       AND upper(trim(m.descricao)) IN ({muns_str})
