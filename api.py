@@ -193,7 +193,7 @@ def load_businesses() -> List[Dict[str, Any]]:
             print(f"PostgreSQL connection failed: {e}. Falling back to JSON file...")
 
     # Fallback to local JSON file
-    json_paths = ["londrina_businesses.json", "londrina_businesses_polars.json"]
+    json_paths = ["londrina_businesses_cleaned.json", "londrina_businesses.json", "londrina_businesses_polars.json"]
     for path in json_paths:
         if os.path.exists(path):
             try:
@@ -207,6 +207,28 @@ def load_businesses() -> List[Dict[str, Any]]:
     # If no data found, return empty list
     print("WARNING: No data source found! Please run the ETL script first.")
     return []
+
+def format_cnpj(biz: Dict[str, Any]) -> str:
+    """Format the CNPJ components from a business dictionary as a padded string."""
+    try:
+        basico = int(biz.get("cnpj_basico") or 0)
+        cnpj_basico = f"{basico:08d}"
+    except (ValueError, TypeError):
+        cnpj_basico = str(biz.get("cnpj_basico", "00000000")).zfill(8)
+
+    try:
+        ordem = int(biz.get("cnpj_ordem") or 0)
+        cnpj_ordem = f"{ordem:04d}"
+    except (ValueError, TypeError):
+        cnpj_ordem = str(biz.get("cnpj_ordem", "0000")).zfill(4)
+
+    try:
+        dv = int(biz.get("cnpj_dv") or 0)
+        cnpj_dv = f"{dv:02d}"
+    except (ValueError, TypeError):
+        cnpj_dv = str(biz.get("cnpj_dv", "00")).zfill(2)
+
+    return cnpj_basico + cnpj_ordem + cnpj_dv
 
 # ==============================================================================
 # SPATIAL ALGORITHMS
@@ -311,7 +333,7 @@ def get_heatmap_geojson():
 
     features = []
     for biz in businesses:
-        cnpj = biz.get("cnpj_basico", "00000000") + biz.get("cnpj_ordem", "0000") + biz.get("cnpj_dv", "00")
+        cnpj = format_cnpj(biz)
         biz_type = biz.get("business_type", "retail")
         municipio = biz.get("municipio")
         coords = assign_geographic_coords(cnpj, biz_type, municipio)
@@ -365,7 +387,7 @@ def get_emergent_clusters():
     counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
     
     for biz in businesses:
-        cnpj = biz.get("cnpj_basico", "00000000") + biz.get("cnpj_ordem", "0000") + biz.get("cnpj_dv", "00")
+        cnpj = format_cnpj(biz)
         biz_type = biz.get("business_type", "retail")
         
         # Deterministic hub assignment
@@ -460,8 +482,9 @@ def get_commercial_streets_analytics():
             continue
 
         porte = biz.get("porte_empresa")
-        # Filter: only micro/small businesses size '01' or '03'
-        if porte and porte not in ["01", "03"]:
+        # Filter: only micro/small businesses size '01' or '03' (or 1 or 3)
+        porte_str = str(porte).zfill(2) if porte is not None else ""
+        if porte_str not in ["01", "03"]:
             continue
 
         categoria = cnae_to_category(biz.get("cnae_fiscal_principal"))
@@ -570,11 +593,7 @@ def get_tech_businesses(
 
     items = []
     for biz in paginated:
-        cnpj = (
-            biz.get("cnpj_basico", "00000000")
-            + biz.get("cnpj_ordem", "0000")
-            + biz.get("cnpj_dv", "00")
-        )
+        cnpj = format_cnpj(biz)
         cnae_raw = str(biz.get("cnae_fiscal_principal") or "")
         prefix = cnae_raw[:2]
         sub = TECH_CNAE_SUBCATEGORY.get(prefix, {"label": "Tecnología", "icon": "💡"})

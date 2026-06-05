@@ -44,8 +44,16 @@ load_env_file()
 
 
 
-# Regional cities IBGE codes (Londrina, Cambé, Ibiporã, Apucarana, Jandaia do Sul)
-REGIONAL_IBGE_CODES = [4113700, 4103701, 4109807, 4101408, 4112108]
+# Regional cities TOM codes (Londrina, Cambé, Ibiporã, Apucarana, Jandaia do Sul)
+REGIONAL_TOM_CODES = [7667, 7473, 7593, 7425, 7635]
+
+TOM_NAME_MAP = {
+    7667: "Londrina",
+    7473: "Cambé",
+    7593: "Ibiporã",
+    7425: "Apucarana",
+    7635: "Jandaia do Sul"
+}
 
 # CNAE codes for retail and gastronomy (simplified list)
 RETAIL_CNAE_CODES = [
@@ -105,16 +113,16 @@ def load_cnpj_data_polars(file_path: str, chunk_size: int = 50000) -> pl.DataFra
     """
     print(f"Loading CNPJ data from {file_path} using Polars")
 
-    # Define column names based on CNPJ public data structure
+    # Define column names based on CNPJ public data structure (exactly 30 columns)
     estabelecimento_columns = [
         'cnpj_basico', 'cnpj_ordem', 'cnpj_dv', 'identificador_matriz_filial',
         'nome_fantasia', 'situacao_cadastral', 'data_situacao_cadastral',
         'motivo_situacao_cadastral', 'nome_cidade_exterior', 'pais',
         'data_inicio_atividade', 'cnae_fiscal_principal', 'cnae_fiscal_secundaria',
         'tipo_logradouro', 'logradouro', 'numero', 'complemento', 'bairro',
-        'cep', 'uf', 'codigo_municipio', 'municipio', 'ddd_1', 'telefone_1',
+        'cep', 'uf', 'codigo_municipio', 'ddd_1', 'telefone_1',
         'ddd_2', 'telefone_2', 'ddd_fax', 'fax', 'correio_eletronico',
-        'situacao_especial', 'data_situacao_especial', 'porte_empresa'
+        'situacao_especial', 'data_situacao_especial'
     ]
 
     try:
@@ -153,10 +161,11 @@ def filter_cnpj_data_polars(df: pl.DataFrame) -> pl.DataFrame:
     """
     try:
         # Apply all filters in a single operation
-        filtered_df = df.with_columns(
+        filtered_df = df.with_columns([
+            pl.col("codigo_municipio").cast(pl.Int64, strict=False),
             pl.col("cnae_fiscal_principal").cast(pl.Utf8, strict=False)
-        ).filter(
-            (pl.col("codigo_municipio").cast(pl.Int64, strict=False).is_in(REGIONAL_IBGE_CODES)) &
+        ]).filter(
+            (pl.col("codigo_municipio").is_in(REGIONAL_TOM_CODES)) &
             (pl.col("situacao_cadastral").cast(pl.Int64, strict=False) == 2) &
             (pl.col("cnae_fiscal_principal").is_in(VALID_CNAE_CODES))
         )
@@ -174,10 +183,12 @@ def filter_cnpj_data_polars(df: pl.DataFrame) -> pl.DataFrame:
                 .when(pl.col("cnae_fiscal_principal").is_in(REPAIRS_CNAE_CODES))
                 .then(pl.lit("repairs"))
                 .otherwise(pl.lit("gastronomy"))
-                .alias("business_type")
+                .alias("business_type"),
+                pl.col("codigo_municipio").replace_strict(TOM_NAME_MAP, default=None).alias("municipio"),
+                pl.lit(1).alias("porte_empresa")
             ])
 
-            # Select only relevant columns (including municipio)
+            # Select only relevant columns
             columns_to_keep = [
                 "cnpj_basico", "cnpj_ordem", "cnpj_dv", "nome_fantasia",
                 "cnae_fiscal_principal", "logradouro", "numero", "bairro", "cep", "telefone_1",
@@ -246,7 +257,7 @@ def main(input_file=None):
     """
     # Example usage - modify these paths according to your setup
     if input_file is None:
-        input_file = "Estabelecimentos0.csv"  # Replace with actual path to your CNPJ data file
+        input_file = "K3241.K03200Y4.D30812.ESTABELE"
         if not os.path.exists(input_file) and os.path.exists("sample_estabelecimentos.csv"):
             input_file = "sample_estabelecimentos.csv"
     output_json = "londrina_businesses.json"
