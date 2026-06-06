@@ -2,27 +2,26 @@
 """
 download_cnpj_pr.py
 ===================
-Script optimizado para el pipeline de datos de CNPJ de Paraná.
-Se conecta a la fuente de datos procesados del repositorio:
-https://github.com/ricardonascimentosoares/dados-abertos-cnpj
+Pipeline ETL: DuckDB (dados-abertos-cnpj) → PostgreSQL (estabelecimentos) en Railway.
+Filtra estrictamente por CNAEs del sector tecnológico (Tech + Repairs)
+en la región metropolitana de Londrina.
 
-Este script lee la base de datos DuckDB (dados_abertos_cnpj.db) y aplica los
-filtros de negocio para la UF 'PR', municipios de interés y CNAEs objetivo.
-
-Autor: Data Engineer
-Fecha: 2026-06-02
+Output: Tabla `estabelecimentos` con datos reales de Receita Federal,
+listos para geocodificar via enriquecer_lojas.py
 """
 
 import os
 import sys
-import json
+import urllib.error
 import duckdb
+import psycopg2
+import psycopg2.extras
+from typing import List, Optional
 
 # ============================================================
 # CONFIG
 # ============================================================
 DB_FILE = "cnpj_data/dados_abertos_cnpj.db"
-OUTPUT_FILE = "londrina_businesses.json"
 REMOTE_GDRIVE_URL = "https://drive.usercontent.google.com/download?id=1SgMhyuMWgBWrrBc5H-Raj_-hJlK8k1y8&confirm=t"
 
 TARGET_MUNICIPIOS = ['LONDRINA', 'CAMBE', 'IBIPORA', 'APUCARANA', 'JANDAIA DO SUL']
@@ -32,49 +31,28 @@ MUN_NAME_MAP = {
     'CAMBE': 'Cambé',
     'IBIPORA': 'Ibiporã',
     'APUCARANA': 'Apucarana',
-    'JANDAIA DO SUL': 'Jandaia do Sul'
-}
-
-RETAIL_CNAE_CODES = {
-    4711301, 4711302, 4712100, 4713000, 4721101, 4721102, 4721103,
-    4722901, 4722902, 4723700, 4724500, 4729601, 4729602, 4729603,
-    4729699, 4731800, 4732600, 4741500, 4742300, 4743100, 4744001,
-    4744002, 4744003, 4751201, 4751202, 4752100, 4753900, 4754701,
-    4754702, 4755501, 4755502, 4756300, 4757100, 4759801, 4759899,
-    4761001, 4761002, 4761003, 4762800, 4763601, 4763602, 4763603,
-    4763604, 4763605, 4771701, 4771702, 4771703, 4771704, 4771705,
-    4771706, 4771799, 4772500, 4773300, 4774100, 4781400, 4782201,
-    4782202, 4783101, 4783102, 4784900, 4785701, 4785702, 4785799,
-    4789001, 4789002, 4789099
-}
-
-GASTRONOMY_CNAE_CODES = {
-    5611201, 5611202, 5611203, 5611204, 5611205, 5612100, 5613900,
-    5620101, 5620102, 5620103, 5620104
+    'JANDAIA DO SUL': 'Jandaia do Sul',
 }
 
 TECH_CNAE_CODES = {
     6201501, 6202300, 6203100, 6204000, 6209100, 6311900, 6319400,
-    6120501, 6120502, 6190601, 6190699,
-    4651601, 4651602, 4661300, 2621300, 2622100,
     4751201, 4751202, 4752100, 4753900,
     4651400, 4652200, 4652201, 4652202,
-    6110801, 6110802, 6110803, 6130200, 6190602,
-    9511800, 9512600,
-    8599603
+    6110801, 6110802, 6110803, 6120501, 6120502, 6130200, 6190601, 6190602, 6190699,
+    9511800, 9512600, 8599603,
 }
 
 REPAIRS_CNAE_CODES = {
-    9511800, 9512600, 9521500, 9529104, 9529199
+    9511800, 9512600, 9521500, 9529104, 9529199,
 }
 
-ALL_CNAES = RETAIL_CNAE_CODES | GASTRONOMY_CNAE_CODES | TECH_CNAE_CODES | REPAIRS_CNAE_CODES
+ALL_CNAES = TECH_CNAE_CODES | REPAIRS_CNAE_CODES
+
 
 # ============================================================
 # HELPERS
 # ============================================================
 def safe_int(val):
-    """Safely convert value to integer if possible, else return string or None."""
     if val is None:
         return None
     if isinstance(val, int):
@@ -87,6 +65,59 @@ def safe_int(val):
     except ValueError:
         return val_str
 
+
+def normalize_municipio(raw: Optional[str]) -> Optional[str]:
+    if raw is None:
+        return None
+    raw = raw.strip()
+    # Intentar decodificar como UTF-8 limpio
+    try:
+        raw.encode('utf-8').decode('utf-8')
+    except UnicodeDecodeError:
+        pass
+    # Si hay bytes Latin-1 malinterpretados como UTF-8, reparar
+    try:
+        raw_bytes = raw.encode('latin-1')
+        fixed = raw_bytes.decode('utf-8')
+        return fixed.upper()
+    except (UnicodeEncodeError, UnicodeDecodeError, LookupError):
+        return raw.upper()
+    return raw.upper()
+
+
+def get_db_connection() -> psycopg2.extensions.connection:
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        db_user = os.environ.get("DB_USER", "postgres")
+        db_password = os.environ.get("DB_PASSWORD", "postgres")
+        db_host = os.environ.get("DB_HOST", "localhost")
+        db_port = os.environ.get("DB_PORT", "5432")
+        db_name = os.environ.get("DB_NAME", "londrina_comercio")
+        db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+    conn = psycopg2.connect(db_url)
+    conn.set_client_encoding('UTF8')
+    return conn
+
+
+def ensure_table_schema(conn: psycopg2.extensions.connection) -> None:
+    cursor = conn.cursor()
+    cursor.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
+    cursor.execute("""
+        ALTER TABLE estabelecimentos
+        ADD COLUMN IF NOT EXISTS business_type VARCHAR(20);
+    """)
+    cursor.execute("""
+        ALTER TABLE estabelecimentos
+        ADD COLUMN IF NOT EXISTS geocoded BOOLEAN DEFAULT FALSE;
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_estabelecimentos_geocoded
+        ON estabelecimentos(geocoded);
+    """)
+    conn.commit()
+    cursor.close()
+
+
 # ============================================================
 # MAIN PIPELINE
 # ============================================================
@@ -95,22 +126,23 @@ def main():
         sys.stdout.reconfigure(encoding='utf-8')
     if hasattr(sys.stderr, 'reconfigure'):
         sys.stderr.reconfigure(encoding='utf-8')
+
     print("=" * 60)
-    print("  Data Pipeline CNPJ - Parana (DuckDB Optimizado)")
-    print("  Repositorio: ricardonascimentosoares/dados-abertos-cnpj")
+    print("  Data Pipeline CNPJ - Sector Tech (DuckDB → PostgreSQL)")
+    print("  Filtro: Tech + Repairs | Municipios: 5 RML")
     print("=" * 60)
 
-    # 1. Establecer conexión con la base de datos DuckDB
+    # 1. Conexión DuckDB
     conn = None
     if os.path.exists(DB_FILE) and os.path.getsize(DB_FILE) > 100 * 1024:
-        print(f"[1/4] Conectando a la base de datos local: {DB_FILE}...")
+        print(f"[1/4] Conectando a DuckDB local: {DB_FILE}...")
         try:
             conn = duckdb.connect(DB_FILE)
         except Exception as e:
-            print(f"Error conectando a DuckDB local: {e}")
-    
+            print(f"  Error DuckDB local: {e}")
+
     if conn is None:
-        print(f"[1/4] Intentando conectar a la fuente remota: {REMOTE_GDRIVE_URL}...")
+        print(f"[1/4] Conectando a fuente remota...")
         try:
             conn = duckdb.connect()
             conn.execute("INSTALL httpfs;")
@@ -119,31 +151,34 @@ def main():
             conn.execute("USE remote_db;")
             print("  Conexión remota exitosa!")
         except Exception as e:
-            print(f"  No se pudo conectar a la base de datos remota (posible límite de cuota superado): {e}")
-            print(f"  Por favor, asegúrate de colocar el archivo 'dados_abertos_cnpj.db' en la ruta '{DB_FILE}'")
+            print(f"  No se pudo conectar: {e}")
+            print(f"  Coloca '{DB_FILE}' localmente y reintenta.")
             sys.exit(1)
 
-    # 2. Ejecutar consulta SQL optimizada con los filtros requeridos
-    print("\n[2/4] Ejecutando consulta SQL en DuckDB con las reglas de negocio...")
-    
+    # 2. Consulta SQL con filtro tech + repairs
+    print("\n[2/4] Extrayendo establecimientos tech de DuckDB...")
     cnaes_str = ",".join(map(str, ALL_CNAES))
     muns_str = ",".join(f"'{m}'" for m in TARGET_MUNICIPIOS)
-    
+
     query = f"""
-    SELECT 
+    SELECT
         e.cnpj_basico,
         e.cnpj_ordem,
         e.cnpj_dv,
         e.nome_fantasia,
-        CAST(e.codigo_cnae_fiscal_principal AS VARCHAR) as cnae_fiscal_principal,
+        CAST(e.codigo_cnae_fiscal_principal AS VARCHAR) as cnae_fiscal,
         e.logradouro,
         e.numero,
         e.bairro,
         e.cep,
         e.telefone_1,
+        e.ddd_1,
         emp.codigo_porte_empresa as porte_empresa,
-        upper(trim(m.descricao)) as municipio_name,
-        e.codigo_cnae_fiscal_principal
+        upper(trim(m.descricao)) as municipio_raw,
+        e.codigo_cnae_fiscal_principal as cnae_int,
+        e.identificador_matriz_filial,
+        e.situacao_cadastral,
+        e.correio_eletronico
     FROM estabelecimentos e
     JOIN municipios m ON e.codigo_municipio = m.codigo
     LEFT JOIN empresas emp ON e.cnpj_basico = emp.cnpj_basico
@@ -152,98 +187,154 @@ def main():
       AND upper(trim(m.descricao)) IN ({muns_str})
       AND e.codigo_cnae_fiscal_principal IN ({cnaes_str})
     """
-    
+
     try:
-        results = conn.execute(query).fetchall()
-        print(f"  Consulta finalizada. Registros extraídos: {len(results)}")
+        rows = conn.execute(query).fetchall()
+        print(f"  Registros extraídos: {len(rows)}")
     except Exception as e:
-        print(f"Error ejecutando consulta: {e}")
+        print(f"  Error en consulta: {e}")
         conn.close()
         sys.exit(1)
-
-    # 3. Procesar y clasificar los registros según tipo de negocio
-    print("\n[3/4] Clasificando y formateando registros para el JSON...")
-    
-    records = []
-    repairs_count = 0
-    type_counts = {"retail": 0, "repairs": 0, "gastronomy": 0, "tech": 0}
-    mun_counts = {}
-
-    for row in results:
-        # Column mappings
-        cnpj_basico = row[0]
-        cnpj_ordem = row[1]
-        cnpj_dv = row[2]
-        nome_fantasia = row[3]
-        cnae_fiscal_principal = row[4]
-        logradouro = row[5]
-        numero = row[6]
-        bairro = row[7]
-        cep = row[8]
-        telefone_1 = row[9]
-        porte_empresa = row[10]
-        mun_raw = row[11]
-        cnae_int = row[12]
-
-        # Classification
-        if cnae_int in TECH_CNAE_CODES:
-            btype = "tech"
-        elif cnae_int in REPAIRS_CNAE_CODES:
-            btype = "repairs"
-            repairs_count += 1
-        elif cnae_int in RETAIL_CNAE_CODES:
-            btype = "retail"
-        else:
-            btype = "gastronomy"
-
-        type_counts[btype] += 1
-        
-        # Proper case municipality name
-        municipio = MUN_NAME_MAP.get(mun_raw, mun_raw.title() if mun_raw else "")
-        mun_counts[municipio] = mun_counts.get(municipio, 0) + 1
-
-        record = {
-            "cnpj_basico":            safe_int(cnpj_basico),
-            "cnpj_ordem":             safe_int(cnpj_ordem),
-            "cnpj_dv":                safe_int(cnpj_dv),
-            "nome_fantasia":          nome_fantasia or None,
-            "cnae_fiscal_principal":  cnae_fiscal_principal,
-            "logradouro":             logradouro or "",
-            "numero":                 safe_int(numero),
-            "bairro":                 bairro or "",
-            "cep":                    safe_int(cep),
-            "telefone_1":             safe_int(telefone_1),
-            "porte_empresa":          safe_int(porte_empresa),
-            "municipio":              municipio,
-            "business_type":          btype
-        }
-        records.append(record)
-
     conn.close()
 
-    # 4. Guardar archivo final
-    print(f"\n[4/4] Guardando entregable en {OUTPUT_FILE}...")
-    try:
-        with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-            json.dump(records, f, ensure_ascii=False, indent=2)
-        print(f"  [OK] Guardado exitoso: {len(records)} registros escritos.")
-    except Exception as e:
-        print(f"Error escribiendo archivo JSON: {e}")
-        sys.exit(1)
+    if not rows:
+        print("  Sin registros para procesar. Saliendo.")
+        return
 
-    # Impresión de Verificación
+    # 3. Clasificar
+    print("\n[3/4] Clasificando y preparando inserción...")
+    type_counts = {"tech": 0, "repairs": 0}
+    mun_counts = {}
+
+    pg_rows: List[tuple] = []
+
+    for row in rows:
+        (
+            cnpj_basico, cnpj_ordem, cnpj_dv, nome_fantasia,
+            cnae_fiscal, logradouro, numero, bairro, cep,
+            telefone_1, ddd_1, porte_empresa,
+            municipio_raw, cnae_int, matriz_filial,
+            situacao_cadastral, email,
+        ) = row
+
+        if cnae_int in TECH_CNAE_CODES:
+            btype = "tech"
+        else:
+            btype = "repairs"
+
+        type_counts[btype] += 1
+
+        mun_normalized = normalize_municipio(municipio_raw)
+        if mun_normalized:
+            municipio = MUN_NAME_MAP.get(mun_normalized, mun_normalized.title())
+        else:
+            municipio = "Londrina"
+        mun_counts[municipio] = mun_counts.get(municipio, 0) + 1
+
+        cnpj_basico_s = str(cnpj_basico).strip().zfill(8) if cnpj_basico else "00000000"
+        cnpj_ordem_s = str(cnpj_ordem).strip().zfill(4) if cnpj_ordem else "0000"
+        cnpj_dv_s = str(cnpj_dv).strip().zfill(2) if cnpj_dv else "00"
+        cnpj_completo = f"{cnpj_basico_s}{cnpj_ordem_s}{cnpj_dv_s}"
+
+        pg_rows.append((
+            cnpj_basico_s, cnpj_ordem_s, cnpj_dv_s, cnpj_completo,
+            safe_int(matriz_filial),
+            nome_fantasia or None,
+            safe_int(situacao_cadastral),
+            None, None, None, None,
+            safe_int(cnae_int),
+            None,
+            None, None,
+            (logradouro or "").strip(),
+            (numero or "").strip(),
+            None,
+            (bairro or "").strip(),
+            str(cep).strip() if cep else None,
+            "PR",
+            None,
+            municipio,
+            ddd_1.strip() if ddd_1 else None,
+            str(telefone_1).strip() if telefone_1 else None,
+            None, None, None, None,
+            email.strip() if email else None,
+            None, None,
+            None, None, None,
+            btype,
+        ))
+
+    # 4. Insertar en PostgreSQL
+    print(f"\n[4/4] Insertando {len(pg_rows)} registros en estabelecimentos (Railway)...")
+    pg_conn = get_db_connection()
+    try:
+        ensure_table_schema(pg_conn)
+        cursor = pg_conn.cursor()
+
+        insert_sql = """
+            INSERT INTO estabelecimentos (
+                cnpj_basico, cnpj_ordem, cnpj_dv, cnpj_completo,
+                identificador_matriz_filial, nome_fantasia,
+                situacao_cadastral, data_situacao_cadastral,
+                motivo_situacao_cadastral, nome_cidade_exterior, codigo_pais,
+                cnae_fiscal, cnae_fiscal_descricao,
+                descricao_tipo_logradouro, logradouro,
+                numero, complemento, bairro, cep,
+                uf, codigo_municipio, municipio,
+                ddd_1, telefone_1,
+                ddd_2, telefone_2, ddd_fax, fax, correio_eletronico,
+                situacao_especial, data_situacao_especial,
+                latitude, longitude, geocoded, business_type
+            ) VALUES (
+                %s, %s, %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, %s, %s,
+                %s, %s,
+                %s, %s,
+                %s, %s, %s, %s,
+                %s, %s, %s,
+                %s, %s,
+                %s, %s, %s, %s, %s,
+                %s, %s,
+                %s, %s, %s, %s
+            )
+            ON CONFLICT (cnpj_completo) DO UPDATE SET
+                nome_fantasia = EXCLUDED.nome_fantasia,
+                cnae_fiscal = EXCLUDED.cnae_fiscal,
+                logradouro = EXCLUDED.logradouro,
+                numero = EXCLUDED.numero,
+                bairro = EXCLUDED.bairro,
+                municipio = EXCLUDED.municipio,
+                business_type = EXCLUDED.business_type,
+                situacao_cadastral = EXCLUDED.situacao_cadastral
+        """
+
+        psycopg2.extras.execute_batch(cursor, insert_sql, pg_rows, page_size=500)
+        pg_conn.commit()
+        cursor.close()
+        print(f"  [OK] {len(pg_rows)} registros insertados/actualizados en estabelecimentos.")
+    except Exception as e:
+        pg_conn.rollback()
+        print(f"  [ERROR] Falló inserción en PostgreSQL: {e}")
+        sys.exit(1)
+    finally:
+        pg_conn.close()
+
+    # Resumen
     print("\n" + "=" * 60)
-    print("  MÉTRICAS DE VERIFICACIÓN (RESUMEN)")
+    print("  MÉTRICAS DE VERIFICACIÓN")
     print("=" * 60)
-    print(f"Total registros importados:  {len(records)}")
-    print(f"Sectores (business_type):")
+    print(f"  Total tech registros:  {len(rows)}")
+    print(f"  Desglose:")
     for k, v in type_counts.items():
-        print(f"  - {k:11s}: {v}")
-    print(f"Municipios:")
-    for k, v in mun_counts.items():
-        print(f"  - {k:15s}: {v}")
+        print(f"    - {k:8s}: {v}")
+    print(f"  Por municipio:")
+    for k, v in sorted(mun_counts.items(), key=lambda x: x[1], reverse=True):
+        print(f"    - {k:20s}: {v}")
     print("=" * 60)
-    print("Proceso completado con exito!")
+    print("  Pipeline completado. Ejecuta ahora enriquecer_lojas.py")
+    print("  para geocodificar direcciones via Nominatim.")
+    print("=" * 60)
+
 
 if __name__ == "__main__":
     main()

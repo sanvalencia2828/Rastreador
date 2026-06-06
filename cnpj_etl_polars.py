@@ -1,28 +1,27 @@
 #!/usr/bin/env python3
 """
-ETL Script for Brazilian CNPJ Data Processing using Polars
+cnpj_etl_polars.py
+==================
+Pipeline ETL alternativo: CSV crudo da Receita Federal → PostgreSQL (estabelecimentos).
+Filtra estrictamente por CNAEs del sector tecnológico (Tech + Repairs)
+en la región metropolitana de Londrina.
 
-This script processes CNPJ (Cadastro Nacional da Pessoa Jurídica) data from the
-Brazilian Federal Revenue Service, filtering for businesses in Londrina/PR
-that are active and operate in retail or gastronomy sectors.
-
-Polars version - more memory efficient for large datasets.
-
-Author: Claude Code (Data Engineering Assistant)
-Date: 2026-05-23
+Usa Polars para procesamiento eficiente en memoria.
+Encoding: CSV en Latin-1 → normalizado a UTF-8 para PostgreSQL.
 """
 
 import polars as pl
-from sqlalchemy import create_engine
+import psycopg2
+import psycopg2.extras
 import json
 import sys
 import os
+from typing import List, Optional
 
 # ==============================================================================
-# ENVIRONMENT VARIABLE LOADER (ZERO-DEPENDENCY)
+# ENV LOADER
 # ==============================================================================
 def load_env_file(dotenv_path: str = ".env") -> None:
-    """Loads environment variables from a .env file if it exists."""
     if os.path.exists(dotenv_path):
         try:
             with open(dotenv_path, "r", encoding="utf-8") as f:
@@ -36,271 +35,243 @@ def load_env_file(dotenv_path: str = ".env") -> None:
                         val = val.strip().strip("'\"")
                         if key not in os.environ:
                             os.environ[key] = val
-            print(f"Loaded environment variables from {dotenv_path}")
+            print(f"Loaded env from {dotenv_path}")
         except Exception as e:
-            print(f"Warning: Could not read {dotenv_path}: {e}")
+            print(f"Warning: {dotenv_path}: {e}")
 
 load_env_file()
 
 
+# Regional cities IBGE codes (Londrina, Cambé, Ibiporã, Apucarana, Jandaia do Sul)
+REGIONAL_IBGE_CODES = [4113700, 4103701, 4109807, 4101408, 4112108]
 
-# Regional cities TOM codes (Londrina, Cambé, Ibiporã, Apucarana, Jandaia do Sul)
-REGIONAL_TOM_CODES = [7667, 7473, 7593, 7425, 7635]
-
-TOM_NAME_MAP = {
-    7667: "Londrina",
-    7473: "Cambé",
-    7593: "Ibiporã",
-    7425: "Apucarana",
-    7635: "Jandaia do Sul"
-}
-
-# CNAE codes for retail and gastronomy (simplified list)
-RETAIL_CNAE_CODES = [
-    # Retail trade
-    '4711301', '4711302', '4712100', '4713000', '4721101', '4721102', '4721103',
-    '4722901', '4722902', '4723700', '4724500', '4729601', '4729602', '4729603',
-    '4729699', '4731800', '4732600', '4741500', '4742300', '4743100', '4744001',
-    '4744002', '4744003', '4751201', '4751202', '4752100', '4753900', '4754701',
-    '4754702', '4755501', '4755502', '4756300', '4757100', '4759801', '4759899',
-    '4761001', '4761002', '4761003', '4762800', '4763601', '4763602', '4763603',
-    '4763604', '4763605', '4771701', '4771702', '4771703', '4771704', '4771705',
-    '4771706', '4771799', '4772500', '4773300', '4774100', '4781400', '4782201',
-    '4782202', '4783101', '4783102', '4784900', '4785701', '4785702', '4785799',
-    '4789001', '4789002', '4789099'
-]
-
-GASTRONOMY_CNAE_CODES = [
-    # Restaurants and similar establishments
-    '5611201', '5611202', '5611203', '5611204', '5611205', '5612100', '5613900',
-    '5620101', '5620102', '5620103', '5620104'
-]
-
+# CNAE codes for Tech + Repairs ONLY
 TECH_CNAE_CODES = [
-    # IT Services and Information Services
     '6201501', '6202300', '6203100', '6204000', '6209100', '6311900', '6319400',
-    # Retail of tech (computers, phones, electronics)
     '4751201', '4751202', '4752100', '4753900',
-    # Wholesale of tech
     '4651400', '4652200', '4652201', '4652202',
-    # Telecom
     '6110801', '6110802', '6110803', '6120501', '6120502', '6130200', '6190601', '6190602', '6190699',
-    # Repair of IT
-    '9511800', '9512600',
-    # Tech training
-    '8599603'
+    '9511800', '9512600', '8599603',
 ]
 
 REPAIRS_CNAE_CODES = [
-    # Technical Assistance & Repairs (computers, cellphones, electronics, appliances)
-    '9511800', '9512600', '9521500', '9529104', '9529199'
+    '9511800', '9512600', '9521500', '9529104', '9529199',
 ]
 
-# Combine all valid CNAE codes
-VALID_CNAE_CODES = RETAIL_CNAE_CODES + GASTRONOMY_CNAE_CODES + TECH_CNAE_CODES + REPAIRS_CNAE_CODES
+VALID_CNAE_CODES = TECH_CNAE_CODES + REPAIRS_CNAE_CODES
 
 
-def load_cnpj_data_polars(file_path: str, chunk_size: int = 50000) -> pl.DataFrame:
-    """
-    Load CNPJ data from CSV file using Polars and apply filters
+def normalize_municipio(val: str) -> str:
+    """Normaliza nombres de municipio con posible corrupción Latin-1/UTF-8."""
+    if not val:
+        return val
+    try:
+        val.encode('utf-8').decode('utf-8')
+    except UnicodeDecodeError:
+        pass
+    try:
+        fixed = val.encode('latin-1').decode('utf-8')
+        return fixed
+    except (UnicodeEncodeError, UnicodeDecodeError, LookupError):
+        return val
 
-    Args:
-        file_path: Path to the CNPJ CSV file
-        chunk_size: Number of rows to process at a time
 
-    Returns:
-        Filtered DataFrame with Londrina businesses
-    """
-    print(f"Loading CNPJ data from {file_path} using Polars")
+def get_db_connection() -> psycopg2.extensions.connection:
+    db_url = os.environ.get("DATABASE_URL")
+    if not db_url:
+        db_user = os.environ.get("DB_USER", "postgres")
+        db_password = os.environ.get("DB_PASSWORD", "postgres")
+        db_host = os.environ.get("DB_HOST", "localhost")
+        db_port = os.environ.get("DB_PORT", "5432")
+        db_name = os.environ.get("DB_NAME", "londrina_comercio")
+        db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+    conn = psycopg2.connect(db_url)
+    conn.set_client_encoding('UTF8')
+    return conn
 
-    # Define column names based on CNPJ public data structure (exactly 30 columns)
+
+def ensure_table_schema(conn: psycopg2.extensions.connection) -> None:
+    cursor = conn.cursor()
+    cursor.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
+    cursor.execute("""
+        ALTER TABLE estabelecimentos
+        ADD COLUMN IF NOT EXISTS business_type VARCHAR(20);
+    """)
+    cursor.execute("""
+        ALTER TABLE estabelecimentos
+        ADD COLUMN IF NOT EXISTS geocoded BOOLEAN DEFAULT FALSE;
+    """)
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_estabelecimentos_geocoded
+        ON estabelecimentos(geocoded);
+    """)
+    conn.commit()
+    cursor.close()
+
+
+def load_and_filter_tech_data(file_path: str) -> pl.DataFrame:
+    """Carga CSV Latin-1 y filtra solo tech/repairs en RML."""
+    print(f"Cargando {file_path} con Polars...")
+
     estabelecimento_columns = [
         'cnpj_basico', 'cnpj_ordem', 'cnpj_dv', 'identificador_matriz_filial',
         'nome_fantasia', 'situacao_cadastral', 'data_situacao_cadastral',
         'motivo_situacao_cadastral', 'nome_cidade_exterior', 'pais',
         'data_inicio_atividade', 'cnae_fiscal_principal', 'cnae_fiscal_secundaria',
         'tipo_logradouro', 'logradouro', 'numero', 'complemento', 'bairro',
-        'cep', 'uf', 'codigo_municipio', 'ddd_1', 'telefone_1',
+        'cep', 'uf', 'codigo_municipio', 'municipio', 'ddd_1', 'telefone_1',
         'ddd_2', 'telefone_2', 'ddd_fax', 'fax', 'correio_eletronico',
-        'situacao_especial', 'data_situacao_especial'
+        'situacao_especial', 'data_situacao_especial', 'porte_empresa',
     ]
 
-    try:
-        # Load data with Polars
-        # Note: Polars handles large files more efficiently than Pandas
-        df = pl.read_csv(
-            file_path,
-            separator=';',
-            encoding='latin1',
-            has_header=False,  # CNPJ data doesn't have proper headers
-            new_columns=estabelecimento_columns,
-            infer_schema_length=10000  # Sample more rows for schema inference
+    df = pl.read_csv(
+        file_path,
+        separator=';',
+        encoding='latin1',
+        has_header=False,
+        new_columns=estabelecimento_columns,
+        infer_schema_length=10000,
+    )
+    print(f"  Filas cargadas: {len(df)}")
+
+    # Normalizar municipio (Latin-1 → UTF-8)
+    df = df.with_columns(
+        pl.col("municipio").map_elements(
+            lambda x: normalize_municipio(x) if x else x,
+            return_dtype=pl.Utf8,
+        ).alias("municipio")
+    )
+
+    # Filtrar
+    filtered = df.with_columns(
+        pl.col("cnae_fiscal_principal").cast(pl.Utf8, strict=False),
+        pl.col("codigo_municipio").cast(pl.Int64, strict=False),
+        pl.col("situacao_cadastral").cast(pl.Int64, strict=False),
+    ).filter(
+        (pl.col("codigo_municipio").is_in(REGIONAL_IBGE_CODES))
+        & (pl.col("situacao_cadastral") == 2)
+        & (pl.col("cnae_fiscal_principal").is_in(VALID_CNAE_CODES))
+    )
+
+    print(f"  Filas tras filtro: {len(filtered)}")
+
+    if len(filtered) == 0:
+        return filtered
+
+    # Clasificar business_type
+    filtered = filtered.with_columns([
+        pl.when(pl.col("cnae_fiscal_principal").is_in(TECH_CNAE_CODES))
+        .then(pl.lit("tech"))
+        .otherwise(pl.lit("repairs"))
+        .alias("business_type"),
+    ])
+
+    # Construir cnpj_completo
+    filtered = filtered.with_columns([
+        (pl.col("cnpj_basico").cast(pl.Utf8).str.zfill(8)
+         + pl.col("cnpj_ordem").cast(pl.Utf8).str.zfill(4)
+         + pl.col("cnpj_dv").cast(pl.Utf8).str.zfill(2)
+        ).alias("cnpj_completo"),
+    ])
+
+    return filtered
+
+
+def export_to_postgresql(df: pl.DataFrame, conn: psycopg2.extensions.connection) -> int:
+    """Inserta/actualiza registros en estabelecimentos."""
+    ensure_table_schema(conn)
+    cursor = conn.cursor()
+
+    rows = df.select([
+        "cnpj_basico", "cnpj_ordem", "cnpj_dv", "cnpj_completo",
+        "identificador_matriz_filial", "nome_fantasia",
+        "situacao_cadastral", "cnae_fiscal_principal",
+        "logradouro", "numero", "bairro", "cep",
+        "uf", "codigo_municipio", "municipio",
+        "ddd_1", "telefone_1", "correio_eletronico",
+        "business_type",
+    ]).to_dicts()
+
+    insert_sql = """
+        INSERT INTO estabelecimentos (
+            cnpj_basico, cnpj_ordem, cnpj_dv, cnpj_completo,
+            identificador_matriz_filial, nome_fantasia,
+            situacao_cadastral, cnae_fiscal,
+            logradouro, numero, bairro, cep,
+            uf, codigo_municipio, municipio,
+            ddd_1, telefone_1, correio_eletronico,
+            business_type, geocoded
+        ) VALUES (
+            %(cnpj_basico)s, %(cnpj_ordem)s, %(cnpj_dv)s, %(cnpj_completo)s,
+            %(identificador_matriz_filial)s, %(nome_fantasia)s,
+            %(situacao_cadastral)s, %(cnae_fiscal_principal)s,
+            %(logradouro)s, %(numero)s, %(bairro)s, %(cep)s,
+            %(uf)s, %(codigo_municipio)s, %(municipio)s,
+            %(ddd_1)s, %(telefone_1)s, %(correio_eletronico)s,
+            %(business_type)s, FALSE
         )
-
-        print(f"Loaded {len(df)} rows from {file_path}")
-
-        # Apply filters
-        filtered_df = filter_cnpj_data_polars(df)
-
-        return filtered_df
-
-    except Exception as e:
-        print(f"Error loading data: {e}")
-        return pl.DataFrame()
-
-
-def filter_cnpj_data_polars(df: pl.DataFrame) -> pl.DataFrame:
+        ON CONFLICT (cnpj_completo) DO UPDATE SET
+            nome_fantasia = EXCLUDED.nome_fantasia,
+            cnae_fiscal = EXCLUDED.cnae_fiscal,
+            logradouro = EXCLUDED.logradouro,
+            numero = EXCLUDED.numero,
+            bairro = EXCLUDED.bairro,
+            municipio = EXCLUDED.municipio,
+            business_type = EXCLUDED.business_type,
+            situacao_cadastral = EXCLUDED.situacao_cadastral
     """
-    Apply business filters to CNPJ data using Polars
 
-    Args:
-        df: DataFrame with CNPJ data
-
-    Returns:
-        Filtered DataFrame
-    """
-    try:
-        # Apply all filters in a single operation
-        filtered_df = df.with_columns([
-            pl.col("codigo_municipio").cast(pl.Int64, strict=False),
-            pl.col("cnae_fiscal_principal").cast(pl.Utf8, strict=False)
-        ]).filter(
-            (pl.col("codigo_municipio").is_in(REGIONAL_TOM_CODES)) &
-            (pl.col("situacao_cadastral").cast(pl.Int64, strict=False) == 2) &
-            (pl.col("cnae_fiscal_principal").is_in(VALID_CNAE_CODES))
-        )
-
-        print(f"Filtered data contains {len(filtered_df)} rows")
-
-        # Clean up columns and add categorizations if we have matches
-        if len(filtered_df) > 0:
-            # Classification: tech, retail, gastronomy or repairs
-            filtered_df = filtered_df.with_columns([
-                pl.when(pl.col("cnae_fiscal_principal").is_in(TECH_CNAE_CODES))
-                .then(pl.lit("tech"))
-                .when(pl.col("cnae_fiscal_principal").is_in(RETAIL_CNAE_CODES))
-                .then(pl.lit("retail"))
-                .when(pl.col("cnae_fiscal_principal").is_in(REPAIRS_CNAE_CODES))
-                .then(pl.lit("repairs"))
-                .otherwise(pl.lit("gastronomy"))
-                .alias("business_type"),
-                pl.col("codigo_municipio").replace_strict(TOM_NAME_MAP, default=None).alias("municipio"),
-                pl.lit(1).alias("porte_empresa")
-            ])
-
-            # Select only relevant columns
-            columns_to_keep = [
-                "cnpj_basico", "cnpj_ordem", "cnpj_dv", "nome_fantasia",
-                "cnae_fiscal_principal", "logradouro", "numero", "bairro", "cep", "telefone_1",
-                "business_type", "porte_empresa", "municipio"
-            ]
-
-            # Only keep columns that exist in the dataframe
-            existing_columns = [col for col in columns_to_keep if col in filtered_df.columns]
-            filtered_df = filtered_df.select(existing_columns)
-
-        return filtered_df
-
-    except Exception as e:
-        print(f"Error filtering data: {e}")
-        return pl.DataFrame()
+    psycopg2.extras.execute_batch(cursor, insert_sql, rows, page_size=500)
+    conn.commit()
+    cursor.close()
+    return len(rows)
 
 
-def export_to_json_polars(df: pl.DataFrame, output_file: str) -> None:
-    """
-    Export Polars DataFrame to JSON file
-
-    Args:
-        df: DataFrame to export
-        output_file: Path to output JSON file
-    """
-    try:
-        # Convert Polars DataFrame to list of dicts and write using standard json module
-        data_dicts = df.to_dicts()
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(data_dicts, f, indent=2, ensure_ascii=False)
-        print(f"Data exported to {output_file}")
-    except Exception as e:
-        print(f"Error exporting to JSON: {e}")
+def export_to_json(df: pl.DataFrame, output_file: str) -> None:
+    """Exporta a JSON como respaldo."""
+    data_dicts = df.to_dicts()
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(data_dicts, f, indent=2, ensure_ascii=False)
+    print(f"  Backup JSON: {output_file}")
 
 
-def export_to_postgresql_polars(df: pl.DataFrame, connection_string: str, table_name: str) -> None:
-    """
-    Export Polars DataFrame to PostgreSQL database
-
-    Args:
-        df: DataFrame to export
-        connection_string: PostgreSQL connection string
-        table_name: Name of the table to create/insert into
-    """
-    try:
-        # Convert to Pandas for SQLAlchemy compatibility
-        pandas_df = df.to_pandas()
-
-        # Create database engine
-        engine = create_engine(connection_string)
-
-        # Export DataFrame to PostgreSQL
-        pandas_df.to_sql(table_name, engine, if_exists='replace', index=False)
-        print(f"Data exported to PostgreSQL table '{table_name}'")
-    except Exception as e:
-        print(f"Error exporting to PostgreSQL: {e}")
-
-
-def main(input_file=None):
-    """
-    Main function to run the ETL process with Polars
-
-    Args:
-        input_file (str, optional): Path to the input CSV file. If not provided,
-                                   will use default files.
-    """
-    # Example usage - modify these paths according to your setup
+def main(input_file: Optional[str] = None):
     if input_file is None:
-        input_file = "K3241.K03200Y4.D30812.ESTABELE"
+        input_file = "Estabelecimentos0.csv"
         if not os.path.exists(input_file) and os.path.exists("sample_estabelecimentos.csv"):
             input_file = "sample_estabelecimentos.csv"
-    output_json = "londrina_businesses.json"
 
-    # Check if input file exists
     if not os.path.exists(input_file):
-        print(f"Input file {input_file} not found.")
-        print("Please download CNPJ data from http://receita.economia.gov.br/orientacao/tributaria/cadastros/cadastro-nacional-de-pessoas-juridicas-cnpj/DadosPublicosCNPJ")
+        print(f"Archivo {input_file} no encontrado.")
+        print("Descarga los CSVs desde http://receita.economia.gov.br/...")
         return
 
-    # Process the data
-    print("Starting CNPJ ETL process with Polars...")
-    filtered_data = load_cnpj_data_polars(input_file)
+    print("=" * 60)
+    print("  ETL Polars: CSV → PostgreSQL (estabelecimentos)")
+    print("  Filtro: Tech + Repairs | RML")
+    print("=" * 60)
 
-    if len(filtered_data) == 0:
-        print("No data to export.")
+    # Cargar y filtrar
+    df = load_and_filter_tech_data(input_file)
+    if len(df) == 0:
+        print("Sin datos tech para exportar.")
         return
 
-    # Export to JSON
-    export_to_json_polars(filtered_data, output_json)
+    # Backup JSON
+    output_json = "londrina_tech_businesses.json"
+    export_to_json(df, output_json)
 
-    # Option 2: Export to PostgreSQL (automatic detection via env variables)
-    postgres_connection = os.environ.get("DATABASE_URL")
-    db_host = "Database URL"
+    # PostgreSQL
+    try:
+        conn = get_db_connection()
+        count = export_to_postgresql(df, conn)
+        print(f"  [OK] {count} registros insertados/actualizados en estabelecimentos.")
+        conn.close()
+    except Exception as e:
+        print(f"  [ERROR] PostgreSQL: {e}")
+        return
 
-    if not postgres_connection:
-        db_user = os.environ.get("DB_USER")
-        db_password = os.environ.get("DB_PASSWORD")
-        db_host = os.environ.get("DB_HOST")
-        db_port = os.environ.get("DB_PORT", "5432")
-        db_name = os.environ.get("DB_NAME")
-        if all([db_user, db_password, db_host, db_name]):
-            postgres_connection = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-        else:
-            db_host = None
-
-    if postgres_connection:
-        print(f"Database connection credentials found. Exporting to PostgreSQL at {db_host or 'configured connection string'}...")
-        export_to_postgresql_polars(filtered_data, postgres_connection, "londrina_businesses")
-    else:
-        print("Database connection variables not set. Skipping PostgreSQL export.")
-
-    print("ETL process completed successfully with Polars!")
+    print("ETL Polars completado. Ejecuta enriquecer_lojas.py para geocodificar.")
 
 
 if __name__ == "__main__":

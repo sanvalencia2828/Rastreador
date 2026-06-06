@@ -158,6 +158,11 @@ def load_businesses() -> List[Dict[str, Any]]:
     """
     Loads businesses from PostgreSQL database if configured,
     otherwise falls back to reading the local JSON file.
+
+    Priority:
+    1. Table `estabelecimentos` (yield actual data, with stored lat/lon if geocoded)
+    2. Table `londrina_businesses` (legacy)
+    3. JSON files (fallback)
     """
     conn_str = os.environ.get("DATABASE_URL")
     db_host = "Database URL"
@@ -173,27 +178,22 @@ def load_businesses() -> List[Dict[str, Any]]:
         else:
             db_host = None
 
-    # Attempt DB connection if variables exist
     if conn_str:
-        try:
-            engine = create_engine(conn_str)
-            print(f"Connecting to database at {db_host or 'configured connection string'}...")
-            with engine.connect() as conn:
-                result = conn.execute(text("SELECT * FROM londrina_businesses"))
-                # Convert rows to dictionaries
-                businesses = []
-                for row in result:
-                    # SQLAlchemy row mapping compatibility
-                    row_dict = dict(row._mapping)
-                    businesses.append(row_dict)
-                print(f"Successfully loaded {len(businesses)} businesses from PostgreSQL DB.")
-                if len(businesses) > 0:
-                    return businesses
-        except Exception as e:
-            print(f"PostgreSQL connection failed: {e}. Falling back to JSON file...")
+        # Try estabelecimentos first (the new canonical table)
+        for table_name in ["estabelecimentos", "londrina_businesses"]:
+            try:
+                engine = create_engine(conn_str)
+                with engine.connect() as conn:
+                    result = conn.execute(text(f"SELECT * FROM {table_name}"))
+                    businesses = [dict(row._mapping) for row in result]
+                    print(f"Loaded {len(businesses)} businesses from PostgreSQL table '{table_name}'.")
+                    if len(businesses) > 0:
+                        return businesses
+            except Exception as e:
+                print(f"PostgreSQL table '{table_name}' failed: {e}.")
 
     # Fallback to local JSON file
-    json_paths = ["londrina_businesses_cleaned.json", "londrina_businesses.json", "londrina_businesses_polars.json"]
+    json_paths = ["londrina_businesses.json", "londrina_businesses_polars.json"]
     for path in json_paths:
         if os.path.exists(path):
             try:
@@ -333,10 +333,17 @@ def get_heatmap_geojson():
 
     features = []
     for biz in businesses:
-        cnpj = format_cnpj(biz)
+        cnpj = biz.get("cnpj_basico", "00000000") + biz.get("cnpj_ordem", "0000") + biz.get("cnpj_dv", "00")
         biz_type = biz.get("business_type", "retail")
         municipio = biz.get("municipio")
-        coords = assign_geographic_coords(cnpj, biz_type, municipio)
+
+        # Use stored real coordinates if geocoded, otherwise fallback to deterministic
+        lat = biz.get("latitude")
+        lon = biz.get("longitude")
+        if lat is not None and lon is not None:
+            coords = [float(lon), float(lat)]
+        else:
+            coords = assign_geographic_coords(cnpj, biz_type, municipio)
         
         feature = {
             "type": "Feature",
@@ -348,7 +355,7 @@ def get_heatmap_geojson():
                 "cnpj": cnpj,
                 "nome_fantasia": biz.get("nome_fantasia", "Comercio"),
                 "business_type": biz_type,
-                "cnae": biz.get("cnae_fiscal_principal", ""),
+                "cnae": biz.get("cnae_fiscal", biz.get("cnae_fiscal_principal", "")),
                 "bairro": biz.get("bairro", "Centro"),
                 "logradouro": biz.get("logradouro", ""),
                 "municipio": municipio or "Londrina"
@@ -367,9 +374,9 @@ def get_heatmap_geojson():
 @app.get("/api/clusters/emergentes", response_model=List[Cluster])
 def get_emergent_clusters():
     """
-    Aggregates the businesses into their respective 5 Londrina hotspots,
-    and returns them as ranked clusters.
-    Used by the sidebar list ranking and interactive map markers.
+    Aggregates businesses into commercial clusters using PostGIS ST_ClusterDBSCAN
+    when real coordinates are available, falling back to the 5 known Londrina hubs.
+    Returns ranked clusters by density.
     """
     cache_key = "emergent_clusters"
     cached = get_cached_response(cache_key)
@@ -377,33 +384,77 @@ def get_emergent_clusters():
         print("Returning cached emergent clusters.")
         return cached
 
+    # Try PostGIS clustering first if coordinates exist
+    conn_str = os.environ.get("DATABASE_URL")
+    if not conn_str:
+        db_user = os.environ.get("DB_USER")
+        db_password = os.environ.get("DB_PASSWORD")
+        db_host = os.environ.get("DB_HOST")
+        db_port = os.environ.get("DB_PORT", "5432")
+        db_name = os.environ.get("DB_NAME")
+        if all([db_user, db_password, db_host, db_name]):
+            conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+
+    if conn_str:
+        try:
+            engine = create_engine(conn_str)
+            with engine.connect() as conn:
+                query = text("""
+                    SELECT
+                        cluster_id,
+                        COUNT(*)::int as total_lojas,
+                        ST_AsGeoJSON(ST_Centroid(ST_Collect(geom)))::json->'coordinates' as center_coords
+                    FROM (
+                        SELECT
+                            ST_ClusterDBSCAN(geom, 0.003, 1) OVER () as cluster_id,
+                            geom
+                        FROM estabelecimentos
+                        WHERE situacao_cadastral = 2
+                          AND geom IS NOT NULL
+                          AND business_type IN ('tech', 'repairs')
+                    ) sub
+                    WHERE cluster_id IS NOT NULL
+                    GROUP BY cluster_id
+                    ORDER BY total_lojas DESC
+                """)
+                result = conn.execute(query)
+                clusters = []
+                for row in result:
+                    row_dict = dict(row._mapping)
+                    coords = row_dict["center_coords"]
+                    clusters.append(
+                        Cluster(
+                            cluster_id=int(row_dict["cluster_id"]) + 100,
+                            total_lojas=row_dict["total_lojas"],
+                            center_geom=ClusterPoint(coordinates=coords)
+                        )
+                    )
+                if clusters:
+                    print(f"Returning {len(clusters)} PostGIS clusters.")
+                    set_cached_response(cache_key, clusters, ttl=300)
+                    return clusters
+        except Exception as e:
+            print(f"PostGIS clustering failed: {e}. Falling back to hub method.")
+
+    # Fallback: deterministic hub assignment (backward compatible)
     businesses = load_businesses()
-    
-    # If empty and we have no data, return empty list
     if len(businesses) == 0:
         return []
 
-    # Initialize count
     counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
-    
     for biz in businesses:
-        cnpj = format_cnpj(biz)
+        cnpj = biz.get("cnpj_basico", "00000000") + biz.get("cnpj_ordem", "0000") + biz.get("cnpj_dv", "00")
         biz_type = biz.get("business_type", "retail")
-        
-        # Deterministic hub assignment
         h = hashlib.md5(cnpj.encode('utf-8')).hexdigest()
         hash_val = int(h, 16)
-        
         if biz_type == "gastronomy":
             hub_idx = [2, 3, 5, 1, 4][hash_val % 5]
         elif biz_type == "tech":
             hub_idx = [3, 2, 1, 5, 4][hash_val % 5]
         else:
             hub_idx = [1, 4, 2, 3, 5][hash_val % 5]
-            
         counts[hub_idx] += 1
 
-    # Form response list
     clusters = []
     for hub_id, count in counts.items():
         coords = HUBS[hub_id]["coords"]
@@ -414,8 +465,6 @@ def get_emergent_clusters():
                 center_geom=ClusterPoint(coordinates=coords)
             )
         )
-        
-    # Sort by density descending
     clusters.sort(key=lambda c: c.total_lojas, reverse=True)
     set_cached_response(cache_key, clusters, ttl=300)
     return clusters
@@ -441,28 +490,31 @@ def get_commercial_streets_analytics():
     raw_rows: List[Dict[str, Any]] = []
 
     if conn_str:
-        try:
-            engine = create_engine(conn_str)
-            with engine.connect() as conn:
-                query = text("""
-                    SELECT logradouro, cnae_fiscal_principal, porte_empresa
-                    FROM londrina_businesses
-                    WHERE logradouro IS NOT NULL AND logradouro != ''
-                      AND porte_empresa IN ('01', '03')
-                """)
-                result = conn.execute(query)
-                for row in result:
-                    raw_rows.append(
-                        dict(row._mapping) if hasattr(row, "_mapping")
-                        else {
-                            "logradouro": row[0],
-                            "cnae_fiscal_principal": row[1],
-                            "porte_empresa": row[2]
-                        }
-                    )
-                print(f"Loaded {len(raw_rows)} rows from PostgreSQL for street analytics.")
-        except Exception as e:
-            print(f"PostgreSQL query failed: {e}. Falling back to JSON...")
+        for table_name in ["estabelecimentos", "londrina_businesses"]:
+            try:
+                engine = create_engine(conn_str)
+                with engine.connect() as conn:
+                    query = text(f"""
+                        SELECT logradouro, cnae_fiscal, porte_empresa
+                        FROM {table_name}
+                        WHERE logradouro IS NOT NULL AND logradouro != ''
+                          AND porte_empresa IN ('01', '03')
+                    """)
+                    result = conn.execute(query)
+                    for row in result:
+                        raw_rows.append(
+                            dict(row._mapping) if hasattr(row, "_mapping")
+                            else {
+                                "logradouro": row[0],
+                                "cnae_fiscal_principal": row[1],
+                                "porte_empresa": row[2]
+                            }
+                        )
+                    if raw_rows:
+                        print(f"Loaded {len(raw_rows)} rows from table '{table_name}' for street analytics.")
+                        break
+            except Exception as e:
+                print(f"Table '{table_name}' query failed: {e}.")
 
     # Fallback to local JSON
     if not raw_rows:
@@ -581,7 +633,7 @@ def get_tech_businesses(
         tech_businesses = [
             b for b in tech_businesses
             if search_lower in (b.get("nome_fantasia") or "").lower()
-            or search_lower in str(b.get("cnae_fiscal_principal") or "").lower()
+            or search_lower in str(b.get("cnae_fiscal") or b.get("cnae_fiscal_principal") or "").lower()
             or search_lower in (b.get("bairro") or "").lower()
             or search_lower in (b.get("logradouro") or "").lower()
         ]
@@ -594,7 +646,7 @@ def get_tech_businesses(
     items = []
     for biz in paginated:
         cnpj = format_cnpj(biz)
-        cnae_raw = str(biz.get("cnae_fiscal_principal") or "")
+        cnae_raw = str(biz.get("cnae_fiscal") or biz.get("cnae_fiscal_principal") or "")
         prefix = cnae_raw[:2]
         sub = TECH_CNAE_SUBCATEGORY.get(prefix, {"label": "Tecnología", "icon": "💡"})
 

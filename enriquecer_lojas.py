@@ -2,28 +2,42 @@
 # -*- coding: utf-8 -*-
 
 """
-Script para enriquecer datos de locales comerciales con información geográfica jerárquica
-y metadatos PostGIS. Incluye autodetección de tablas y 4 niveles de geocodificación.
+enriquecer_lojas.py
+====================
+Geocodificación forward vía Nominatim /search para la tabla `estabelecimentos`.
+Lee establecimientos sin geocodificar (geocoded = FALSE), construye direcciones
+a partir de logradouro, numero, bairro, municipio, y obtiene coordenadas reales
+(latitude, longitude, geom).
+
+Incluye:
+  - Rate limiting (1 req/s) para cumplir TOS de Nominatim
+  - Checkpoint cada N registros para reanudar si se interrumpe
+  - Fallback a coordenadas deterministas si Nominatim no retorna resultados
+  - Normalización de encoding Latin-1/UTF-8 en direcciones
 """
 
 import time
 import psycopg2
+import psycopg2.extras
 import requests
-from typing import Optional, Dict, Any, Tuple
 import json
+import os
+import sys
+import hashlib
 import logging
+from typing import Optional, Tuple, Dict, Any
 
-# Configuración de logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
-import os
 
 # ==============================================================================
-# ENVIRONMENT VARIABLE LOADER (ZERO-DEPENDENCY)
+# ENV LOADER
 # ==============================================================================
 def load_env_file(dotenv_path: str = ".env") -> None:
-    """Loads environment variables from a .env file if it exists."""
     if os.path.exists(dotenv_path):
         try:
             with open(dotenv_path, "r", encoding="utf-8") as f:
@@ -37,349 +51,292 @@ def load_env_file(dotenv_path: str = ".env") -> None:
                         val = val.strip().strip("'\"")
                         if key not in os.environ:
                             os.environ[key] = val
-            logger.info(f"Loaded environment variables from {dotenv_path}")
+            logger.info(f"Loaded env from {dotenv_path}")
         except Exception as e:
             logger.warning(f"Could not read {dotenv_path}: {e}")
 
 load_env_file()
 
-# Configuración de Nominatim
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/reverse"
+
+# ==============================================================================
+# CONSTANTES
+# ==============================================================================
+NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 HEADERS = {
-    'User-Agent': 'LondrinaComercio-Enricher/1.0 (londrina.comercio@antigravity.dev)'
+    'User-Agent': 'LondrinaRadarComercial-Geocoder/1.0 (londrina.radar@antigravity.dev)'
+}
+CHECKPOINT_INTERVAL = 50  # commit cada N registros
+RATE_LIMIT_SLEEP = 1.1    # segundos entre requests (Nominatim TOS: max 1 req/s)
+
+# Hubs de Londrina para fallback determinista
+HUBS = {
+    1: {"coords": [-51.1610, -23.3110]},
+    2: {"coords": [-51.1890, -23.3310]},
+    3: {"coords": [-51.1670, -23.3220]},
+    4: {"coords": [-51.1480, -23.2720]},
+    5: {"coords": [-51.1550, -23.3180]},
 }
 
-def conectar_db() -> psycopg2.extensions.connection:
-    """Establece conexión con la base de datos PostgreSQL"""
+# Centros de ciudades vecinas para fallback
+CITY_CENTERS = {
+    "camb": [-51.2782, -23.2758],
+    "ibipor": [-51.0478, -23.2694],
+    "apucar": [-51.4614, -23.5521],
+    "janda": [-51.6447, -23.6064],
+}
+
+
+# ==============================================================================
+# CONEXIÓN DB
+# ==============================================================================
+def get_db_connection() -> psycopg2.extensions.connection:
     db_url = os.environ.get("DATABASE_URL")
-    try:
-        if db_url:
-            logger.info("Conectando a PostgreSQL usando DATABASE_URL...")
-            conn = psycopg2.connect(db_url)
-        else:
-            db_user = os.environ.get("DB_USER")
-            db_password = os.environ.get("DB_PASSWORD")
-            db_host = os.environ.get("DB_HOST")
-            db_port = os.environ.get("DB_PORT", "5432")
-            db_name = os.environ.get("DB_NAME")
+    if not db_url:
+        db_user = os.environ.get("DB_USER", "postgres")
+        db_password = os.environ.get("DB_PASSWORD", "postgres")
+        db_host = os.environ.get("DB_HOST", "localhost")
+        db_port = os.environ.get("DB_PORT", "5432")
+        db_name = os.environ.get("DB_NAME", "londrina_comercio")
+        db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+    conn = psycopg2.connect(db_url)
+    conn.set_client_encoding('UTF8')
+    return conn
 
-            if all([db_user, db_password, db_host, db_name]):
-                conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-                logger.info(f"Conectando a PostgreSQL en {db_host} usando variables de entorno...")
-                conn = psycopg2.connect(conn_str)
-            else:
-                logger.info("Conectando usando configuración local hardcoded...")
-                db_config = {
-                    'host': os.environ.get("DB_HOST", "localhost"),
-                    'port': int(os.environ.get("DB_PORT", 5432)),
-                    'database': os.environ.get("DB_NAME", "londrina_comercio"),
-                    'user': os.environ.get("DB_USER", "postgres"),
-                    'password': os.environ.get("DB_PASSWORD", "postgres")
-                }
-                conn = psycopg2.connect(**db_config)
-        logger.info("Conexión a la base de datos establecida correctamente")
-        return conn
-    except Exception as e:
-        logger.error(f"Error al conectar a la base de datos: {e}")
-        raise
 
-def autodetectar_tabla_lojas(conn: psycopg2.extensions.connection) -> str:
-    """Autodetección de tabla que contiene datos de locales comerciales"""
-    cursor = conn.cursor()
+# ==============================================================================
+# GEOCODING FORWARD
+# ==============================================================================
+def build_address(
+    logradouro: Optional[str],
+    numero: Optional[str],
+    bairro: Optional[str],
+    municipio: Optional[str],
+) -> str:
+    """Construye dirección estructurada para consulta Nominatim."""
+    parts = []
+    street = (logradouro or "").strip()
+    num = (numero or "").strip()
+    if street:
+        addr = street
+        if num and num not in ('0', 'S/N', 'SN', 's/n'):
+            addr += f", {num}"
+        parts.append(addr)
+    if bairro:
+        parts.append(bairro.strip())
+    if municipio:
+        parts.append(municipio.strip())
+    parts.append("PR")
+    parts.append("Brazil")
+    return ", ".join(parts)
 
-    # Prioridad: Buscar tablas conocidas de locales comerciales
-    query_conocidas = """
-    SELECT table_name 
-    FROM information_schema.tables 
-    WHERE table_name IN ('londrina_businesses', 'estabelecimentos')
-    AND table_schema = 'public'
-    ORDER BY CASE table_name 
-        WHEN 'londrina_businesses' THEN 1 
-        WHEN 'estabelecimentos' THEN 2 
-    END;
+
+def geocode_address(address: str) -> Optional[Tuple[float, float]]:
     """
-    cursor.execute(query_conocidas)
-    result = cursor.fetchone()
-    if result:
-        tabla = result[0]
-        logger.info(f"Tabla de locales preferida detectada: {tabla}")
-        return tabla
-
-    # Buscar tablas que contengan columnas típicas de locales comerciales
-    query = """
-    SELECT table_name
-    FROM information_schema.columns
-    WHERE (column_name LIKE '%loja%' OR column_name LIKE '%local%' OR column_name LIKE '%comercio%')
-    AND table_schema = 'public'
-    GROUP BY table_name
-    ORDER BY COUNT(*) DESC
-    LIMIT 1;
-    """
-
-    cursor.execute(query)
-    result = cursor.fetchone()
-
-    if result:
-        tabla = result[0]
-        logger.info(f"Tabla de locales detectada automáticamente: {tabla}")
-        return tabla
-
-    # Si no encuentra por nombre, buscar por columnas de coordenadas
-    query_coords = """
-    SELECT table_name
-    FROM information_schema.columns
-    WHERE (column_name LIKE '%lat%' OR column_name LIKE '%latitude%' OR column_name = 'y')
-    AND table_schema = 'public'
-    INTERSECT
-    SELECT table_name
-    FROM information_schema.columns
-    WHERE (column_name LIKE '%lon%' OR column_name LIKE '%longitude%' OR column_name = 'x')
-    AND table_schema = 'public'
-    LIMIT 1;
-    """
-
-    cursor.execute(query_coords)
-    result = cursor.fetchone()
-
-    if result:
-        tabla = result[0]
-        logger.info(f"Tabla de locales detectada por coordenadas: {tabla}")
-        return tabla
-
-    raise Exception("No se pudo autodetectar tabla de locales comerciales")
-
-def obtener_metadatos_postgis(conn: psycopg2.extensions.connection, tabla: str) -> Dict[str, Any]:
-    """Obtiene metadatos espaciales de la tabla usando funciones PostGIS"""
-    cursor = conn.cursor()
-
-    metadatos = {}
-
-    # Obtener el SRID de la geometría
-    try:
-        cursor.execute(f"SELECT ST_SRID(geom) FROM {tabla} LIMIT 1;")
-        srid_result = cursor.fetchone()
-        metadatos['srid'] = srid_result[0] if srid_result else 4326
-        logger.info(f"SRID detectado: {metadatos['srid']}")
-    except:
-        conn.rollback()
-        metadatos['srid'] = 4326
-        logger.warning("No se pudo obtener SRID, usando 4326 por defecto")
-
-    # Obtener el tipo de geometría
-    try:
-        cursor.execute(f"SELECT GeometryType(geom) FROM {tabla} LIMIT 1;")
-        geom_type_result = cursor.fetchone()
-        metadatos['geometry_type'] = geom_type_result[0] if geom_type_result else 'POINT'
-        logger.info(f"Tipo de geometría: {metadatos['geometry_type']}")
-    except:
-        conn.rollback()
-        metadatos['geometry_type'] = 'POINT'
-        logger.warning("No se pudo obtener tipo de geometría, usando POINT por defecto")
-
-    # Obtener el extent de la tabla
-    try:
-        cursor.execute(f"SELECT ST_Extent(geom) FROM {tabla};")
-        extent_result = cursor.fetchone()
-        metadatos['extent'] = extent_result[0] if extent_result else None
-        logger.info("Extent de la tabla obtenido")
-    except:
-        conn.rollback()
-        metadatos['extent'] = None
-        logger.warning("No se pudo obtener el extent de la tabla")
-
-    return metadatos
-
-def geocodificar_completo(lat: float, lon: float) -> Optional[Dict[str, Any]]:
-    """
-    Realiza una única consulta a Nominatim a zoom 18 y calcula
-    los niveles 2, 3 y 4 localmente en memoria.
+    Consulta Nominatim /search con la dirección completa.
+    Retorna (lat, lon) o None si no hay resultados.
     """
     params = {
-        'lat': lat,
-        'lon': lon,
+        'q': address,
         'format': 'json',
-        'addressdetails': 1,
-        'zoom': 18
+        'limit': 1,
+        'addressdetails': 0,
     }
-
     try:
-        response = requests.get(NOMINATIM_URL, params=params, headers=HEADERS, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-
-        resultado = {
-            'direccion': data.get('display_name', ''),
-            'tipo_lugar': data.get('type', ''),
-            'categoria': data.get('category', ''),
-            'importance': data.get('importance', 0)
-        }
-
-        # Extraer componentes de dirección
-        address = data.get('address', {})
-        resultado.update({
-            'calle': address.get('road', ''),
-            'numero': address.get('house_number', ''),
-            'codigo_postal': address.get('postcode', ''),
-            'barrio': address.get('suburb', address.get('neighbourhood', '')),
-            'ciudad': address.get('city', address.get('town', '')),
-            'estado': address.get('state', ''),
-            'pais': address.get('country', ''),
-            # Nivel 2
-            'distrito': address.get('district', ''),
-            'municipio': address.get('county', ''),
-            'region': address.get('state_district', ''),
-            'zona_comercial': '',
-            'area_metropolitana': '',
-            # Nivel 3
-            'macrozona': '',
-            'cuadrante': '',
-            'corredor_principal': '',
-            'polo_desarrollo': '',
-            # Nivel 4
-            'microregion': address.get('county', ''),
-            'mesoregion': address.get('state_district', ''),
-            'region_economica': '',
-            'cluster_economico': '',
-            'densidad_comercial': ''
-        })
-
-        # --- Lógica de Nivel 2 ---
-        ciudad = address.get('city', address.get('town', '')).lower()
-        if 'londrina' in ciudad:
-            if lat > -23.3:
-                resultado['zona_comercial'] = 'Zona Norte'
-            elif lat < -23.32:
-                resultado['zona_comercial'] = 'Zona Sul'
-            else:
-                resultado['zona_comercial'] = 'Centro'
-            resultado['area_metropolitana'] = 'Região Metropolitana de Londrina'
-
-        # --- Lógica de Nivel 3 ---
-        # Centro de Londrina aproximadamente: -23.31, -51.16
-        if -23.30 <= lat <= -23.29 and -51.17 <= lon <= -51.15:
-            resultado['macrozona'] = 'Centro Histórico'
-            resultado['cuadrante'] = 'Centro'
-        elif -23.29 <= lat <= -23.27 and -51.15 <= lon <= -51.13:
-            resultado['macrozona'] = 'Zona Nova'
-            resultado['cuadrante'] = 'Noreste'
-        elif -23.32 <= lat <= -23.30 and -51.18 <= lon <= -51.16:
-            resultado['macrozona'] = 'Zona Oeste'
-            resultado['cuadrante'] = 'Sudoeste'
-        elif -23.34 <= lat <= -23.32 and -51.15 <= lon <= -51.13:
-            resultado['macrozona'] = 'Zona Sul'
-            resultado['cuadrante'] = 'Sureste'
-        else:
-            resultado['macrozona'] = 'Zona Periférica'
-            resultado['cuadrante'] = 'Exterior'
-
-        # Corredor principal
-        if -51.17 <= lon <= -51.15:
-            resultado['corredor_principal'] = 'Av. Brasil'
-        elif -51.16 <= lon <= -51.14:
-            resultado['corredor_principal'] = 'Av. Londrina'
-        elif -23.32 <= lat <= -23.30:
-            resultado['corredor_principal'] = 'Av. Paulista'
-        else:
-            resultado['corredor_principal'] = 'Otros corredores'
-
-        # --- Lógica de Nivel 4 ---
-        estado = address.get('state', '').lower()
-        if 'paraná' in estado or 'parana' in estado:
-            resultado['region_economica'] = 'Núcleo Norte Paranaense'
-            resultado['cluster_economico'] = 'Área Metropolitana de Londrina'
-
-            # Determinar densidad comercial
-            if -23.32 <= lat <= -23.29 and -51.18 <= lon <= -51.14:
-                resultado['densidad_comercial'] = 'Alta'
-            elif -23.35 <= lat <= -23.27 and -51.20 <= lon <= -51.12:
-                resultado['densidad_comercial'] = 'Media'
-            else:
-                resultado['densidad_comercial'] = 'Baja'
-
-        logger.info(f"Geocodificación completa realizada para {lat}, {lon}")
-        return resultado
-    except Exception as e:
-        logger.error(f"Error en geocodificación completa: {e}")
+        resp = requests.get(
+            NOMINATIM_SEARCH_URL,
+            params=params,
+            headers=HEADERS,
+            timeout=15,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data and len(data) > 0:
+            lat = float(data[0]['lat'])
+            lon = float(data[0]['lon'])
+            return (lat, lon)
+        return None
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"  HTTP error en geocode: {e}")
         return None
 
-def procesar_locales(conn: psycopg2.extensions.connection, tabla: str) -> None:
-    """Procesa todos los locales comerciales y enriquece sus datos"""
+
+def fallback_coordinates(
+    cnpj_completo: str,
+    business_type: str,
+    municipio: Optional[str],
+) -> Tuple[float, float]:
+    """Coordenadas deterministas como fallback si Nominatim no responde."""
+    h = hashlib.md5(cnpj_completo.encode('utf-8')).hexdigest()
+    hash_val = int(h, 16)
+    city_key = (municipio or "").strip().lower()
+
+    for prefix, coords in CITY_CENTERS.items():
+        if prefix in city_key or city_key.startswith(prefix):
+            center_lng, center_lat = coords
+            lng_factor = ((hash_val % 1000) - 500) / 500.0
+            lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
+            lng_off = (lng_factor ** 3) * 0.015
+            lat_off = (lat_factor ** 3) * 0.015
+            return (center_lat + lat_off, center_lng + lng_off)
+
+    # Londrina hubs
+    if business_type == "tech":
+        hub_idx = [3, 2, 1, 5, 4][hash_val % 5]
+    else:
+        hub_idx = [1, 4, 2, 3, 5][hash_val % 5]
+    hub = HUBS[hub_idx]
+    center_lng, center_lat = hub["coords"]
+    lng_factor = ((hash_val % 1000) - 500) / 500.0
+    lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
+    lng_off = (lng_factor ** 3) * 0.0075
+    lat_off = (lat_factor ** 3) * 0.0075
+    return (center_lat + lat_off, center_lng + lng_off)
+
+
+# ==============================================================================
+# PROCESO PRINCIPAL
+# ==============================================================================
+def ensure_geom_column(conn: psycopg2.extensions.connection) -> None:
+    cursor = conn.cursor()
+    cursor.execute("CREATE EXTENSION IF NOT EXISTS postgis;")
+    cursor.execute("""
+        ALTER TABLE estabelecimentos
+        ADD COLUMN IF NOT EXISTS latitude DECIMAL(10, 8);
+    """)
+    cursor.execute("""
+        ALTER TABLE estabelecimentos
+        ADD COLUMN IF NOT EXISTS longitude DECIMAL(11, 8);
+    """)
+    cursor.execute("""
+        ALTER TABLE estabelecimentos
+        ADD COLUMN IF NOT EXISTS geocoded BOOLEAN DEFAULT FALSE;
+    """)
+    try:
+        cursor.execute("""
+            ALTER TABLE estabelecimentos
+            ADD COLUMN IF NOT EXISTS geom geometry(Point, 4326);
+        """)
+    except Exception:
+        conn.rollback()
+    conn.commit()
+    cursor.close()
+
+
+def geocode_all_pending(conn: psycopg2.extensions.connection) -> Tuple[int, int, int]:
+    """
+    Itera sobre estabelecimientos sin geocodificar y les asigna
+    coordenadas reales via Nominatim forward geocoding.
+    Retorna (geocodificados, fallbacks, errores).
+    """
+    ensure_geom_column(conn)
     cursor = conn.cursor()
 
-    # Actualizar tabla con nueva columna si no existe
-    try:
-        cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS datos_enriquecidos JSONB;")
-        cursor.execute(f"ALTER TABLE {tabla} ADD COLUMN IF NOT EXISTS enriquecido BOOLEAN DEFAULT FALSE;")
-        conn.commit()
-        logger.info("Columnas de enriquecimiento creadas o verificadas")
-    except Exception as e:
-        logger.error(f"Error al crear columnas de enriquecimiento: {e}")
-        conn.rollback()
+    # Obtener registros pendientes
+    cursor.execute("""
+        SELECT id, cnpj_completo, logradouro, numero,
+               bairro, municipio, business_type
+        FROM estabelecimentos
+        WHERE (geocoded IS NULL OR geocoded = FALSE)
+          AND situacao_cadastral = 2
+        ORDER BY id
+    """)
+    pendientes = cursor.fetchall()
+    total = len(pendientes)
+    logger.info(f"Registros pendientes de geocodificar: {total}")
 
-    # Obtener todos los locales sin datos enriquecidos
-    query = f"""
-    SELECT id, ST_Y(geom) as lat, ST_X(geom) as lon
-    FROM {tabla}
-    WHERE enriquecido IS NULL OR enriquecido = FALSE
-    ORDER BY id;
-    """
+    if total == 0:
+        cursor.close()
+        return (0, 0, 0)
 
-    cursor.execute(query)
-    locales = cursor.fetchall()
+    geocoded_count = 0
+    fallback_count = 0
+    error_count = 0
 
-    logger.info(f"Procesando {len(locales)} locales comerciales...")
+    for i, row in enumerate(pendientes, 1):
+        row_id, cnpj_completo, logradouro, numero, bairro, municipio, business_type = row
+        btype = business_type or "tech"
 
-    locales_procesados = 0
+        address = build_address(logradouro, numero, bairro, municipio)
+        logger.info(f"[{i}/{total}] ID={row_id} Geocode: \"{address[:80]}...\"")
 
-    for local_id, lat, lon in locales:
+        lat, lon = None, None
+        source = None
+
         try:
-            logger.info(f"Procesando local ID {local_id} ({lat}, {lon})")
-
-            # Obtener datos usando la función de geocodificación única optimizada
-            datos_combinados = geocodificar_completo(lat, lon)
-            time.sleep(1.1)  # Respetar límites de rate de Nominatim (1 request por segundo)
-
-            # Guardar en la base de datos
-            if datos_combinados:
-                cursor.execute(
-                    f"UPDATE {tabla} SET datos_enriquecidos = %s, enriquecido = TRUE WHERE id = %s",
-                    (json.dumps(datos_combinados, ensure_ascii=False), local_id)
-                )
-                conn.commit()
-                logger.info(f"Local ID {local_id} enriquecido correctamente")
-                locales_procesados += 1
+            result = geocode_address(address)
+            if result:
+                lat, lon = result
+                source = "nominatim"
             else:
-                logger.warning(f"No se pudieron obtener datos para el local ID {local_id}")
-
+                logger.warning(f"  Sin resultados Nominatim para ID={row_id}, usando fallback")
         except Exception as e:
-            logger.error(f"Error al procesar local ID {local_id}: {e}")
-            conn.rollback()
+            logger.error(f"  Error geocoding ID={row_id}: {e}")
 
-    logger.info(f"Proceso completado. {locales_procesados} locales procesados exitosamente.")
+        if lat is None or lon is None:
+            # Fallback determinista
+            lat, lon = fallback_coordinates(cnpj_completo, btype, municipio)
+            source = "fallback"
+            fallback_count += 1
+        else:
+            geocoded_count += 1
+
+        # Actualizar DB
+        try:
+            cursor.execute("""
+                UPDATE estabelecimentos
+                SET latitude = %s,
+                    longitude = %s,
+                    geom = ST_SetSRID(ST_MakePoint(%s, %s), 4326),
+                    geocoded = TRUE
+                WHERE id = %s
+            """, (lat, lon, lon, lat, row_id))
+        except Exception as e:
+            logger.error(f"  DB update error ID={row_id}: {e}")
+            conn.rollback()
+            error_count += 1
+            continue
+
+        # Checkpoint periódico
+        if i % CHECKPOINT_INTERVAL == 0:
+            conn.commit()
+            logger.info(f"  Checkpoint: {i}/{total} procesados")
+
+        # Rate limit Nominatim
+        time.sleep(RATE_LIMIT_SLEEP)
+
+    # Commit final
+    conn.commit()
+    cursor.close()
+
+    logger.info(
+        f"Resumen: {geocoded_count} geocodificados, "
+        f"{fallback_count} fallback, {error_count} errores"
+    )
+    return (geocoded_count, fallback_count, error_count)
+
 
 def main():
-    """Función principal"""
+    """Función principal."""
+    logger.info("=" * 60)
+    logger.info("  Geocodificador Forward Nominatim - estabelecimentos")
+    logger.info("=" * 60)
+
     try:
-        # Conectar a la base de datos
-        conn = conectar_db()
-
-        # Autodetectar tabla de locales
-        tabla_locales = autodetectar_tabla_lojas(conn)
-
-        # Obtener metadatos PostGIS
-        metadatos = obtener_metadatos_postgis(conn, tabla_locales)
-        logger.info(f"Metadatos PostGIS: {metadatos}")
-
-        # Procesar locales
-        procesar_locales(conn, tabla_locales)
-
-        # Cerrar conexión
+        conn = get_db_connection()
+        ok, fallback, err = geocode_all_pending(conn)
         conn.close()
-        logger.info("Proceso de enriquecimiento finalizado correctamente")
 
+        logger.info("=" * 60)
+        logger.info(f"  Total procesados: {ok + fallback + err}")
+        logger.info(f"  Nominatim:     {ok}")
+        logger.info(f"  Fallback:      {fallback}")
+        logger.info(f"  Errores:       {err}")
+        logger.info("=" * 60)
+        logger.info("Geocodificación completada.")
     except Exception as e:
-        logger.error(f"Error en el proceso principal: {e}")
-        raise
+        logger.error(f"Error fatal: {e}")
+        sys.exit(1)
+
 
 if __name__ == "__main__":
     main()
