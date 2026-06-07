@@ -122,8 +122,8 @@ export default function MapView({
     longitude: -51.1628,
     latitude: -23.3102,
     zoom: 13.5,
-    pitch: 20,
-    bearing: 0,
+    pitch: 62,
+    bearing: -15,
   });
 
   // Connection & Offline States
@@ -613,6 +613,39 @@ export default function MapView({
               </div>
             </Marker>
           )}
+
+          {/* 3D Buildings Extrusion Layer */}
+          <Layer
+            id="3d-buildings"
+            source="openmaptiles"
+            source-layer="building"
+            type="fill-extrusion"
+            minzoom={13}
+            paint={{
+              "fill-extrusion-color": [
+                "interpolate",
+                ["linear"],
+                ["get", "height"],
+                0, "#0b0b14", // deep dark purple-blue
+                50, "#1c1c2e" // muted dark indigo grey
+              ],
+              "fill-extrusion-height": [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                13, 0,
+                14.5, ["coalesce", ["get", "render_height"], ["get", "height"], 15]
+              ],
+              "fill-extrusion-base": [
+                "interpolate",
+                ["linear"],
+                ["zoom"],
+                13, 0,
+                14.5, ["coalesce", ["get", "render_min_height"], ["get", "min_height"], 0]
+              ],
+              "fill-extrusion-opacity": 0.45
+            }}
+          />
 
           {/* 1. Heatmap */}
           {showHeatmap && heatmapData && (
