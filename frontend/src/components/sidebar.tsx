@@ -9,13 +9,13 @@ import {
   Eye, 
   EyeOff, 
   Search, 
-  Store, 
   Sparkles, 
   HelpCircle,
-  UtensilsCrossed,
   LayoutGrid,
   Cpu,
-  Wrench
+  Wrench,
+  Code,
+  Server
 } from "lucide-react";
 import TechBusinessPanel from "./tech-business-panel";
 
@@ -43,8 +43,8 @@ interface SidebarProps {
   setShowHeatmap: (show: boolean) => void;
   showClusters: boolean;
   setShowClusters: (show: boolean) => void;
-  selectedType: "all" | "retail" | "gastronomy" | "tech" | "repairs";
-  setSelectedType: (type: "all" | "retail" | "gastronomy" | "tech" | "repairs") => void;
+  selectedType: "all" | "software" | "support" | "repairs";
+  setSelectedType: (type: "all" | "software" | "support" | "repairs") => void;
   apiBaseUrl: string;
   heatmapData?: any;
 }
@@ -134,10 +134,10 @@ export default function Sidebar({
           </div>
           <div>
             <h1 className="text-lg font-bold tracking-tight text-white leading-none">
-              Londrina
+              Londrina Tech
             </h1>
-            <span className="text-[11px] font-semibold text-primary uppercase tracking-widest">
-              Radar Comercial
+            <span className="text-[10px] font-semibold text-primary uppercase tracking-widest">
+              Radar de Asistencia y TI
             </span>
           </div>
         </div>
@@ -194,14 +194,14 @@ export default function Sidebar({
         {/* Sectores Interactivos (Glassmorphism Tab Selector) */}
         <div className="space-y-2">
           <h2 className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider flex items-center gap-1.5">
-            <Store className="w-3.5 h-3.5 text-primary/70" /> Filtrar por Sector
+            <Cpu className="w-3.5 h-3.5 text-primary/70" /> Filtrar por Especialidad
           </h2>
-          <div className="grid grid-cols-5 gap-1 p-1 bg-zinc-950/60 border border-slate-800/80 rounded-xl relative">
+          <div className="grid grid-cols-4 gap-1 p-1 bg-zinc-950/60 border border-slate-800/80 rounded-xl relative">
             <button
               onClick={() => setSelectedType("all")}
               className={`py-2 px-1 rounded-lg text-[8px] font-black tracking-wide uppercase transition-all duration-300 cursor-pointer flex flex-col items-center justify-center gap-1 ${
                 selectedType === "all"
-                  ? "bg-primary text-white shadow-[0_0_12px_rgba(255,90,54,0.35)]"
+                  ? "bg-primary text-black shadow-[0_0_12px_rgba(0,242,254,0.35)] font-black"
                   : "text-muted-foreground hover:text-white hover:bg-white/5"
               }`}
             >
@@ -209,54 +209,43 @@ export default function Sidebar({
               <span>Todos</span>
             </button>
             <button
-              onClick={() => setSelectedType("retail")}
+              onClick={() => setSelectedType("software")}
               className={`py-2 px-1 rounded-lg text-[8px] font-black tracking-wide uppercase transition-all duration-300 cursor-pointer flex flex-col items-center justify-center gap-1 ${
-                selectedType === "retail"
-                  ? "bg-primary text-white shadow-[0_0_12px_rgba(255,90,54,0.35)]"
+                selectedType === "software"
+                  ? "bg-primary text-black shadow-[0_0_12px_rgba(0,242,254,0.35)] font-black"
                   : "text-muted-foreground hover:text-white hover:bg-white/5"
               }`}
             >
-              <Store className="w-3.5 h-3.5" />
-              <span>Retail</span>
+              <Code className="w-3.5 h-3.5" />
+              <span>Software</span>
             </button>
             <button
-              onClick={() => setSelectedType("gastronomy")}
+              onClick={() => setSelectedType("support")}
               className={`py-2 px-1 rounded-lg text-[8px] font-black tracking-wide uppercase transition-all duration-300 cursor-pointer flex flex-col items-center justify-center gap-1 ${
-                selectedType === "gastronomy"
-                  ? "bg-primary text-white shadow-[0_0_12px_rgba(255,90,54,0.35)]"
+                selectedType === "support"
+                  ? "bg-primary text-black shadow-[0_0_12px_rgba(0,242,254,0.35)] font-black"
                   : "text-muted-foreground hover:text-white hover:bg-white/5"
               }`}
             >
-              <UtensilsCrossed className="w-3.5 h-3.5" />
-              <span>Gastro</span>
-            </button>
-            <button
-              onClick={() => setSelectedType("tech")}
-              className={`py-2 px-1 rounded-lg text-[8px] font-black tracking-wide uppercase transition-all duration-300 cursor-pointer flex flex-col items-center justify-center gap-1 ${
-                selectedType === "tech"
-                  ? "bg-primary text-white shadow-[0_0_12px_rgba(255,90,54,0.35)]"
-                  : "text-muted-foreground hover:text-white hover:bg-white/5"
-              }`}
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              <span>Tech</span>
+              <Server className="w-3.5 h-3.5" />
+              <span>Soporte TI</span>
             </button>
             <button
               onClick={() => setSelectedType("repairs")}
               className={`py-2 px-1 rounded-lg text-[8px] font-black tracking-wide uppercase transition-all duration-300 cursor-pointer flex flex-col items-center justify-center gap-1 ${
                 selectedType === "repairs"
-                  ? "bg-primary text-white shadow-[0_0_12px_rgba(255,90,54,0.35)]"
+                  ? "bg-primary text-black shadow-[0_0_12px_rgba(0,242,254,0.35)] font-black"
                   : "text-muted-foreground hover:text-white hover:bg-white/5"
               }`}
             >
               <Wrench className="w-3.5 h-3.5" />
-              <span>Soporte</span>
+              <span>Hardware</span>
             </button>
           </div>
         </div>
 
-        {/* Tech Business Panel — visible only when Tech sector is selected */}
-        {selectedType === "tech" && (
+        {/* Tech Business Panel — visible when software or support is selected */}
+        {(selectedType === "software" || selectedType === "support") && (
           <TechBusinessPanel apiBaseUrl={apiBaseUrl} />
         )}
 
@@ -280,7 +269,7 @@ export default function Sidebar({
             <div>
               <span className="text-[10px] text-muted-foreground block font-medium">Lojas Totales</span>
               <span className="text-sm font-bold text-white flex items-center gap-1">
-                <Store className="w-3.5 h-3.5 text-primary" />
+                <Cpu className="w-3.5 h-3.5 text-primary" />
                 {isLoading ? "..." : stats.totalLojas}
               </span>
             </div>

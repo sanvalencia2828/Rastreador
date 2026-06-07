@@ -28,44 +28,44 @@ interface MapViewProps {
   mapRef: React.RefObject<MapRef | null>;
   showHeatmap: boolean;
   showClusters: boolean;
-  selectedType: "all" | "retail" | "gastronomy" | "tech" | "repairs";
+  selectedType: "all" | "software" | "support" | "repairs";
 }
 
 const HUB_METADATA: Record<number, { name: string; zone: string; desc: string; densityLabel: string; typeBias: string }> = {
   1: {
-    name: "Centro (Calçadão)",
+    name: "Centro (Peatonal)",
     zone: "Zona Central",
-    desc: "Principal eje histórico peatonal de Londrina, con un mix de tiendas masivas y comercio tradicional.",
-    densityLabel: "Alta concentración de retail masivo, calzado y tiendas departamentales de gran volumen.",
-    typeBias: "Comercio Minorista / Tiendas de Ropa"
+    desc: "Eje peatonal central con alta densidad de talleres de servicio técnico de hardware y soporte express.",
+    densityLabel: "Gran volumen de tiendas de reparación y venta de accesorios para móviles y periféricos.",
+    typeBias: "Soporte TI & Reparación Express"
   },
   2: {
     name: "Gleba Palhano (Av. Ayrton Senna)",
     zone: "Zona Sur",
-    desc: "Polo de gastronomía y servicios ejecutivos premium.",
-    densityLabel: "Boutiques modernas, cafeterías y restaurantes premium.",
-    typeBias: "Gastronomía Premium & Boutiques"
+    desc: "Polo corporativo de startups, consultoras de desarrollo de software y servicios TI empresariales.",
+    densityLabel: "Alta presencia de empresas de ingeniería de software corporativo y consultorías en la nube.",
+    typeBias: "Desarrollo de Software / SaaS"
   },
   3: {
     name: "Jardim Guanabara (Av. Higienópolis)",
     zone: "Zona Centro-Sur",
-    desc: "Polo de gastronomía y servicios ejecutivos.",
-    densityLabel: "Restaurantes ejecutivos, bares premium y entidades financieras.",
-    typeBias: "Gastronomía Ejecutiva y Servicios"
+    desc: "Polo mixto con consultoras de software, integradores de redes y soporte corporativo de sistemas.",
+    densityLabel: "Despachos de ingeniería de sistemas, redes inalámbricas y soporte corporativo.",
+    typeBias: "Consultoría TI & Redes"
   },
   4: {
     name: "Zona Norte (Av. Saul Elkind)",
     zone: "Zona Norte",
-    desc: "Gran concentración de retail masivo.",
-    densityLabel: "Tiendas de vestuario popular, centros de abastecimiento y retail regional.",
-    typeBias: "Retail Popular y Servicios"
+    desc: "Área comercial con alta densidad de servicios técnicos de reparación de computadores y electrodomésticos.",
+    densityLabel: "Alta concentración de talleres locales de reparación de computadoras y servicio autorizado multimarca.",
+    typeBias: "Asistencia de Hardware y Computadores"
   },
   5: {
     name: "Zona Leste (Av. Bandeirantes)",
     zone: "Zona Este",
-    desc: "Polo médico y comercial gastronómico de paso.",
-    densityLabel: "Clínicas médicas, farmacias especializadas y centros culinarios de paso.",
-    typeBias: "Salud y Gastronomía al paso"
+    desc: "Polo comercial enfocado en asistencia técnica de equipos de comunicación, telefonía y automatización.",
+    densityLabel: "Servicio técnico oficial de redes, telefonía y automatización comercial.",
+    typeBias: "Reparación de Comunicaciones"
   }
 };
 
@@ -525,20 +525,20 @@ export default function MapView({
   const getSectorDensityLabel = (lojasCount: number) => {
     if (lojasCount === 0) return "Sin comercios activos detectados en esta zona.";
     if (selectedType === "all") return activeMeta?.densityLabel || `Zona comercial consolidada con ${lojasCount} locales.`;
-    const typeLabel = selectedType === "retail" 
-      ? "Comercio" 
-      : selectedType === "gastronomy" 
-        ? "Gastronomía" 
-        : selectedType === "tech" 
-          ? "Tecnología" 
-          : "Asistencia Técnica";
-    const nounLabel = selectedType === "tech" 
-      ? "empresas de tecnología activas" 
-      : selectedType === "repairs" 
-        ? "talleres de soporte técnico activos" 
-        : selectedType === "retail"
-          ? "locales comerciales activos"
-          : "puntos culinarios activos";
+    const typeLabel = selectedType === "software" 
+      ? "Desarrollo de Software" 
+      : selectedType === "support" 
+        ? "Soporte TI" 
+        : selectedType === "repairs" 
+          ? "Hardware" 
+          : "Servicios Tecnológicos";
+    const nounLabel = selectedType === "software" 
+      ? "empresas de desarrollo de software activas" 
+      : selectedType === "support" 
+        ? "empresas de soporte TI activas" 
+        : selectedType === "repairs" 
+          ? "talleres de reparación de hardware activos"
+          : "locales tecnológicos activos";
     return `${typeLabel} en funcionamiento: ${lojasCount} ${nounLabel}.`;
   };
 
@@ -628,12 +628,12 @@ export default function MapView({
                     ["linear"],
                     ["heatmap-density"],
                     0, "rgba(0,0,50,0)",
-                    0.15, "rgba(0, 128, 255, 0.25)",
-                    0.35, "rgba(0, 242, 254, 0.6)",
-                    0.6, "rgba(0, 255, 128, 0.8)",
-                    0.8, "rgba(245, 166, 35, 0.9)",
-                    0.95, "rgba(255, 90, 54, 1)",
-                    1.0, "rgba(255, 235, 59, 1)"
+                    0.15, "rgba(45, 0, 90, 0.25)",
+                    0.35, "rgba(138, 43, 226, 0.55)",
+                    0.6, "rgba(0, 0, 255, 0.75)",
+                    0.8, "rgba(0, 191, 255, 0.85)",
+                    0.95, "rgba(0, 242, 254, 0.95)",
+                    1.0, "rgba(255, 255, 255, 1)"
                   ],
                   "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 3, 9, 9, 15, 28],
                   "heatmap-opacity": 0.85

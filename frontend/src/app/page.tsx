@@ -25,8 +25,8 @@ export default function DashboardPage() {
   const [showHeatmap, setShowHeatmap] = useState(true);
   const [showClusters, setShowClusters] = useState(true);
 
-  // Sector filter state ("all" | "retail" | "gastronomy" | "tech")
-  const [selectedType, setSelectedType] = useState<"all" | "retail" | "gastronomy" | "tech" | "repairs">("all");
+  // Sector filter state ("all" | "software" | "support" | "repairs")
+  const [selectedType, setSelectedType] = useState<"all" | "software" | "support" | "repairs">("all");
 
   // State for mobile view toggle ("map" | "list")
   const [mobileView, setMobileView] = useState<"map" | "list">("map");
@@ -116,9 +116,19 @@ export default function DashboardPage() {
     if (selectedType === "all") return heatmapData;
     return {
       ...heatmapData,
-      features: heatmapData.features.filter(
-        (f: any) => f.properties?.business_type === selectedType
-      ),
+      features: heatmapData.features.filter((f: any) => {
+        const cnae = String(f.properties?.cnae || "").trim();
+        if (selectedType === "software") {
+          return cnae === "6201501" || cnae === "6202300";
+        }
+        if (selectedType === "support") {
+          return cnae === "6209100";
+        }
+        if (selectedType === "repairs") {
+          return cnae === "9511800" || cnae === "9512600";
+        }
+        return false;
+      }),
     };
   }, [heatmapData, selectedType]);
 
@@ -131,9 +141,19 @@ export default function DashboardPage() {
     const counts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
 
     if (heatmapData && heatmapData.features) {
-      const sectorFeatures = heatmapData.features.filter(
-        (f: any) => f.properties?.business_type === selectedType
-      );
+      const sectorFeatures = heatmapData.features.filter((f: any) => {
+        const cnae = String(f.properties?.cnae || "").trim();
+        if (selectedType === "software") {
+          return cnae === "6201501" || cnae === "6202300";
+        }
+        if (selectedType === "support") {
+          return cnae === "6209100";
+        }
+        if (selectedType === "repairs") {
+          return cnae === "9511800" || cnae === "9512600";
+        }
+        return false;
+      });
       for (const f of sectorFeatures) {
         if (f.geometry && f.geometry.coordinates) {
           const [lng, lat] = f.geometry.coordinates;
