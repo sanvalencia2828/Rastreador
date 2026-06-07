@@ -240,7 +240,7 @@ def assign_geographic_coords(cnpj: str, business_type: str, municipio: Optional[
     If it is in a nearby city, it maps it around the city's centroid.
     """
     # Create a md5 hash of the CNPJ to have deterministic geographic placement
-    h = hashlib.md5(cnpj.encode('utf-8')).hexdigest()
+    h = hashlib.md5(str(cnpj).encode('utf-8')).hexdigest()
     hash_val = int(h, 16)
 
     city_key = municipio.strip().lower() if municipio else ""
@@ -443,7 +443,7 @@ def get_emergent_clusters():
 
     counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
     for biz in businesses:
-        cnpj = biz.get("cnpj_basico", "00000000") + biz.get("cnpj_ordem", "0000") + biz.get("cnpj_dv", "00")
+        cnpj = str(biz.get("cnpj_basico", "00000000")) + str(biz.get("cnpj_ordem", "0000")) + str(biz.get("cnpj_dv", "00"))
         biz_type = biz.get("business_type", "retail")
         h = hashlib.md5(cnpj.encode('utf-8')).hexdigest()
         hash_val = int(h, 16)
