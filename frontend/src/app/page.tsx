@@ -1,5 +1,6 @@
 "use client";
 
+// Tech-only filters for Londrina Tech Radar: all, software, support, repairs (no gastronomy or general retail)
 import React, { useState, useRef, useMemo } from "react";
 import useSWR from "swr";
 import { MapRef } from "react-map-gl/maplibre";

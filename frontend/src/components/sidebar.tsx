@@ -1,5 +1,6 @@
 "use client";
 
+// Cyberpunk-themed sidebar with pure technology focus (no Gastronomía or Retail)
 import React, { useState, useMemo } from "react";
 import { 
   Radar, 

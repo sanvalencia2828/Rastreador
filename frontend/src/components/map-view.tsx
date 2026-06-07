@@ -122,7 +122,7 @@ export default function MapView({
     longitude: -51.1628,
     latitude: -23.3102,
     zoom: 13.5,
-    pitch: 62,
+    pitch: 65,
     bearing: -15,
   });
 
@@ -587,6 +587,13 @@ export default function MapView({
       <div className="flex-1 w-full relative">
         <Map
           ref={mapRef}
+          initialViewState={{
+            longitude: -51.1628,
+            latitude: -23.3102,
+            zoom: 13.5,
+            pitch: 65,
+            bearing: -15,
+          }}
           {...viewState}
           onMove={(evt: any) => setViewState(evt.viewState)}
           onMoveEnd={handleMoveEnd}
@@ -622,13 +629,7 @@ export default function MapView({
             type="fill-extrusion"
             minzoom={13}
             paint={{
-              "fill-extrusion-color": [
-                "interpolate",
-                ["linear"],
-                ["get", "height"],
-                0, "#0b0b14", // deep dark purple-blue
-                50, "#1c1c2e" // muted dark indigo grey
-              ],
+              "fill-extrusion-color": "#1a1a2e",
               "fill-extrusion-height": [
                 "interpolate",
                 ["linear"],
@@ -643,7 +644,7 @@ export default function MapView({
                 13, 0,
                 14.5, ["coalesce", ["get", "render_min_height"], ["get", "min_height"], 0]
               ],
-              "fill-extrusion-opacity": 0.45
+              "fill-extrusion-opacity": 0.65
             }}
           />
 
@@ -660,13 +661,11 @@ export default function MapView({
                     "interpolate",
                     ["linear"],
                     ["heatmap-density"],
-                    0, "rgba(0,0,50,0)",
-                    0.15, "rgba(45, 0, 90, 0.25)",
-                    0.35, "rgba(138, 43, 226, 0.55)",
-                    0.6, "rgba(0, 0, 255, 0.75)",
-                    0.8, "rgba(0, 191, 255, 0.85)",
-                    0.95, "rgba(0, 242, 254, 0.95)",
-                    1.0, "rgba(255, 255, 255, 1)"
+                    0, "rgba(0,0,0,0)",
+                    0.2, "rgba(138, 43, 226, 0.4)", // Púrpura neón
+                    0.5, "rgba(0, 0, 139, 0.7)",    // Azul profundo
+                    0.8, "rgba(0, 242, 254, 0.9)",   // Cian neón
+                    1.0, "rgba(255, 255, 255, 1.0)"  // Blanco brillante
                   ],
                   "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 0, 3, 9, 9, 15, 28],
                   "heatmap-opacity": 0.85

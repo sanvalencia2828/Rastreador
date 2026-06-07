@@ -67,9 +67,7 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-8000}
       PORT: 3000
-    ports:
-      # Producción mapea 3000:3000. Si cambias a 'development', usa 3000:3001 (debido al script dev en package.json)
-      - "${PORT:-3000}:3000"
+    ports: ["3005:3000"]
     healthcheck:
       test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', (r) => { if (r.statusCode === 200) process.exit(0); else process.exit(1); }).on('error', () => process.exit(1))"]
       interval: 15s
