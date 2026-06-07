@@ -35,15 +35,11 @@ MUN_NAME_MAP = {
 }
 
 TECH_CNAE_CODES = {
-    6201501, 6202300, 6203100, 6204000, 6209100, 6311900, 6319400,
-    4751201, 4751202, 4752100, 4753900,
-    4651400, 4652200, 4652201, 4652202,
-    6110801, 6110802, 6110803, 6120501, 6120502, 6130200, 6190601, 6190602, 6190699,
-    9511800, 9512600, 8599603,
+    6201501, 6202300, 6209100
 }
 
 REPAIRS_CNAE_CODES = {
-    9511800, 9512600, 9521500, 9529104, 9529199,
+    9511800, 9512600
 }
 
 ALL_CNAES = TECH_CNAE_CODES | REPAIRS_CNAE_CODES
@@ -82,7 +78,7 @@ def normalize_municipio(raw: Optional[str]) -> Optional[str]:
         return fixed.upper()
     except (UnicodeEncodeError, UnicodeDecodeError, LookupError):
         return raw.upper()
-    return raw.upper()
+
 
 
 def get_db_connection() -> psycopg2.extensions.connection:
@@ -123,9 +119,9 @@ def ensure_table_schema(conn: psycopg2.extensions.connection) -> None:
 # ============================================================
 def main():
     if hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stdout.reconfigure(encoding='utf-8')  # type: ignore
     if hasattr(sys.stderr, 'reconfigure'):
-        sys.stderr.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')  # type: ignore
 
     print("=" * 60)
     print("  Data Pipeline CNPJ - Sector Tech (DuckDB → PostgreSQL)")

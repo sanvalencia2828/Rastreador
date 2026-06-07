@@ -70,7 +70,7 @@ const HUB_METADATA: Record<number, { name: string; zone: string; desc: string; d
 };
 
 const getApiUrl = (): string => {
-  const defaultUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
+  const defaultUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
   if (typeof window !== "undefined") {
     const hostname = window.location.hostname;
     try {

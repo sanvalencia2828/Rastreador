@@ -1,0 +1,21 @@
+# ==============================================================================
+# Development Dependencies (requirements-dev.txt)
+# ==============================================================================
+# Install these packages locally for type stub assistance, linting, and formatting.
+# Run: pip install -r requirements-dev.txt
+# Do not deploy these packages to production (Railway).
+# ==============================================================================
+
+# Base production requirements
+-r requirements.txt
+
+# Type Stubs & Annotations
+types-psycopg2>=2.9.21
+types-requests>=2.31.0
+pandas-stubs>=2.0.0
+
+# Linters, Formatters & Type Checkers
+pyright>=1.1.300
+ruff>=0.1.0
+black>=23.0.0
+mypy>=1.4.0

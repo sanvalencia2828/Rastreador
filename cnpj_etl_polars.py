@@ -47,15 +47,14 @@ REGIONAL_IBGE_CODES = [4113700, 4103701, 4109807, 4101408, 4112108]
 
 # CNAE codes for Tech + Repairs ONLY
 TECH_CNAE_CODES = [
-    '6201501', '6202300', '6203100', '6204000', '6209100', '6311900', '6319400',
-    '4751201', '4751202', '4752100', '4753900',
-    '4651400', '4652200', '4652201', '4652202',
-    '6110801', '6110802', '6110803', '6120501', '6120502', '6130200', '6190601', '6190602', '6190699',
-    '9511800', '9512600', '8599603',
+    '6201501',  # Desenvolvimento de programas de computador sob encomenda
+    '6202300',  # Desenvolvimento e licenciamento de programas de computador customizáveis
+    '6209100',  # Suporte técnico, manutenção e outros serviços em tecnologia da informação
 ]
 
 REPAIRS_CNAE_CODES = [
-    '9511800', '9512600', '9521500', '9529104', '9529199',
+    '9511800',  # Reparação e manutenção de computadores e de equipamentos periféricos
+    '9512600',  # Reparação e manutenção de equipamentos de comunicação
 ]
 
 VALID_CNAE_CODES = TECH_CNAE_CODES + REPAIRS_CNAE_CODES
@@ -144,7 +143,7 @@ def load_and_filter_tech_data(file_path: str) -> pl.DataFrame:
 
     # Filtrar
     filtered = df.with_columns(
-        pl.col("cnae_fiscal_principal").cast(pl.Utf8, strict=False),
+        pl.col("cnae_fiscal_principal").cast(pl.Utf8, strict=False).str.replace_all(r"[-/\s\.]", ""),
         pl.col("codigo_municipio").cast(pl.Int64, strict=False),
         pl.col("situacao_cadastral").cast(pl.Int64, strict=False),
     ).filter(

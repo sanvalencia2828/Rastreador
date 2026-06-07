@@ -40,3 +40,16 @@ max_lambda_size = "50mb"
 [tool.pyrefly]
 search-paths = ["."]
 
+[tool.pyright]
+include = [
+    "api.py",
+    "download_cnpj_pr.py",
+    "cnpj_etl_polars.py",
+    "enriquecer_lojas.py"
+]
+exclude = [
+    "**/node_modules",
+    "**/__pycache__",
+    "cnpj_downloader"
+]
+reportMissingTypeStubs = "none"
