@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "dev": "npm run dev --prefix frontend"
+  },
   "dependencies": {
     "lucide-react": "^1.16.0",
     "maplibre-gl": "^5.24.0",
