@@ -1,0 +1,32 @@
+# Exclude git repository and configuration files
+.git
+.gitignore
+.env
+.env.example
+.vscode
+.antigravitycli
+.claude
+
+# Exclude local package dependencies
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+build
+
+# Exclude large data files, databases, and temporary archives
+K3241.*
+*.zip
+*.csv
+*.json
+*.sql
+cnpj_data
+cnpj_downloader
+__pycache__
+**/__pycache__
+output
+temp_download.zip
+londrina_businesses.json
+londrina_businesses_cleaned.json
+db
