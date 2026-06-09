@@ -4,7 +4,7 @@ download_cnpj_pr.py
 ===================
 Pipeline ETL: DuckDB (dados-abertos-cnpj) → PostgreSQL (estabelecimentos) en Railway.
 Filtra estrictamente por CNAEs del sector tecnológico (Tech + Repairs)
-en la región metropolitana de Londrina.
+en la región metropolitana de Londrina y ciudades cercanas.
 
 Output: Tabla `estabelecimentos` con datos reales de Receita Federal,
 listos para geocodificar via enriquecer_lojas.py
@@ -24,7 +24,15 @@ from typing import List, Optional
 DB_FILE = "cnpj_data/dados_abertos_cnpj.db"
 REMOTE_GDRIVE_URL = "https://drive.usercontent.google.com/download?id=1SgMhyuMWgBWrrBc5H-Raj_-hJlK8k1y8&confirm=t"
 
-TARGET_MUNICIPIOS = ['LONDRINA', 'CAMBE', 'IBIPORA', 'APUCARANA', 'JANDAIA DO SUL']
+
+def load_env_list(env_key: str, default_value: str) -> List[str]:
+    raw_value = os.environ.get(env_key, default_value)
+    return [item.strip().upper() for item in raw_value.split(",") if item.strip()]
+
+TARGET_MUNICIPIOS = load_env_list(
+    "TARGET_MUNICIPIOS",
+    "LONDRINA,CAMBE,IBIPORA,APUCARANA,JANDAIA DO SUL"
+)
 
 MUN_NAME_MAP = {
     'LONDRINA': 'Londrina',
@@ -224,7 +232,7 @@ def main():
         if mun_normalized:
             municipio = MUN_NAME_MAP.get(mun_normalized, mun_normalized.title())
         else:
-            municipio = "Londrina"
+            municipio = "Unknown"
         mun_counts[municipio] = mun_counts.get(municipio, 0) + 1
 
         cnpj_basico_s = str(cnpj_basico).strip().zfill(8) if cnpj_basico else "00000000"

@@ -3,8 +3,8 @@
 ETL Script for Brazilian CNPJ Data Processing
 
 This script processes CNPJ (Cadastro Nacional da Pessoa Jurídica) data from the
-Brazilian Federal Revenue Service, filtering for businesses in Londrina/PR
-that are active and operate in retail or gastronomy sectors.
+Brazilian Federal Revenue Service, filtering for businesses in Londrina/PR and
+its nearby municipalities that are active and operate in retail or gastronomy sectors.
 
 Author: Claude Code (Data Engineering Assistant)
 Date: 2026-05-23
