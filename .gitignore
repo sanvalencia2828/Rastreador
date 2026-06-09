@@ -52,3 +52,7 @@ desktop.ini
 # Tooling
 .antigravitycli/
 *.zip
+
+# Git rewrite temporary state
+.git-rewrite/
+

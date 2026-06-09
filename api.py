@@ -11,6 +11,7 @@ import os
 import json
 import hashlib
 import sys
+import uuid
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -333,7 +334,7 @@ def get_heatmap_geojson():
 
     features = []
     for biz in businesses:
-        cnpj = biz.get("cnpj_basico", "00000000") + biz.get("cnpj_ordem", "0000") + biz.get("cnpj_dv", "00")
+        cnpj = format_cnpj(biz)
         biz_type = biz.get("business_type", "retail")
         municipio = biz.get("municipio")
 
@@ -345,6 +346,15 @@ def get_heatmap_geojson():
         else:
             coords = assign_geographic_coords(cnpj, biz_type, municipio)
         
+        porte_val = biz.get("porte_empresa")
+        porte_desc = "Otros"
+        if porte_val in [1, "1", "01"]:
+            porte_desc = "ME (Microempresa)"
+        elif porte_val in [3, "3", "03"]:
+            porte_desc = "EPP (Empresa de Pequeno Porte)"
+        elif porte_val in [5, "5", "05"]:
+            porte_desc = "Grande/Otros (Demais)"
+
         feature = {
             "type": "Feature",
             "geometry": {
@@ -356,8 +366,14 @@ def get_heatmap_geojson():
                 "nome_fantasia": biz.get("nome_fantasia", "Comercio"),
                 "business_type": biz_type,
                 "cnae": biz.get("cnae_fiscal", biz.get("cnae_fiscal_principal", "")),
+                "cnae_desc": biz.get("cnae_fiscal_descricao", ""),
                 "bairro": biz.get("bairro", "Centro"),
                 "logradouro": biz.get("logradouro", ""),
+                "numero": biz.get("numero", ""),
+                "cep": biz.get("cep", ""),
+                "telefone_1": biz.get("telefone_1", ""),
+                "porte_empresa": str(porte_val or ""),
+                "porte_desc": porte_desc,
                 "municipio": municipio or "Londrina"
             }
         }
