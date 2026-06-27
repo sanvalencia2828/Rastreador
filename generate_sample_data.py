@@ -11,49 +11,69 @@ from datetime import datetime
 # Sample data for testing
 SAMPLE_CNAE_CODES = [
     # Retail
-    '4711301', '4712100', '4721101', '4722901', '4751201', '4761001', '4771701', '4781400',
+    "4711301",
+    "4712100",
+    "4721101",
+    "4722901",
+    "4751201",
+    "4761001",
+    "4771701",
+    "4781400",
     # Gastronomy
-    '5611201', '5612100', '5620101',
+    "5611201",
+    "5612100",
+    "5620101",
     # Technology
-    '6201501', '6202300', '6203100', '6204000', '6209100', '6311900', '6319400',
+    "6201501",
+    "6202300",
+    "6203100",
+    "6204000",
+    "6209100",
+    "6311900",
+    "6319400",
     # Technical Assistance & Repairs (Support)
-    '9511800', '9512600', '9521500', '9529104', '9529199',
+    "9511800",
+    "9512600",
+    "9521500",
+    "9529104",
+    "9529199",
     # Others (should be filtered out)
-    '6411100', '8511101'
+    "6411100",
+    "8511101",
 ]
 
 SAMPLE_MUNICIPALITIES = [
-    (4113700, 'Londrina'),       # Target city
-    (4103701, 'Cambé'),          # Nearby metro city
-    (4109807, 'Ibiporã'),        # Nearby metro city
-    (4101408, 'Apucarana'),       # Nearby city
-    (4112108, 'Jandaia do Sul'),  # Nearby city
-    (3550308, 'São Paulo'),
-    (3304557, 'Rio de Janeiro'),
-    (4106902, 'Curitiba')
+    (4113700, "Londrina"),  # Target city
+    (4103701, "Cambé"),  # Nearby metro city
+    (4109807, "Ibiporã"),  # Nearby metro city
+    (4101408, "Apucarana"),  # Nearby city
+    (4112108, "Jandaia do Sul"),  # Nearby city
+    (3550308, "São Paulo"),
+    (3304557, "Rio de Janeiro"),
+    (4106902, "Curitiba"),
 ]
 
 SAMPLE_BUSINESS_NAMES = [
-    'Supermercado Central Ltda',
-    'Restaurante Sabores do Brasil',
-    'Padaria Pão Quente Ltda',
-    'Hotéis e Turismo S/A',
-    'Consultoria Empresarial ME',
-    'Tecnologia da Informação Ltda',
-    'Academia Fitness Center',
-    'Oficina Mecânica Auto Peças',
-    'Clínica Médica Saúde Total',
-    'Escola Infantil Sonho Meu',
-    'Londrina Tech Software ME',
-    'ByteCraft Consultoria TI',
-    'Paraná Cloud Services',
-    'SoftSoluções Desenvolvimento',
-    'WebFlow Portais e Mídia',
-    'Assistência Técnica Central Londrina',
-    'Conserto de Celular & Tablets ME',
-    'Reparação de Notebooks e PCs Eireli',
-    'Oficina Eletromóveis Paraná',
-    'Suporte Técnico & Informática'
+    "Supermercado Central Ltda",
+    "Restaurante Sabores do Brasil",
+    "Padaria Pão Quente Ltda",
+    "Hotéis e Turismo S/A",
+    "Consultoria Empresarial ME",
+    "Tecnologia da Informação Ltda",
+    "Academia Fitness Center",
+    "Oficina Mecânica Auto Peças",
+    "Clínica Médica Saúde Total",
+    "Escola Infantil Sonho Meu",
+    "Londrina Tech Software ME",
+    "ByteCraft Consultoria TI",
+    "Paraná Cloud Services",
+    "SoftSoluções Desenvolvimento",
+    "WebFlow Portais e Mídia",
+    "Assistência Técnica Central Londrina",
+    "Conserto de Celular & Tablets ME",
+    "Reparação de Notebooks e PCs Eireli",
+    "Oficina Eletromóveis Paraná",
+    "Suporte Técnico & Informática",
 ]
 
 SAMPLE_STREETS = [
@@ -71,8 +91,9 @@ SAMPLE_STREETS = [
     "Rua Piauí",
     "Av. Duque de Caxias",
     "Av. Maringá",
-    "Av. Leste Oeste"
+    "Av. Leste Oeste",
 ]
+
 
 def generate_sample_data(num_records=1000):
     """Generate sample CNPJ data for testing"""
@@ -97,43 +118,48 @@ def generate_sample_data(num_records=1000):
 
         # Generate record
         record = {
-            'cnpj_basico': f'{random.randint(10000000, 99999999):08d}',
-            'cnpj_ordem': f'{random.randint(0, 9999):04d}',
-            'cnpj_dv': f'{random.randint(0, 99):02d}',
-            'identificador_matriz_filial': random.choice([1, 2]),  # 1=Matriz, 2=Filial
-            'nome_fantasia': random.choice(SAMPLE_BUSINESS_NAMES),
-            'situacao_cadastral': situacao_cadastral,
-            'data_situacao_cadastral': datetime.now().strftime('%Y%m%d'),
-            'motivo_situacao_cadastral': '00',
-            'nome_cidade_exterior': '',
-            'pais': '1058',  # Brazil
-            'data_inicio_atividade': '20100101',
-            'cnae_fiscal_principal': cnae_code,
-            'cnae_fiscal_secundaria': '',
-            'tipo_logradouro': 'RUA',
-            'logradouro': 'Principal',
-            'numero': str(random.randint(1, 2000)),
-            'complemento': random.choice(['', 'SALA 101', 'LOJA A', 'BL A']),
-            'bairro': 'Centro',
-            'cep': f'{random.randint(80000000, 89999999):08d}',
-            'uf': 'PR' if cod_municipio == 4113700 else random.choice(['SP', 'RJ', 'RS']),
-            'codigo_municipio': cod_municipio,
-            'municipio': municipio,
-            'ddd_1': '43' if cod_municipio == 4113700 else str(random.randint(11, 99)),
-            'telefone_1': f'{random.randint(30000000, 39999999):08d}',
-            'ddd_2': '',
-            'telefone_2': '',
-            'ddd_fax': '',
-            'fax': '',
-            'correio_eletronico': f'contato{random.randint(1, 1000)}@empresa.com.br',
-            'situacao_especial': '',
-            'data_situacao_especial': '',
-            'porte_empresa': random.choice(['01', '01', '01', '01', '03', '03', '05'])  # ~57% Micro, ~29% Small, ~14% Other
+            "cnpj_basico": f"{random.randint(10000000, 99999999):08d}",
+            "cnpj_ordem": f"{random.randint(0, 9999):04d}",
+            "cnpj_dv": f"{random.randint(0, 99):02d}",
+            "identificador_matriz_filial": random.choice([1, 2]),  # 1=Matriz, 2=Filial
+            "nome_fantasia": random.choice(SAMPLE_BUSINESS_NAMES),
+            "situacao_cadastral": situacao_cadastral,
+            "data_situacao_cadastral": datetime.now().strftime("%Y%m%d"),
+            "motivo_situacao_cadastral": "00",
+            "nome_cidade_exterior": "",
+            "pais": "1058",  # Brazil
+            "data_inicio_atividade": "20100101",
+            "cnae_fiscal_principal": cnae_code,
+            "cnae_fiscal_secundaria": "",
+            "tipo_logradouro": "RUA",
+            "logradouro": "Principal",
+            "numero": str(random.randint(1, 2000)),
+            "complemento": random.choice(["", "SALA 101", "LOJA A", "BL A"]),
+            "bairro": "Centro",
+            "cep": f"{random.randint(80000000, 89999999):08d}",
+            "uf": (
+                "PR" if cod_municipio == 4113700 else random.choice(["SP", "RJ", "RS"])
+            ),
+            "codigo_municipio": cod_municipio,
+            "municipio": municipio,
+            "ddd_1": "43" if cod_municipio == 4113700 else str(random.randint(11, 99)),
+            "telefone_1": f"{random.randint(30000000, 39999999):08d}",
+            "ddd_2": "",
+            "telefone_2": "",
+            "ddd_fax": "",
+            "fax": "",
+            "correio_eletronico": f"contato{random.randint(1, 1000)}@empresa.com.br",
+            "situacao_especial": "",
+            "data_situacao_especial": "",
+            "porte_empresa": random.choice(
+                ["01", "01", "01", "01", "03", "03", "05"]
+            ),  # ~57% Micro, ~29% Small, ~14% Other
         }
 
         data.append(record)
 
     return pd.DataFrame(data)
+
 
 def main():
     """Generate sample data files"""
@@ -143,28 +169,31 @@ def main():
     df = generate_sample_data(5000)
 
     # Save as CSV (semicolon separated like the real CNPJ data)
-    output_file = 'sample_estabelecimentos.csv'
-    df.to_csv(output_file, sep=';', index=False, header=False)
+    output_file = "sample_estabelecimentos.csv"
+    df.to_csv(output_file, sep=";", index=False, header=False)
 
     print(f"Sample data saved to {output_file}")
     print(f"Total records: {len(df)}")
 
     # Show some statistics
     target_cities_codes = [4113700, 4103701, 4109807, 4101408, 4112108]
-    metro_count = len(df[df['codigo_municipio'].isin(target_cities_codes)])
-    active_count = len(df[df['situacao_cadastral'] == 2])
-    retail_count = len(df[df['cnae_fiscal_principal'].isin(SAMPLE_CNAE_CODES[:8])])
-    gastronomy_count = len(df[df['cnae_fiscal_principal'].isin(SAMPLE_CNAE_CODES[8:11])])
-    tech_count = len(df[df['cnae_fiscal_principal'].isin(SAMPLE_CNAE_CODES[11:18])])
-    repairs_count = len(df[df['cnae_fiscal_principal'].isin(SAMPLE_CNAE_CODES[18:23])])
- 
-    print(f"\nStatistics:")
+    metro_count = len(df[df["codigo_municipio"].isin(target_cities_codes)])
+    active_count = len(df[df["situacao_cadastral"] == 2])
+    retail_count = len(df[df["cnae_fiscal_principal"].isin(SAMPLE_CNAE_CODES[:8])])
+    gastronomy_count = len(
+        df[df["cnae_fiscal_principal"].isin(SAMPLE_CNAE_CODES[8:11])]
+    )
+    tech_count = len(df[df["cnae_fiscal_principal"].isin(SAMPLE_CNAE_CODES[11:18])])
+    repairs_count = len(df[df["cnae_fiscal_principal"].isin(SAMPLE_CNAE_CODES[18:23])])
+
+    print("\nStatistics:")
     print(f"- Target regional businesses (Londrina + nearby): {metro_count}")
     print(f"- Active businesses: {active_count}")
     print(f"- Retail businesses: {retail_count}")
     print(f"- Gastronomy businesses: {gastronomy_count}")
     print(f"- Technology businesses: {tech_count}")
     print(f"- Technical Assistance (Repairs): {repairs_count}")
+
 
 if __name__ == "__main__":
     main()

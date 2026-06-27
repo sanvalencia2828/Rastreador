@@ -3,15 +3,14 @@
 Test script to validate the CNPJ ETL environment setup
 """
 
-import sys
 
 def test_dependencies():
     """Test if all required dependencies are installed"""
     dependencies = {
-        'pandas': 'import pandas as pd; print(f"Pandas version: {pd.__version__}")',
-        'polars': 'import polars as pl; print(f"Polars version: {pl.__version__}")',
-        'sqlalchemy': 'import sqlalchemy; print(f"SQLAlchemy version: {sqlalchemy.__version__}")',
-        'psycopg2': 'import psycopg2; print("psycopg2 imported successfully")'
+        "pandas": 'import pandas as pd; print(f"Pandas version: {pd.__version__}")',
+        "polars": 'import polars as pl; print(f"Polars version: {pl.__version__}")',
+        "sqlalchemy": 'import sqlalchemy; print(f"SQLAlchemy version: {sqlalchemy.__version__}")',
+        "psycopg2": 'import psycopg2; print("psycopg2 imported successfully")',
     }
 
     print("Testing dependencies...")
@@ -26,6 +25,7 @@ def test_dependencies():
             print(f"[ERROR] {dep_name}: {e}")
 
     print("\nDependency check completed.")
+
 
 if __name__ == "__main__":
     test_dependencies()

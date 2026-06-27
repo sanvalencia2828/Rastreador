@@ -5,6 +5,7 @@ Script to clean and validate existing CNPJ data in londrina_businesses.json
 
 import json
 
+
 def clean_and_validate_data(records):
     """
     Clean and validate the CNPJ data:
@@ -23,7 +24,11 @@ def clean_and_validate_data(records):
 
     for record in records:
         # Create a unique key from the CNPJ components
-        key = (str(record["cnpj_basico"]).strip(), str(record["cnpj_ordem"]).strip(), str(record["cnpj_dv"]).strip())
+        key = (
+            str(record["cnpj_basico"]).strip(),
+            str(record["cnpj_ordem"]).strip(),
+            str(record["cnpj_dv"]).strip(),
+        )
         if key in seen:
             duplicates_removed += 1
             continue
@@ -47,8 +52,12 @@ def clean_and_validate_data(records):
                 record[field] = str(record[field]).strip()
 
         # Ensure key fields are not empty
-        if record.get("municipio") and str(record.get("municipio")).strip() != "" and \
-           record.get("cnae_fiscal_principal") and str(record.get("cnae_fiscal_principal")).strip() != "":
+        if (
+            record.get("municipio")
+            and str(record.get("municipio")).strip() != ""
+            and record.get("cnae_fiscal_principal")
+            and str(record.get("cnae_fiscal_principal")).strip() != ""
+        ):
             cleaned_records.append(record)
 
     return cleaned_records, duplicates_removed
@@ -69,7 +78,7 @@ def main():
     with open("londrina_businesses_cleaned.json", "w", encoding="utf-8") as f:
         json.dump(cleaned_records, f, ensure_ascii=False, indent=2)
 
-    print(f"Registros limpios guardados en londrina_businesses_cleaned.json")
+    print("Registros limpios guardados en londrina_businesses_cleaned.json")
 
     # Print quality report
     print("\n" + "=" * 60)
@@ -78,7 +87,11 @@ def main():
     print(f"  Registros originales:     {len(all_records)}")
     print(f"  Registros duplicados:     {duplicates_removed}")
     print(f"  Registros limpios:        {len(cleaned_records)}")
-    print(f"  Porcentaje de limpieza:   {((len(all_records) - len(cleaned_records)) / len(all_records) * 100):.2f}%" if len(all_records) > 0 else "  Porcentaje de limpieza:   0%")
+    print(
+        f"  Porcentaje de limpieza:   {((len(all_records) - len(cleaned_records)) / len(all_records) * 100):.2f}%"
+        if len(all_records) > 0
+        else "  Porcentaje de limpieza:   0%"
+    )
     print("=" * 60)
 
 

@@ -6,6 +6,7 @@ Installation script for CNPJ ETL dependencies
 import subprocess
 import sys
 
+
 def install_package(package):
     """Install a Python package using pip"""
     try:
@@ -16,6 +17,7 @@ def install_package(package):
         print(f"[ERROR] Failed to install {package}: {e}")
         return False
 
+
 def main():
     """Main function to install all required dependencies"""
     print("Installing CNPJ ETL dependencies...")
@@ -25,7 +27,7 @@ def main():
         "pandas>=1.5.0",
         "polars>=0.19.0",
         "sqlalchemy>=1.4.0",
-        "psycopg2-binary>=2.9.0"
+        "psycopg2-binary>=2.9.0",
     ]
 
     installed = 0
@@ -37,7 +39,7 @@ def main():
         else:
             failed += 1
 
-    print(f"\nInstallation summary:")
+    print("\nInstallation summary:")
     print(f"  Successfully installed: {installed}")
     print(f"  Failed to install: {failed}")
 
@@ -46,7 +48,10 @@ def main():
         print("You can now run the CNPJ ETL scripts.")
     else:
         print(f"\nWarning: {failed} packages failed to install.")
-        print("You may need to install them manually or check your internet connection.")
+        print(
+            "You may need to install them manually or check your internet connection."
+        )
+
 
 if __name__ == "__main__":
     main()

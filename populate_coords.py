@@ -11,6 +11,7 @@ import os
 import hashlib
 import psycopg2
 
+
 # Cargar variables de entorno del archivo .env
 def load_env_file(dotenv_path: str = ".env") -> None:
     if os.path.exists(dotenv_path):
@@ -30,6 +31,7 @@ def load_env_file(dotenv_path: str = ".env") -> None:
         except Exception as e:
             print(f"Warning: Could not read {dotenv_path}: {e}")
 
+
 load_env_file()
 
 # Configuración de hubs de Londrina del api.py
@@ -38,12 +40,15 @@ HUBS = {
     2: {"name": "Gleba Palhano (Av. Ayrton Senna)", "coords": [-51.1890, -23.3310]},
     3: {"name": "Jardim Guanabara (Av. Higienópolis)", "coords": [-51.1670, -23.3220]},
     4: {"name": "Zona Norte (Av. Saul Elkind)", "coords": [-51.1480, -23.2720]},
-    5: {"name": "Zona Leste (Av. Bandeirantes)", "coords": [-51.1550, -23.3180]}
+    5: {"name": "Zona Leste (Av. Bandeirantes)", "coords": [-51.1550, -23.3180]},
 }
 
-def assign_geographic_coords(cnpj: str, business_type: str, municipio: str = None) -> list:
+
+def assign_geographic_coords(
+    cnpj: str, business_type: str, municipio: str = None
+) -> list:
     """Calcula deterministamente coordenadas a partir del CNPJ, tipo de negocio y ciudad."""
-    h = hashlib.md5(cnpj.encode('utf-8')).hexdigest()
+    h = hashlib.md5(cnpj.encode("utf-8")).hexdigest()
     hash_val = int(h, 16)
 
     city_key = municipio.strip().lower() if municipio else ""
@@ -63,9 +68,9 @@ def assign_geographic_coords(cnpj: str, business_type: str, municipio: str = Non
     if center_lng is not None and center_lat is not None:
         lng_factor = ((hash_val % 1000) - 500) / 500.0
         lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
-        
-        lng_offset = (lng_factor ** 3) * 0.015
-        lat_offset = (lat_factor ** 3) * 0.015
+
+        lng_offset = (lng_factor**3) * 0.015
+        lat_offset = (lat_factor**3) * 0.015
         return [center_lng + lng_offset, center_lat + lat_offset]
 
     # Por defecto: Hubs de Londrina
@@ -80,10 +85,11 @@ def assign_geographic_coords(cnpj: str, business_type: str, municipio: str = Non
     lng_factor = ((hash_val % 1000) - 500) / 500.0
     lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
 
-    lng_offset = (lng_factor ** 3) * 0.0075
-    lat_offset = (lat_factor ** 3) * 0.0075
+    lng_offset = (lng_factor**3) * 0.0075
+    lat_offset = (lat_factor**3) * 0.0075
 
     return [center_lng + lng_offset, center_lat + lat_offset]
+
 
 def main():
     db_user = os.environ.get("DB_USER", "postgres")
@@ -94,14 +100,16 @@ def main():
 
     conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
     print(f"Conectando a {db_host}...")
-    
+
     conn = psycopg2.connect(conn_str)
     cursor = conn.cursor()
 
     # 1. Preparar la tabla: Añadir columna serial ID si no existe
     print("Verificando/añadiendo columna ID...")
     try:
-        cursor.execute("ALTER TABLE londrina_businesses ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;")
+        cursor.execute(
+            "ALTER TABLE londrina_businesses ADD COLUMN IF NOT EXISTS id SERIAL PRIMARY KEY;"
+        )
         conn.commit()
     except Exception as e:
         conn.rollback()
@@ -109,8 +117,12 @@ def main():
 
     # 2. Añadir columnas de latitud y longitud si no existen
     print("Verificando/añadiendo columnas de coordenadas...")
-    cursor.execute("ALTER TABLE londrina_businesses ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;")
-    cursor.execute("ALTER TABLE londrina_businesses ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;")
+    cursor.execute(
+        "ALTER TABLE londrina_businesses ADD COLUMN IF NOT EXISTS latitude DOUBLE PRECISION;"
+    )
+    cursor.execute(
+        "ALTER TABLE londrina_businesses ADD COLUMN IF NOT EXISTS longitude DOUBLE PRECISION;"
+    )
     conn.commit()
 
     # 3. Habilitar extensión PostGIS (por si acaso) y agregar columna geométrica geom
@@ -120,14 +132,18 @@ def main():
 
     print("Verificando/añadiendo columna geométrica geom...")
     try:
-        cursor.execute("ALTER TABLE londrina_businesses ADD COLUMN IF NOT EXISTS geom geometry(Point, 4326);")
+        cursor.execute(
+            "ALTER TABLE londrina_businesses ADD COLUMN IF NOT EXISTS geom geometry(Point, 4326);"
+        )
         conn.commit()
     except Exception as e:
         conn.rollback()
         print(f"Error al agregar columna geom: {e}")
 
     # 4. Obtener todos los registros para calcular y actualizar coordenadas (incluyendo municipio)
-    cursor.execute("SELECT id, cnpj_basico, cnpj_ordem, cnpj_dv, business_type, municipio FROM londrina_businesses;")
+    cursor.execute(
+        "SELECT id, cnpj_basico, cnpj_ordem, cnpj_dv, business_type, municipio FROM londrina_businesses;"
+    )
     rows = cursor.fetchall()
     print(f"Calculando coordenadas para {len(rows)} comercios...")
 
@@ -139,7 +155,7 @@ def main():
         if len(cnpj_completo) < 14:
             # Rellenar con ceros si falta algo
             cnpj_completo = cnpj_completo.zfill(14)
-            
+
         lng, lat = assign_geographic_coords(cnpj_completo, business_type, municipio)
         updates.append((lat, lng, row_id))
 
@@ -147,16 +163,21 @@ def main():
     print("Actualizando coordenadas y columna geométrica...")
     cursor.executemany(
         "UPDATE londrina_businesses SET latitude = %s, longitude = %s WHERE id = %s;",
-        updates
+        updates,
     )
     conn.commit()
 
     # Actualizar la columna 'geom' con las coordenadas calculadas
-    cursor.execute("UPDATE londrina_businesses SET geom = ST_SetSRID(ST_MakePoint(longitude, latitude), 4326) WHERE latitude IS NOT NULL AND longitude IS NOT NULL;")
+    cursor.execute(
+        "UPDATE londrina_businesses SET geom = ST_SetSRID(ST_MakePoint(longitude, latitude), 4326) WHERE latitude IS NOT NULL AND longitude IS NOT NULL;"
+    )
     conn.commit()
 
-    print("¡Coordenadas y geometría geom cargadas correctamente en londrina_businesses!")
+    print(
+        "¡Coordenadas y geometría geom cargadas correctamente en londrina_businesses!"
+    )
     conn.close()
+
 
 if __name__ == "__main__":
     main()
