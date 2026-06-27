@@ -56,3 +56,7 @@ desktop.ini
 # Git rewrite temporary state
 .git-rewrite/
 
+
+# Large CNPJ raw data files
+K3241*
+*.ESTABELE
