@@ -16,11 +16,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code and data files
 COPY api.py .
-COPY cnpj_etl.py .
+COPY download_cnpj_pr.py .
 COPY cnpj_etl_polars.py .
+COPY enriquecer_lojas.py .
 COPY generate_sample_data.py .
-COPY londrina_businesses.json* ./
-COPY sample_estabelecimentos.csv* ./
 
 # Expose API port
 EXPOSE 8000
