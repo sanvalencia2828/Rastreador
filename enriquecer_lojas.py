@@ -20,16 +20,14 @@ import time
 import psycopg2
 import psycopg2.extras
 import requests
-import json
 import os
 import sys
 import hashlib
 import logging
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple
 
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -55,6 +53,7 @@ def load_env_file(dotenv_path: str = ".env") -> None:
         except Exception as e:
             logger.warning(f"Could not read {dotenv_path}: {e}")
 
+
 load_env_file()
 
 
@@ -63,10 +62,10 @@ load_env_file()
 # ==============================================================================
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 HEADERS = {
-    'User-Agent': 'LondrinaRadarComercial-Geocoder/1.0 (londrina.radar@antigravity.dev)'
+    "User-Agent": "LondrinaRadarComercial-Geocoder/1.0 (londrina.radar@antigravity.dev)"
 }
 CHECKPOINT_INTERVAL = 50  # commit cada N registros
-RATE_LIMIT_SLEEP = 1.1    # segundos entre requests (Nominatim TOS: max 1 req/s)
+RATE_LIMIT_SLEEP = 1.1  # segundos entre requests (Nominatim TOS: max 1 req/s)
 
 # Hubs de Londrina para fallback determinista
 HUBS = {
@@ -99,7 +98,7 @@ def get_db_connection() -> psycopg2.extensions.connection:
         db_name = os.environ.get("DB_NAME", "londrina_comercio")
         db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
     conn = psycopg2.connect(db_url)
-    conn.set_client_encoding('UTF8')
+    conn.set_client_encoding("UTF8")
     return conn
 
 
@@ -118,7 +117,7 @@ def build_address(
     num = (numero or "").strip()
     if street:
         addr = street
-        if num and num not in ('0', 'S/N', 'SN', 's/n'):
+        if num and num not in ("0", "S/N", "SN", "s/n"):
             addr += f", {num}"
         parts.append(addr)
     if bairro:
@@ -136,10 +135,10 @@ def geocode_address(address: str) -> Optional[Tuple[float, float]]:
     Retorna (lat, lon) o None si no hay resultados.
     """
     params = {
-        'q': address,
-        'format': 'json',
-        'limit': 1,
-        'addressdetails': 0,
+        "q": address,
+        "format": "json",
+        "limit": 1,
+        "addressdetails": 0,
     }
     try:
         resp = requests.get(
@@ -151,8 +150,8 @@ def geocode_address(address: str) -> Optional[Tuple[float, float]]:
         resp.raise_for_status()
         data = resp.json()
         if data and len(data) > 0:
-            lat = float(data[0]['lat'])
-            lon = float(data[0]['lon'])
+            lat = float(data[0]["lat"])
+            lon = float(data[0]["lon"])
             return (lat, lon)
         return None
     except requests.exceptions.RequestException as e:
@@ -166,7 +165,7 @@ def fallback_coordinates(
     municipio: Optional[str],
 ) -> Tuple[float, float]:
     """Coordenadas deterministas como fallback si Nominatim no responde."""
-    h = hashlib.md5(cnpj_completo.encode('utf-8')).hexdigest()
+    h = hashlib.md5(cnpj_completo.encode("utf-8")).hexdigest()
     hash_val = int(h, 16)
     city_key = (municipio or "").strip().lower()
 
@@ -175,8 +174,8 @@ def fallback_coordinates(
             center_lng, center_lat = coords
             lng_factor = ((hash_val % 1000) - 500) / 500.0
             lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
-            lng_off = (lng_factor ** 3) * 0.015
-            lat_off = (lat_factor ** 3) * 0.015
+            lng_off = (lng_factor**3) * 0.015
+            lat_off = (lat_factor**3) * 0.015
             return (center_lat + lat_off, center_lng + lng_off)
 
     # Londrina hubs
@@ -188,8 +187,8 @@ def fallback_coordinates(
     center_lng, center_lat = hub["coords"]
     lng_factor = ((hash_val % 1000) - 500) / 500.0
     lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
-    lng_off = (lng_factor ** 3) * 0.0075
-    lat_off = (lat_factor ** 3) * 0.0075
+    lng_off = (lng_factor**3) * 0.0075
+    lat_off = (lat_factor**3) * 0.0075
     return (center_lat + lat_off, center_lng + lng_off)
 
 
@@ -253,11 +252,13 @@ def geocode_all_pending(conn: psycopg2.extensions.connection) -> Tuple[int, int,
     error_count = 0
 
     for i, row in enumerate(pendientes, 1):
-        row_id, cnpj_completo, logradouro, numero, bairro, municipio, business_type = row
+        row_id, cnpj_completo, logradouro, numero, bairro, municipio, business_type = (
+            row
+        )
         btype = business_type or "tech"
 
         address = build_address(logradouro, numero, bairro, municipio)
-        logger.info(f"[{i}/{total}] ID={row_id} Geocode: \"{address[:80]}...\"")
+        logger.info(f'[{i}/{total}] ID={row_id} Geocode: "{address[:80]}..."')
 
         lat, lon = None, None
         source = None
@@ -268,7 +269,9 @@ def geocode_all_pending(conn: psycopg2.extensions.connection) -> Tuple[int, int,
                 lat, lon = result
                 source = "nominatim"
             else:
-                logger.warning(f"  Sin resultados Nominatim para ID={row_id}, usando fallback")
+                logger.warning(
+                    f"  Sin resultados Nominatim para ID={row_id}, usando fallback"
+                )
         except Exception as e:
             logger.error(f"  Error geocoding ID={row_id}: {e}")
 
@@ -282,14 +285,17 @@ def geocode_all_pending(conn: psycopg2.extensions.connection) -> Tuple[int, int,
 
         # Actualizar DB
         try:
-            cursor.execute("""
+            cursor.execute(
+                """
                 UPDATE estabelecimentos
                 SET latitude = %s,
                     longitude = %s,
                     geom = ST_SetSRID(ST_MakePoint(%s, %s), 4326),
                     geocoded = TRUE
                 WHERE id = %s
-            """, (lat, lon, lon, lat, row_id))
+            """,
+                (lat, lon, lon, lat, row_id),
+            )
         except Exception as e:
             logger.error(f"  DB update error ID={row_id}: {e}")
             conn.rollback()

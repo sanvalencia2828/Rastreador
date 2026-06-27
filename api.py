@@ -10,13 +10,12 @@ Date: 2026-05-24
 import os
 import json
 import hashlib
-import sys
-import uuid
 from typing import List, Dict, Any, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
+
 
 # ==============================================================================
 # ENVIRONMENT VARIABLE LOADER (ZERO-DEPENDENCY)
@@ -40,12 +39,13 @@ def load_env_file(dotenv_path: str = ".env") -> None:
         except Exception as e:
             print(f"Warning: Could not read {dotenv_path}: {e}")
 
+
 load_env_file()
 
 app = FastAPI(
     title="Rastreador CNPJ API",
     description="API para mapas y clústeres de comercios en Londrina, PR",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 app.add_middleware(
@@ -60,7 +60,9 @@ app.add_middleware(
 # IN-MEMORY CACHE HELPER (ZERO-DEPENDENCY)
 # ==============================================================================
 import time
+
 _RESPONSE_CACHE = {}
+
 
 def get_cached_response(key: str) -> Optional[Any]:
     """Gets a cached response if it exists and has not expired."""
@@ -72,25 +74,49 @@ def get_cached_response(key: str) -> Optional[Any]:
             del _RESPONSE_CACHE[key]
     return None
 
+
 def set_cached_response(key: str, value: Any, ttl: int = 300) -> None:
     """Sets a cached response with an expiration time."""
     _RESPONSE_CACHE[key] = (value, time.time() + ttl)
 
+
 def clear_response_cache() -> None:
     """Clears the entire response cache."""
     _RESPONSE_CACHE.clear()
+
 
 # ==============================================================================
 # GEOGRAPHIC CONSTANTS - LONDRINA HOTSPOTS
 # ==============================================================================
 # 5 main commercial hubs in Londrina with coordinates [lng, lat]
 HUBS = {
-    1: {"name": "Centro (Calçadão)", "coords": [-51.1610, -23.3110], "desc": "Comercio minorista y gastronomía tradicional"},
-    2: {"name": "Gleba Palhano (Av. Ayrton Senna)", "coords": [-51.1890, -23.3310], "desc": "Boutiques premium, cafeterías y restaurantes modernos"},
-    3: {"name": "Jardim Guanabara (Av. Higienópolis)", "coords": [-51.1670, -23.3220], "desc": "Polo de gastronomía y servicios ejecutivos"},
-    4: {"name": "Zona Norte (Av. Saul Elkind)", "coords": [-51.1480, -23.2720], "desc": "Gran concentración de tiendas de retail masivo"},
-    5: {"name": "Zona Leste (Av. Bandeirantes)", "coords": [-51.1550, -23.3180], "desc": "Clúster médico y comercial gastronómico de paso"}
+    1: {
+        "name": "Centro (Calçadão)",
+        "coords": [-51.1610, -23.3110],
+        "desc": "Comercio minorista y gastronomía tradicional",
+    },
+    2: {
+        "name": "Gleba Palhano (Av. Ayrton Senna)",
+        "coords": [-51.1890, -23.3310],
+        "desc": "Boutiques premium, cafeterías y restaurantes modernos",
+    },
+    3: {
+        "name": "Jardim Guanabara (Av. Higienópolis)",
+        "coords": [-51.1670, -23.3220],
+        "desc": "Polo de gastronomía y servicios ejecutivos",
+    },
+    4: {
+        "name": "Zona Norte (Av. Saul Elkind)",
+        "coords": [-51.1480, -23.2720],
+        "desc": "Gran concentración de tiendas de retail masivo",
+    },
+    5: {
+        "name": "Zona Leste (Av. Bandeirantes)",
+        "coords": [-51.1550, -23.3180],
+        "desc": "Clúster médico y comercial gastronómico de paso",
+    },
 }
+
 
 # ==============================================================================
 # DATA MODELS
@@ -99,10 +125,12 @@ class ClusterPoint(BaseModel):
     type: str = "Point"
     coordinates: List[float]  # [lng, lat]
 
+
 class Cluster(BaseModel):
     cluster_id: int
     total_lojas: int
     center_geom: ClusterPoint
+
 
 # CNAE code prefixes → human-readable categories
 CNAE_CATEGORY_MAP: Dict[str, str] = {
@@ -135,6 +163,7 @@ CNAE_CATEGORY_MAP: Dict[str, str] = {
     "52": "Logística",
 }
 
+
 def cnae_to_category(cnae) -> str:
     """Maps a CNAE code (int or str) to a human-readable category."""
     if cnae is None:
@@ -142,15 +171,18 @@ def cnae_to_category(cnae) -> str:
     prefix = str(cnae)[:2]
     return CNAE_CATEGORY_MAP.get(prefix, "Otros")
 
+
 class RubroDistribucion(BaseModel):
     categoria: str
     cantidad: int
+
 
 class StreetAnalytics(BaseModel):
     logradouro: str
     total_negocios: int
     distribucion_rubros: List[RubroDistribucion]
     predominancia: str
+
 
 # ==============================================================================
 # DATABASE OR LOCAL JSON LOADER
@@ -175,7 +207,9 @@ def load_businesses() -> List[Dict[str, Any]]:
         db_port = os.environ.get("DB_PORT", "5432")
         db_name = os.environ.get("DB_NAME")
         if all([db_user, db_password, db_host, db_name]):
-            conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+            conn_str = (
+                f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+            )
         else:
             db_host = None
 
@@ -187,7 +221,9 @@ def load_businesses() -> List[Dict[str, Any]]:
                 with engine.connect() as conn:
                     result = conn.execute(text(f"SELECT * FROM {table_name}"))
                     businesses = [dict(row._mapping) for row in result]
-                    print(f"Loaded {len(businesses)} businesses from PostgreSQL table '{table_name}'.")
+                    print(
+                        f"Loaded {len(businesses)} businesses from PostgreSQL table '{table_name}'."
+                    )
                     if len(businesses) > 0:
                         return businesses
             except Exception as e:
@@ -208,6 +244,7 @@ def load_businesses() -> List[Dict[str, Any]]:
     # If no data found, return empty list
     print("WARNING: No data source found! Please run the ETL script first.")
     return []
+
 
 def format_cnpj(biz: Dict[str, Any]) -> str:
     """Format the CNPJ components from a business dictionary as a padded string."""
@@ -231,21 +268,24 @@ def format_cnpj(biz: Dict[str, Any]) -> str:
 
     return cnpj_basico + cnpj_ordem + cnpj_dv
 
+
 # ==============================================================================
 # SPATIAL ALGORITHMS
 # ==============================================================================
-def assign_geographic_coords(cnpj: str, business_type: str, municipio: Optional[str] = None) -> List[float]:
+def assign_geographic_coords(
+    cnpj: str, business_type: str, municipio: Optional[str] = None
+) -> List[float]:
     """
     Deterministically maps a CNPJ to geographical coordinates.
     If the business is in Londrina (or default), it maps it to one of the 5 hubs.
     If it is in a nearby city, it maps it around the city's centroid.
     """
     # Create a md5 hash of the CNPJ to have deterministic geographic placement
-    h = hashlib.md5(str(cnpj).encode('utf-8')).hexdigest()
+    h = hashlib.md5(str(cnpj).encode("utf-8")).hexdigest()
     hash_val = int(h, 16)
 
     city_key = municipio.strip().lower() if municipio else ""
-    
+
     # Determine centroid based on prefix to prevent encoding conflicts (e.g. UTF-8 vs Latin1)
     center_lng, center_lat = None, None
     if city_key.startswith("camb"):
@@ -262,9 +302,9 @@ def assign_geographic_coords(cnpj: str, business_type: str, municipio: Optional[
         # Deterministic displacement within 2km radius
         lng_factor = ((hash_val % 1000) - 500) / 500.0
         lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
-        
-        lng_offset = (lng_factor ** 3) * 0.015
-        lat_offset = (lat_factor ** 3) * 0.015
+
+        lng_offset = (lng_factor**3) * 0.015
+        lat_offset = (lat_factor**3) * 0.015
         return [center_lng + lng_offset, center_lat + lat_offset]
 
     # Default: Londrina Hubs
@@ -285,14 +325,15 @@ def assign_geographic_coords(cnpj: str, business_type: str, municipio: Optional[
     lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0  # [-1.0, 1.0]
 
     # Add Gaussian weight (dense at center, scattered at edges)
-    lng_offset = (lng_factor ** 3) * 0.0075
-    lat_offset = (lat_factor ** 3) * 0.0075
+    lng_offset = (lng_factor**3) * 0.0075
+    lat_offset = (lat_factor**3) * 0.0075
 
     # Ensure coordinates are floats before addition
     center_lng = float(center_lng)
     center_lat = float(center_lat)
 
     return [center_lng + lng_offset, center_lat + lat_offset]
+
 
 # ==============================================================================
 # API ENDPOINTS
@@ -301,6 +342,7 @@ def assign_geographic_coords(cnpj: str, business_type: str, municipio: Optional[
 def health_check():
     """Health check endpoint for Docker container checks"""
     return {"status": "ok", "message": "Rastreador CNPJ backend is running"}
+
 
 @app.get("/api/heatmap")
 def get_heatmap_geojson():
@@ -315,7 +357,7 @@ def get_heatmap_geojson():
         return cached
 
     businesses = load_businesses()
-    
+
     # If empty, try to generate sample data and run polars ETL to auto-populate!
     if len(businesses) == 0:
         print("No businesses detected! Attempting to auto-generate sample data...")
@@ -323,8 +365,9 @@ def get_heatmap_geojson():
             # We run generate_sample_data and then etl polars
             import generate_sample_data
             import cnpj_etl_polars
+
             generate_sample_data.main()
-            
+
             # Create a mock CSV if we don't have it
             if os.path.exists("sample_estabelecimentos.csv"):
                 cnpj_etl_polars.main("sample_estabelecimentos.csv")
@@ -345,7 +388,7 @@ def get_heatmap_geojson():
             coords = [float(lon), float(lat)]
         else:
             coords = assign_geographic_coords(cnpj, biz_type, municipio)
-        
+
         porte_val = biz.get("porte_empresa")
         porte_desc = "Otros"
         if porte_val in [1, "1", "01"]:
@@ -357,10 +400,7 @@ def get_heatmap_geojson():
 
         feature = {
             "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": coords
-            },
+            "geometry": {"type": "Point", "coordinates": coords},
             "properties": {
                 "cnpj": cnpj,
                 "nome_fantasia": biz.get("nome_fantasia", "Comercio"),
@@ -374,18 +414,16 @@ def get_heatmap_geojson():
                 "telefone_1": biz.get("telefone_1", ""),
                 "porte_empresa": str(porte_val or ""),
                 "porte_desc": porte_desc,
-                "municipio": municipio or "Londrina"
-            }
+                "municipio": municipio or "Londrina",
+            },
         }
         features.append(feature)
 
     print(f"Returning {len(features)} points as GeoJSON.")
-    result = {
-        "type": "FeatureCollection",
-        "features": features
-    }
+    result = {"type": "FeatureCollection", "features": features}
     set_cached_response(cache_key, result, ttl=300)
     return result
+
 
 @app.get("/api/clusters/emergentes", response_model=List[Cluster])
 def get_emergent_clusters():
@@ -409,7 +447,9 @@ def get_emergent_clusters():
         db_port = os.environ.get("DB_PORT", "5432")
         db_name = os.environ.get("DB_NAME")
         if all([db_user, db_password, db_host, db_name]):
-            conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+            conn_str = (
+                f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+            )
 
     if conn_str:
         try:
@@ -442,7 +482,7 @@ def get_emergent_clusters():
                         Cluster(
                             cluster_id=int(row_dict["cluster_id"]) + 100,
                             total_lojas=row_dict["total_lojas"],
-                            center_geom=ClusterPoint(coordinates=coords)
+                            center_geom=ClusterPoint(coordinates=coords),
                         )
                     )
                 if clusters:
@@ -459,9 +499,13 @@ def get_emergent_clusters():
 
     counts = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
     for biz in businesses:
-        cnpj = str(biz.get("cnpj_basico", "00000000")) + str(biz.get("cnpj_ordem", "0000")) + str(biz.get("cnpj_dv", "00"))
+        cnpj = (
+            str(biz.get("cnpj_basico", "00000000"))
+            + str(biz.get("cnpj_ordem", "0000"))
+            + str(biz.get("cnpj_dv", "00"))
+        )
         biz_type = biz.get("business_type", "retail")
-        h = hashlib.md5(cnpj.encode('utf-8')).hexdigest()
+        h = hashlib.md5(cnpj.encode("utf-8")).hexdigest()
         hash_val = int(h, 16)
         if biz_type == "gastronomy":
             hub_idx = [2, 3, 5, 1, 4][hash_val % 5]
@@ -478,12 +522,13 @@ def get_emergent_clusters():
             Cluster(
                 cluster_id=hub_id,
                 total_lojas=count,
-                center_geom=ClusterPoint(coordinates=coords)
+                center_geom=ClusterPoint(coordinates=coords),
             )
         )
     clusters.sort(key=lambda c: c.total_lojas, reverse=True)
     set_cached_response(cache_key, clusters, ttl=300)
     return clusters
+
 
 @app.get("/api/analytics/streets", response_model=List[StreetAnalytics])
 def get_commercial_streets_analytics():
@@ -501,7 +546,9 @@ def get_commercial_streets_analytics():
         db_port = os.environ.get("DB_PORT", "5432")
         db_name = os.environ.get("DB_NAME")
         if all([db_user, db_password, db_host, db_name]):
-            conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+            conn_str = (
+                f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+            )
 
     raw_rows: List[Dict[str, Any]] = []
 
@@ -519,15 +566,18 @@ def get_commercial_streets_analytics():
                     result = conn.execute(query)
                     for row in result:
                         raw_rows.append(
-                            dict(row._mapping) if hasattr(row, "_mapping")
+                            dict(row._mapping)
+                            if hasattr(row, "_mapping")
                             else {
                                 "logradouro": row[0],
                                 "cnae_fiscal_principal": row[1],
-                                "porte_empresa": row[2]
+                                "porte_empresa": row[2],
                             }
                         )
                     if raw_rows:
-                        print(f"Loaded {len(raw_rows)} rows from table '{table_name}' for street analytics.")
+                        print(
+                            f"Loaded {len(raw_rows)} rows from table '{table_name}' for street analytics."
+                        )
                         break
             except Exception as e:
                 print(f"Table '{table_name}' query failed: {e}.")
@@ -565,15 +615,16 @@ def get_commercial_streets_analytics():
         rubros[categoria] = rubros.get(categoria, 0) + 1
 
     # Sort streets by total descending, take top 15
-    sorted_streets = sorted(street_data.items(), key=lambda x: x[1]["total"], reverse=True)[:15]
+    sorted_streets = sorted(
+        street_data.items(), key=lambda x: x[1]["total"], reverse=True
+    )[:15]
 
     result_list: List[StreetAnalytics] = []
     for street_name, data in sorted_streets:
         rubros_sorted = sorted(data["rubros"].items(), key=lambda x: x[1], reverse=True)
         predominancia = rubros_sorted[0][0] if rubros_sorted else "Otros"
         distribucion = [
-            RubroDistribucion(categoria=cat, cantidad=cnt)
-            for cat, cnt in rubros_sorted
+            RubroDistribucion(categoria=cat, cantidad=cnt) for cat, cnt in rubros_sorted
         ]
         result_list.append(
             StreetAnalytics(
@@ -594,19 +645,20 @@ def get_commercial_streets_analytics():
 
 # CNAE prefix → tech subcategory mapping
 TECH_CNAE_SUBCATEGORY: Dict[str, Dict[str, str]] = {
-    "62": {"label": "Software & TI",       "icon": "💻"},
+    "62": {"label": "Software & TI", "icon": "💻"},
     "63": {"label": "Data & Servicios Web", "icon": "🌐"},
-    "26": {"label": "Electrónica",          "icon": "🖥️"},
-    "27": {"label": "Electrodomésticos",    "icon": "⚡"},
-    "61": {"label": "Telecomunicaciones",   "icon": "📡"},
-    "95": {"label": "Reparación TI",       "icon": "🔧"},
-    "46": {"label": "Comercio Mayorista TI","icon": "📦"},
+    "26": {"label": "Electrónica", "icon": "🖥️"},
+    "27": {"label": "Electrodomésticos", "icon": "⚡"},
+    "61": {"label": "Telecomunicaciones", "icon": "📡"},
+    "95": {"label": "Reparación TI", "icon": "🔧"},
+    "46": {"label": "Comercio Mayorista TI", "icon": "📦"},
     "47": {"label": "Retail de Tecnología", "icon": "🏪"},
-    "70": {"label": "Consultoría TI",      "icon": "🤝"},
-    "71": {"label": "Ingeniería & P&D",    "icon": "🔬"},
-    "72": {"label": "Investigación",       "icon": "🔭"},
-    "85": {"label": "Educación TI",        "icon": "🎓"},
+    "70": {"label": "Consultoría TI", "icon": "🤝"},
+    "71": {"label": "Ingeniería & P&D", "icon": "🔬"},
+    "72": {"label": "Investigación", "icon": "🔭"},
+    "85": {"label": "Educación TI", "icon": "🎓"},
 }
+
 
 class TechBusiness(BaseModel):
     cnpj: str
@@ -619,18 +671,16 @@ class TechBusiness(BaseModel):
     municipio: str
     business_type: str
 
+
 class TechBusinessesResponse(BaseModel):
     total: int
     offset: int
     limit: int
     items: List[TechBusiness]
 
+
 @app.get("/api/businesses/tech", response_model=TechBusinessesResponse)
-def get_tech_businesses(
-    limit: int = 50,
-    offset: int = 0,
-    search: str = ""
-):
+def get_tech_businesses(limit: int = 50, offset: int = 0, search: str = ""):
     """
     Returns paginated tech businesses with enriched CNAE subcategory data.
     Supports full-text search by name, CNAE or neighborhood.
@@ -647,9 +697,11 @@ def get_tech_businesses(
     search_lower = search.strip().lower()
     if search_lower:
         tech_businesses = [
-            b for b in tech_businesses
+            b
+            for b in tech_businesses
             if search_lower in (b.get("nome_fantasia") or "").lower()
-            or search_lower in str(b.get("cnae_fiscal") or b.get("cnae_fiscal_principal") or "").lower()
+            or search_lower
+            in str(b.get("cnae_fiscal") or b.get("cnae_fiscal_principal") or "").lower()
             or search_lower in (b.get("bairro") or "").lower()
             or search_lower in (b.get("logradouro") or "").lower()
         ]
@@ -657,7 +709,7 @@ def get_tech_businesses(
     total = len(tech_businesses)
 
     # Paginate
-    paginated = tech_businesses[offset: offset + limit]
+    paginated = tech_businesses[offset : offset + limit]
 
     items = []
     for biz in paginated:
@@ -680,7 +732,9 @@ def get_tech_businesses(
             )
         )
 
-    print(f"Returning {len(items)} tech businesses (total={total}, offset={offset}, search='{search}').")
+    print(
+        f"Returning {len(items)} tech businesses (total={total}, offset={offset}, search='{search}')."
+    )
     return TechBusinessesResponse(total=total, offset=offset, limit=limit, items=items)
 
 
@@ -691,35 +745,41 @@ def get_tech_businesses(
 # STREET SEGMENTS, VISITS AND OFFLINE SYNC - EXTRA MODELS & ENDPOINTS
 # ==============================================================================
 import hmac
-import hashlib
 import base64
-import time
 from datetime import datetime
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from fastapi import Depends, Header
+from fastapi import Depends
 
 security = HTTPBearer(auto_error=False)
 SECRET_KEY = "super_secret_key_londrina_radar_2026"
+
 
 # ------------------------------------------------------------------------------
 # 0-DEPENDENCY JWT & CRYPTO UTILITIES
 # ------------------------------------------------------------------------------
 def base64url_encode(payload: bytes) -> str:
-    return base64.urlsafe_b64encode(payload).rstrip(b'=').decode('utf-8')
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("utf-8")
+
 
 def base64url_decode(payload: str) -> bytes:
-    padding = '=' * (4 - (len(payload) % 4))
+    padding = "=" * (4 - (len(payload) % 4))
     return base64.urlsafe_b64decode(payload + padding)
+
 
 def create_jwt_token(data: dict, expires_in: int = 86400) -> str:
     header = {"alg": "HS256", "typ": "JWT"}
     payload = data.copy()
     payload["exp"] = int(time.time()) + expires_in
-    header_json = json.dumps(header, separators=(',', ':')).encode('utf-8')
-    payload_json = json.dumps(payload, separators=(',', ':')).encode('utf-8')
-    unsigned_token = base64url_encode(header_json) + "." + base64url_encode(payload_json)
-    signature = hmac.new(SECRET_KEY.encode('utf-8'), unsigned_token.encode('utf-8'), hashlib.sha256).digest()
+    header_json = json.dumps(header, separators=(",", ":")).encode("utf-8")
+    payload_json = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    unsigned_token = (
+        base64url_encode(header_json) + "." + base64url_encode(payload_json)
+    )
+    signature = hmac.new(
+        SECRET_KEY.encode("utf-8"), unsigned_token.encode("utf-8"), hashlib.sha256
+    ).digest()
     return unsigned_token + "." + base64url_encode(signature)
+
 
 def decode_jwt_token(token: str) -> dict:
     try:
@@ -728,19 +788,23 @@ def decode_jwt_token(token: str) -> dict:
             return {}
         header_segment, payload_segment, signature_segment = parts
         unsigned_token = header_segment + "." + payload_segment
-        expected_signature = hmac.new(SECRET_KEY.encode('utf-8'), unsigned_token.encode('utf-8'), hashlib.sha256).digest()
+        expected_signature = hmac.new(
+            SECRET_KEY.encode("utf-8"), unsigned_token.encode("utf-8"), hashlib.sha256
+        ).digest()
         actual_signature = base64url_decode(signature_segment)
         if not hmac.compare_digest(expected_signature, actual_signature):
             return {}
-        payload = json.loads(base64url_decode(payload_segment).decode('utf-8'))
+        payload = json.loads(base64url_decode(payload_segment).decode("utf-8"))
         if payload.get("exp", 0) < time.time():
             return {}
         return payload
     except Exception:
         return {}
 
+
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode('utf-8')).hexdigest()
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
 
 # ------------------------------------------------------------------------------
 # PYDANTIC SCHEMAS
@@ -749,9 +813,11 @@ class UserRegister(BaseModel):
     username: str
     password: str
 
+
 class UserLogin(BaseModel):
     username: str
     password: str
+
 
 class VisitCreate(BaseModel):
     segment_id: int
@@ -760,6 +826,7 @@ class VisitCreate(BaseModel):
     notes: Optional[str] = None
     source: Optional[str] = "mobile"
 
+
 class VisitSyncItem(BaseModel):
     segment_id: int
     visited: bool
@@ -767,9 +834,11 @@ class VisitSyncItem(BaseModel):
     notes: Optional[str] = None
     source: Optional[str] = "mobile"
 
+
 class RouteCreate(BaseModel):
     name: str
     segment_ids: List[int]
+
 
 # ------------------------------------------------------------------------------
 # DB SETUP & GLOBAL ENGINE
@@ -802,10 +871,13 @@ if db_engine:
     except Exception as e:
         print(f"Error initializing users table: {e}")
 
+
 # ------------------------------------------------------------------------------
 # DEPENDENCY FOR AUTHENTICATION
 # ------------------------------------------------------------------------------
-def get_current_user_id(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> str:
+def get_current_user_id(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> str:
     if not credentials:
         raise HTTPException(status_code=401, detail="Authentication token missing")
     token = credentials.credentials
@@ -814,12 +886,16 @@ def get_current_user_id(credentials: Optional[HTTPAuthorizationCredentials] = De
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     return payload["user_id"]
 
-def get_optional_user_id(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[str]:
+
+def get_optional_user_id(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Optional[str]:
     if not credentials:
         return None
     token = credentials.credentials
     payload = decode_jwt_token(token)
     return payload.get("user_id") if payload else None
+
 
 # ------------------------------------------------------------------------------
 # AUTH ENDPOINTS
@@ -832,50 +908,68 @@ def register_user(user: UserRegister):
         pw_hash = hash_password(user.password)
         with db_engine.connect() as conn:
             result = conn.execute(
-                text("INSERT INTO users (username, password_hash) VALUES (:username, :pw_hash) RETURNING id"),
-                {"username": user.username, "pw_hash": pw_hash}
+                text(
+                    "INSERT INTO users (username, password_hash) VALUES (:username, :pw_hash) RETURNING id"
+                ),
+                {"username": user.username, "pw_hash": pw_hash},
             )
             row = result.fetchone()
             if not row:
                 raise HTTPException(status_code=500, detail="User creation failed")
             user_id = row[0]
-            token = create_jwt_token({"user_id": str(user_id), "username": user.username})
+            token = create_jwt_token(
+                {"user_id": str(user_id), "username": user.username}
+            )
             return {"user_id": str(user_id), "username": user.username, "token": token}
     except Exception as e:
         if "unique" in str(e).lower():
             raise HTTPException(status_code=400, detail="Username already registered")
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
+
 @app.post("/auth/login")
 def login_user(user: UserLogin):
     if not db_engine:
-        return {"user_id": "00000000-0000-0000-0000-000000000001", "username": user.username, "token": "dummy_dev_token"}
+        return {
+            "user_id": "00000000-0000-0000-0000-000000000001",
+            "username": user.username,
+            "token": "dummy_dev_token",
+        }
     try:
         pw_hash = hash_password(user.password)
         with db_engine.connect() as conn:
             result = conn.execute(
                 text("SELECT id, password_hash FROM users WHERE username = :username"),
-                {"username": user.username}
+                {"username": user.username},
             )
             row = result.fetchone()
             if not row:
-                raise HTTPException(status_code=400, detail="Invalid username or password")
+                raise HTTPException(
+                    status_code=400, detail="Invalid username or password"
+                )
             user_id, db_pw_hash = row
             if db_pw_hash != pw_hash:
-                raise HTTPException(status_code=400, detail="Invalid username or password")
-            
-            token = create_jwt_token({"user_id": str(user_id), "username": user.username})
+                raise HTTPException(
+                    status_code=400, detail="Invalid username or password"
+                )
+
+            token = create_jwt_token(
+                {"user_id": str(user_id), "username": user.username}
+            )
             return {"user_id": str(user_id), "username": user.username, "token": token}
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database error: {e}")
 
+
 # ------------------------------------------------------------------------------
 # TRACKING ENDPOINTS
 # ------------------------------------------------------------------------------
 @app.get("/api/segments")
-def get_street_segments(bbox: str, user_id: Optional[str] = Depends(get_optional_user_id)):
+def get_street_segments(
+    bbox: str, user_id: Optional[str] = Depends(get_optional_user_id)
+):
     """
     Returns GeoJSON FeatureCollection of street segments within the specified bbox.
     Format: bbox=lng1,lat1,lng2,lat2
@@ -883,14 +977,19 @@ def get_street_segments(bbox: str, user_id: Optional[str] = Depends(get_optional
     """
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
-    
+
     try:
         parts = bbox.split(",")
         if len(parts) != 4:
-            raise HTTPException(status_code=400, detail="Bbox must have exactly 4 coordinates: lng1,lat1,lng2,lat2")
+            raise HTTPException(
+                status_code=400,
+                detail="Bbox must have exactly 4 coordinates: lng1,lat1,lng2,lat2",
+            )
         lng1, lat1, lng2, lat2 = map(float, parts)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Bbox coordinates must be valid numbers")
+        raise HTTPException(
+            status_code=400, detail="Bbox coordinates must be valid numbers"
+        )
 
     try:
         with db_engine.connect() as conn:
@@ -902,7 +1001,13 @@ def get_street_segments(bbox: str, user_id: Optional[str] = Depends(get_optional
                     LEFT JOIN user_visits v ON s.id = v.segment_id AND v.user_id = :user_id
                     WHERE ST_Intersects(s.geom, ST_MakeEnvelope(:lng1, :lat1, :lng2, :lat2, 4326))
                 """)
-                params = {"lng1": lng1, "lat1": lat1, "lng2": lng2, "lat2": lat2, "user_id": user_id}
+                params = {
+                    "lng1": lng1,
+                    "lat1": lat1,
+                    "lng2": lng2,
+                    "lat2": lat2,
+                    "user_id": user_id,
+                }
             else:
                 query = text("""
                     SELECT s.id, s.osm_id, s.name, s.length_m, ST_AsGeoJSON(s.geom) as geom_geojson,
@@ -924,29 +1029,37 @@ def get_street_segments(bbox: str, user_id: Optional[str] = Depends(get_optional
                         "id": row_dict["id"],
                         "osm_id": row_dict["osm_id"],
                         "name": row_dict["name"] or "Calle sin nombre",
-                        "length_m": float(row_dict["length_m"]) if row_dict["length_m"] else 0.0,
+                        "length_m": (
+                            float(row_dict["length_m"]) if row_dict["length_m"] else 0.0
+                        ),
                         "visited_by_user": row_dict["visited_by_user"],
                         "notes": row_dict["notes"],
-                        "visited_at": row_dict["visited_at"].isoformat() if row_dict["visited_at"] else None
-                    }
+                        "visited_at": (
+                            row_dict["visited_at"].isoformat()
+                            if row_dict["visited_at"]
+                            else None
+                        ),
+                    },
                 }
                 features.append(feature)
 
-            return {
-                "type": "FeatureCollection",
-                "features": features
-            }
+            return {"type": "FeatureCollection", "features": features}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database query failed: {e}")
 
+
 @app.get("/api/visits")
-def get_user_visits(user_id: Optional[str] = None, bbox: Optional[str] = None, current_user_id: str = Depends(get_current_user_id)):
+def get_user_visits(
+    user_id: Optional[str] = None,
+    bbox: Optional[str] = None,
+    current_user_id: str = Depends(get_current_user_id),
+):
     """
     Returns user visits. If user_id is not supplied, uses the authenticated current_user_id.
     """
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
-    
+
     target_user_id = user_id if user_id else current_user_id
 
     query_str = """
@@ -975,20 +1088,25 @@ def get_user_visits(user_id: Optional[str] = None, bbox: Optional[str] = None, c
             for row in result:
                 row_dict = dict(row._mapping)
                 geom = json.loads(row_dict["geom_geojson"])
-                visits.append({
-                    "id": row_dict["id"],
-                    "segment_id": row_dict["segment_id"],
-                    "visited": row_dict["visited"],
-                    "visited_at": row_dict["visited_at"].isoformat(),
-                    "notes": row_dict["notes"],
-                    "source": row_dict["source"],
-                    "street_name": row_dict["street_name"],
-                    "length_m": float(row_dict["length_m"]) if row_dict["length_m"] else 0.0,
-                    "geometry": geom
-                })
+                visits.append(
+                    {
+                        "id": row_dict["id"],
+                        "segment_id": row_dict["segment_id"],
+                        "visited": row_dict["visited"],
+                        "visited_at": row_dict["visited_at"].isoformat(),
+                        "notes": row_dict["notes"],
+                        "source": row_dict["source"],
+                        "street_name": row_dict["street_name"],
+                        "length_m": (
+                            float(row_dict["length_m"]) if row_dict["length_m"] else 0.0
+                        ),
+                        "geometry": geom,
+                    }
+                )
             return visits
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Database operation failed: {e}")
+
 
 @app.post("/api/visits")
 def upsert_visit(visit: VisitCreate, user_id: str = Depends(get_current_user_id)):
@@ -1001,7 +1119,9 @@ def upsert_visit(visit: VisitCreate, user_id: str = Depends(get_current_user_id)
     try:
         visited_at = datetime.fromisoformat(visit.visited_at.replace("Z", "+00:00"))
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid visited_at timestamp format")
+        raise HTTPException(
+            status_code=400, detail="Invalid visited_at timestamp format"
+        )
 
     try:
         with db_engine.connect() as conn:
@@ -1016,24 +1136,34 @@ def upsert_visit(visit: VisitCreate, user_id: str = Depends(get_current_user_id)
                     synced = TRUE
                 RETURNING id
             """)
-            result = conn.execute(query, {
-                "user_id": user_id,
-                "segment_id": visit.segment_id,
-                "visited": visit.visited,
-                "visited_at": visited_at,
-                "notes": visit.notes,
-                "source": visit.source
-            })
+            result = conn.execute(
+                query,
+                {
+                    "user_id": user_id,
+                    "segment_id": visit.segment_id,
+                    "visited": visit.visited,
+                    "visited_at": visited_at,
+                    "notes": visit.notes,
+                    "source": visit.source,
+                },
+            )
             row = result.fetchone()
             if not row:
-                raise HTTPException(status_code=500, detail="Database did not return the visit ID")
+                raise HTTPException(
+                    status_code=500, detail="Database did not return the visit ID"
+                )
             visit_id = row[0]
             return {"status": "success", "visit_id": visit_id, "synced": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Database insert/update failed: {e}")
+        raise HTTPException(
+            status_code=500, detail=f"Database insert/update failed: {e}"
+        )
+
 
 @app.post("/api/sync/visits")
-def sync_visits(visits: List[VisitSyncItem], user_id: str = Depends(get_current_user_id)):
+def sync_visits(
+    visits: List[VisitSyncItem], user_id: str = Depends(get_current_user_id)
+):
     """
     Sync offline visits. Implements conflict resolution by visited_at timestamp (last write wins).
     Returns synced count and conflicts list with server state.
@@ -1048,7 +1178,9 @@ def sync_visits(visits: List[VisitSyncItem], user_id: str = Depends(get_current_
         with db_engine.connect() as conn:
             for item in visits:
                 try:
-                    client_time = datetime.fromisoformat(item.visited_at.replace("Z", "+00:00"))
+                    client_time = datetime.fromisoformat(
+                        item.visited_at.replace("Z", "+00:00")
+                    )
                 except ValueError:
                     continue
 
@@ -1058,19 +1190,23 @@ def sync_visits(visits: List[VisitSyncItem], user_id: str = Depends(get_current_
                     FROM user_visits
                     WHERE user_id = :user_id AND segment_id = :segment_id
                 """)
-                existing = conn.execute(check_query, {"user_id": user_id, "segment_id": item.segment_id}).fetchone()
+                existing = conn.execute(
+                    check_query, {"user_id": user_id, "segment_id": item.segment_id}
+                ).fetchone()
 
                 if existing:
                     server_visited, server_time, server_notes = existing
                     if server_time > client_time:
-                        conflicts.append({
-                            "segment_id": item.segment_id,
-                            "client_visited": item.visited,
-                            "client_visited_at": item.visited_at,
-                            "server_visited": server_visited,
-                            "server_visited_at": server_time.isoformat(),
-                            "server_notes": server_notes
-                        })
+                        conflicts.append(
+                            {
+                                "segment_id": item.segment_id,
+                                "client_visited": item.visited,
+                                "client_visited_at": item.visited_at,
+                                "server_visited": server_visited,
+                                "server_visited_at": server_time.isoformat(),
+                                "server_notes": server_notes,
+                            }
+                        )
                         continue
 
                 # Otherwise, upsert client state
@@ -1084,22 +1220,23 @@ def sync_visits(visits: List[VisitSyncItem], user_id: str = Depends(get_current_
                         source = EXCLUDED.source,
                         synced = TRUE
                 """)
-                conn.execute(upsert_query, {
-                    "user_id": user_id,
-                    "segment_id": item.segment_id,
-                    "visited": item.visited,
-                    "visited_at": client_time,
-                    "notes": item.notes,
-                    "source": item.source
-                })
+                conn.execute(
+                    upsert_query,
+                    {
+                        "user_id": user_id,
+                        "segment_id": item.segment_id,
+                        "visited": item.visited,
+                        "visited_at": client_time,
+                        "notes": item.notes,
+                        "source": item.source,
+                    },
+                )
                 synced_count += 1
-            
-            return {
-                "synced": synced_count,
-                "conflicts": conflicts
-            }
+
+            return {"synced": synced_count, "conflicts": conflicts}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Sync process failed: {e}")
+
 
 @app.post("/api/routes")
 def create_route(route: RouteCreate, user_id: str = Depends(get_current_user_id)):
@@ -1111,12 +1248,15 @@ def create_route(route: RouteCreate, user_id: str = Depends(get_current_user_id)
         raise HTTPException(status_code=500, detail="Database connection unavailable")
 
     if not route.segment_ids:
-        raise HTTPException(status_code=400, detail="A route must contain at least one segment")
+        raise HTTPException(
+            status_code=400, detail="A route must contain at least one segment"
+        )
 
     try:
         with db_engine.connect() as conn:
             # First collect the geometries of the segments and merge them
             from sqlalchemy import bindparam
+
             merge_query = text("""
                 INSERT INTO routes (user_id, name, geom)
                 VALUES (
@@ -1130,35 +1270,42 @@ def create_route(route: RouteCreate, user_id: str = Depends(get_current_user_id)
                 )
                 RETURNING id, ST_AsGeoJSON(geom) as geom_geojson
             """).bindparams(bindparam("segment_ids", expanding=True))
-            
-            result = conn.execute(merge_query, {
-                "user_id": user_id,
-                "name": route.name,
-                "segment_ids": route.segment_ids
-            })
-            
+
+            result = conn.execute(
+                merge_query,
+                {
+                    "user_id": user_id,
+                    "name": route.name,
+                    "segment_ids": route.segment_ids,
+                },
+            )
+
             row = result.fetchone()
             if not row or not row[1]:
-                raise HTTPException(status_code=400, detail="Could not construct route geometry. Make sure segment IDs exist.")
-            
+                raise HTTPException(
+                    status_code=400,
+                    detail="Could not construct route geometry. Make sure segment IDs exist.",
+                )
+
             route_id, geom_json = row
             return {
                 "status": "success",
                 "route_id": route_id,
                 "name": route.name,
-                "geometry": json.loads(geom_json)
+                "geometry": json.loads(geom_json),
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create route: {e}")
+
 
 # ==============================================================================
 # MAIN METHOD
 # ==============================================================================
 if __name__ == "__main__":
     import uvicorn
+
     # Read config from environment variables
     port = int(os.environ.get("API_PORT", "8000"))
     host = os.environ.get("API_HOST", "0.0.0.0")
     print(f"Launching Rastreador CNPJ Backend API on http://{host}:{port}...")
     uvicorn.run("api:app", host=host, port=port, reload=True)
-

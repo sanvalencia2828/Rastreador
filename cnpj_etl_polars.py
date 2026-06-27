@@ -14,9 +14,9 @@ import polars as pl
 import psycopg2
 import psycopg2.extras
 import json
-import sys
 import os
-from typing import List, Optional
+from typing import Optional
+
 
 # ==============================================================================
 # ENV LOADER
@@ -39,6 +39,7 @@ def load_env_file(dotenv_path: str = ".env") -> None:
         except Exception as e:
             print(f"Warning: {dotenv_path}: {e}")
 
+
 load_env_file()
 
 
@@ -47,14 +48,14 @@ REGIONAL_IBGE_CODES = [4113700, 4103701, 4109807, 4101408, 4112108]
 
 # CNAE codes for Tech + Repairs ONLY
 TECH_CNAE_CODES = [
-    '6201501',  # Desenvolvimento de programas de computador sob encomenda
-    '6202300',  # Desenvolvimento e licenciamento de programas de computador customizáveis
-    '6209100',  # Suporte técnico, manutenção e outros serviços em tecnologia da informação
+    "6201501",  # Desenvolvimento de programas de computador sob encomenda
+    "6202300",  # Desenvolvimento e licenciamento de programas de computador customizáveis
+    "6209100",  # Suporte técnico, manutenção e outros serviços em tecnologia da informação
 ]
 
 REPAIRS_CNAE_CODES = [
-    '9511800',  # Reparação e manutenção de computadores e de equipamentos periféricos
-    '9512600',  # Reparação e manutenção de equipamentos de comunicação
+    "9511800",  # Reparação e manutenção de computadores e de equipamentos periféricos
+    "9512600",  # Reparação e manutenção de equipamentos de comunicação
 ]
 
 VALID_CNAE_CODES = TECH_CNAE_CODES + REPAIRS_CNAE_CODES
@@ -65,11 +66,11 @@ def normalize_municipio(val: str) -> str:
     if not val:
         return val
     try:
-        val.encode('utf-8').decode('utf-8')
+        val.encode("utf-8").decode("utf-8")
     except UnicodeDecodeError:
         pass
     try:
-        fixed = val.encode('latin-1').decode('utf-8')
+        fixed = val.encode("latin-1").decode("utf-8")
         return fixed
     except (UnicodeEncodeError, UnicodeDecodeError, LookupError):
         return val
@@ -85,7 +86,7 @@ def get_db_connection() -> psycopg2.extensions.connection:
         db_name = os.environ.get("DB_NAME", "londrina_comercio")
         db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
     conn = psycopg2.connect(db_url)
-    conn.set_client_encoding('UTF8')
+    conn.set_client_encoding("UTF8")
     return conn
 
 
@@ -113,20 +114,44 @@ def load_and_filter_tech_data(file_path: str) -> pl.DataFrame:
     print(f"Cargando {file_path} con Polars...")
 
     estabelecimento_columns = [
-        'cnpj_basico', 'cnpj_ordem', 'cnpj_dv', 'identificador_matriz_filial',
-        'nome_fantasia', 'situacao_cadastral', 'data_situacao_cadastral',
-        'motivo_situacao_cadastral', 'nome_cidade_exterior', 'pais',
-        'data_inicio_atividade', 'cnae_fiscal_principal', 'cnae_fiscal_secundaria',
-        'tipo_logradouro', 'logradouro', 'numero', 'complemento', 'bairro',
-        'cep', 'uf', 'codigo_municipio', 'municipio', 'ddd_1', 'telefone_1',
-        'ddd_2', 'telefone_2', 'ddd_fax', 'fax', 'correio_eletronico',
-        'situacao_especial', 'data_situacao_especial', 'porte_empresa',
+        "cnpj_basico",
+        "cnpj_ordem",
+        "cnpj_dv",
+        "identificador_matriz_filial",
+        "nome_fantasia",
+        "situacao_cadastral",
+        "data_situacao_cadastral",
+        "motivo_situacao_cadastral",
+        "nome_cidade_exterior",
+        "pais",
+        "data_inicio_atividade",
+        "cnae_fiscal_principal",
+        "cnae_fiscal_secundaria",
+        "tipo_logradouro",
+        "logradouro",
+        "numero",
+        "complemento",
+        "bairro",
+        "cep",
+        "uf",
+        "codigo_municipio",
+        "municipio",
+        "ddd_1",
+        "telefone_1",
+        "ddd_2",
+        "telefone_2",
+        "ddd_fax",
+        "fax",
+        "correio_eletronico",
+        "situacao_especial",
+        "data_situacao_especial",
+        "porte_empresa",
     ]
 
     df = pl.read_csv(
         file_path,
-        separator=';',
-        encoding='latin1',
+        separator=";",
+        encoding="latin1",
         has_header=False,
         new_columns=estabelecimento_columns,
         infer_schema_length=10000,
@@ -135,15 +160,19 @@ def load_and_filter_tech_data(file_path: str) -> pl.DataFrame:
 
     # Normalizar municipio (Latin-1 → UTF-8)
     df = df.with_columns(
-        pl.col("municipio").map_elements(
+        pl.col("municipio")
+        .map_elements(
             lambda x: normalize_municipio(x) if x else x,
             return_dtype=pl.Utf8,
-        ).alias("municipio")
+        )
+        .alias("municipio")
     )
 
     # Filtrar
     filtered = df.with_columns(
-        pl.col("cnae_fiscal_principal").cast(pl.Utf8, strict=False).str.replace_all(r"[-/\s\.]", ""),
+        pl.col("cnae_fiscal_principal")
+        .cast(pl.Utf8, strict=False)
+        .str.replace_all(r"[-/\s\.]", ""),
         pl.col("codigo_municipio").cast(pl.Int64, strict=False),
         pl.col("situacao_cadastral").cast(pl.Int64, strict=False),
     ).filter(
@@ -158,20 +187,25 @@ def load_and_filter_tech_data(file_path: str) -> pl.DataFrame:
         return filtered
 
     # Clasificar business_type
-    filtered = filtered.with_columns([
-        pl.when(pl.col("cnae_fiscal_principal").is_in(TECH_CNAE_CODES))
-        .then(pl.lit("tech"))
-        .otherwise(pl.lit("repairs"))
-        .alias("business_type"),
-    ])
+    filtered = filtered.with_columns(
+        [
+            pl.when(pl.col("cnae_fiscal_principal").is_in(TECH_CNAE_CODES))
+            .then(pl.lit("tech"))
+            .otherwise(pl.lit("repairs"))
+            .alias("business_type"),
+        ]
+    )
 
     # Construir cnpj_completo
-    filtered = filtered.with_columns([
-        (pl.col("cnpj_basico").cast(pl.Utf8).str.zfill(8)
-         + pl.col("cnpj_ordem").cast(pl.Utf8).str.zfill(4)
-         + pl.col("cnpj_dv").cast(pl.Utf8).str.zfill(2)
-        ).alias("cnpj_completo"),
-    ])
+    filtered = filtered.with_columns(
+        [
+            (
+                pl.col("cnpj_basico").cast(pl.Utf8).str.zfill(8)
+                + pl.col("cnpj_ordem").cast(pl.Utf8).str.zfill(4)
+                + pl.col("cnpj_dv").cast(pl.Utf8).str.zfill(2)
+            ).alias("cnpj_completo"),
+        ]
+    )
 
     return filtered
 
@@ -181,15 +215,29 @@ def export_to_postgresql(df: pl.DataFrame, conn: psycopg2.extensions.connection)
     ensure_table_schema(conn)
     cursor = conn.cursor()
 
-    rows = df.select([
-        "cnpj_basico", "cnpj_ordem", "cnpj_dv", "cnpj_completo",
-        "identificador_matriz_filial", "nome_fantasia",
-        "situacao_cadastral", "cnae_fiscal_principal",
-        "logradouro", "numero", "bairro", "cep",
-        "uf", "codigo_municipio", "municipio",
-        "ddd_1", "telefone_1", "correio_eletronico",
-        "business_type",
-    ]).to_dicts()
+    rows = df.select(
+        [
+            "cnpj_basico",
+            "cnpj_ordem",
+            "cnpj_dv",
+            "cnpj_completo",
+            "identificador_matriz_filial",
+            "nome_fantasia",
+            "situacao_cadastral",
+            "cnae_fiscal_principal",
+            "logradouro",
+            "numero",
+            "bairro",
+            "cep",
+            "uf",
+            "codigo_municipio",
+            "municipio",
+            "ddd_1",
+            "telefone_1",
+            "correio_eletronico",
+            "business_type",
+        ]
+    ).to_dicts()
 
     insert_sql = """
         INSERT INTO estabelecimentos (
@@ -237,7 +285,9 @@ def export_to_json(df: pl.DataFrame, output_file: str) -> None:
 def main(input_file: Optional[str] = None):
     if input_file is None:
         input_file = "Estabelecimentos0.csv"
-        if not os.path.exists(input_file) and os.path.exists("sample_estabelecimentos.csv"):
+        if not os.path.exists(input_file) and os.path.exists(
+            "sample_estabelecimentos.csv"
+        ):
             input_file = "sample_estabelecimentos.csv"
 
     if not os.path.exists(input_file):

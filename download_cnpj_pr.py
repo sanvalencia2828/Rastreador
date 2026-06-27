@@ -12,7 +12,6 @@ listos para geocodificar via enriquecer_lojas.py
 
 import os
 import sys
-import urllib.error
 import duckdb
 import psycopg2
 import psycopg2.extras
@@ -29,26 +28,22 @@ def load_env_list(env_key: str, default_value: str) -> List[str]:
     raw_value = os.environ.get(env_key, default_value)
     return [item.strip().upper() for item in raw_value.split(",") if item.strip()]
 
+
 TARGET_MUNICIPIOS = load_env_list(
-    "TARGET_MUNICIPIOS",
-    "LONDRINA,CAMBE,IBIPORA,APUCARANA,JANDAIA DO SUL"
+    "TARGET_MUNICIPIOS", "LONDRINA,CAMBE,IBIPORA,APUCARANA,JANDAIA DO SUL"
 )
 
 MUN_NAME_MAP = {
-    'LONDRINA': 'Londrina',
-    'CAMBE': 'Cambé',
-    'IBIPORA': 'Ibiporã',
-    'APUCARANA': 'Apucarana',
-    'JANDAIA DO SUL': 'Jandaia do Sul',
+    "LONDRINA": "Londrina",
+    "CAMBE": "Cambé",
+    "IBIPORA": "Ibiporã",
+    "APUCARANA": "Apucarana",
+    "JANDAIA DO SUL": "Jandaia do Sul",
 }
 
-TECH_CNAE_CODES = {
-    6201501, 6202300, 6209100
-}
+TECH_CNAE_CODES = {6201501, 6202300, 6209100}
 
-REPAIRS_CNAE_CODES = {
-    9511800, 9512600
-}
+REPAIRS_CNAE_CODES = {9511800, 9512600}
 
 ALL_CNAES = TECH_CNAE_CODES | REPAIRS_CNAE_CODES
 
@@ -76,17 +71,16 @@ def normalize_municipio(raw: Optional[str]) -> Optional[str]:
     raw = raw.strip()
     # Intentar decodificar como UTF-8 limpio
     try:
-        raw.encode('utf-8').decode('utf-8')
+        raw.encode("utf-8").decode("utf-8")
     except UnicodeDecodeError:
         pass
     # Si hay bytes Latin-1 malinterpretados como UTF-8, reparar
     try:
-        raw_bytes = raw.encode('latin-1')
-        fixed = raw_bytes.decode('utf-8')
+        raw_bytes = raw.encode("latin-1")
+        fixed = raw_bytes.decode("utf-8")
         return fixed.upper()
     except (UnicodeEncodeError, UnicodeDecodeError, LookupError):
         return raw.upper()
-
 
 
 def get_db_connection() -> psycopg2.extensions.connection:
@@ -99,7 +93,7 @@ def get_db_connection() -> psycopg2.extensions.connection:
         db_name = os.environ.get("DB_NAME", "londrina_comercio")
         db_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
     conn = psycopg2.connect(db_url)
-    conn.set_client_encoding('UTF8')
+    conn.set_client_encoding("UTF8")
     return conn
 
 
@@ -126,10 +120,10 @@ def ensure_table_schema(conn: psycopg2.extensions.connection) -> None:
 # MAIN PIPELINE
 # ============================================================
 def main():
-    if hasattr(sys.stdout, 'reconfigure'):
-        sys.stdout.reconfigure(encoding='utf-8')  # type: ignore
-    if hasattr(sys.stderr, 'reconfigure'):
-        sys.stderr.reconfigure(encoding='utf-8')  # type: ignore
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore
 
     print("=" * 60)
     print("  Data Pipeline CNPJ - Sector Tech (DuckDB → PostgreSQL)")
@@ -146,12 +140,14 @@ def main():
             print(f"  Error DuckDB local: {e}")
 
     if conn is None:
-        print(f"[1/4] Conectando a fuente remota...")
+        print("[1/4] Conectando a fuente remota...")
         try:
             conn = duckdb.connect()
             conn.execute("INSTALL httpfs;")
             conn.execute("LOAD httpfs;")
-            conn.execute(f"ATTACH '{REMOTE_GDRIVE_URL}' AS remote_db (TYPE DUCKDB, READ_ONLY);")
+            conn.execute(
+                f"ATTACH '{REMOTE_GDRIVE_URL}' AS remote_db (TYPE DUCKDB, READ_ONLY);"
+            )
             conn.execute("USE remote_db;")
             print("  Conexión remota exitosa!")
         except Exception as e:
@@ -214,11 +210,23 @@ def main():
 
     for row in rows:
         (
-            cnpj_basico, cnpj_ordem, cnpj_dv, nome_fantasia,
-            cnae_fiscal, logradouro, numero, bairro, cep,
-            telefone_1, ddd_1, porte_empresa,
-            municipio_raw, cnae_int, matriz_filial,
-            situacao_cadastral, email,
+            cnpj_basico,
+            cnpj_ordem,
+            cnpj_dv,
+            nome_fantasia,
+            cnae_fiscal,
+            logradouro,
+            numero,
+            bairro,
+            cep,
+            telefone_1,
+            ddd_1,
+            porte_empresa,
+            municipio_raw,
+            cnae_int,
+            matriz_filial,
+            situacao_cadastral,
+            email,
         ) = row
 
         if cnae_int in TECH_CNAE_CODES:
@@ -240,34 +248,51 @@ def main():
         cnpj_dv_s = str(cnpj_dv).strip().zfill(2) if cnpj_dv else "00"
         cnpj_completo = f"{cnpj_basico_s}{cnpj_ordem_s}{cnpj_dv_s}"
 
-        pg_rows.append((
-            cnpj_basico_s, cnpj_ordem_s, cnpj_dv_s, cnpj_completo,
-            safe_int(matriz_filial),
-            nome_fantasia or None,
-            safe_int(situacao_cadastral),
-            None, None, None, None,
-            safe_int(cnae_int),
-            None,
-            None, None,
-            (logradouro or "").strip(),
-            (numero or "").strip(),
-            None,
-            (bairro or "").strip(),
-            str(cep).strip() if cep else None,
-            "PR",
-            None,
-            municipio,
-            ddd_1.strip() if ddd_1 else None,
-            str(telefone_1).strip() if telefone_1 else None,
-            None, None, None, None,
-            email.strip() if email else None,
-            None, None,
-            None, None, None,
-            btype,
-        ))
+        pg_rows.append(
+            (
+                cnpj_basico_s,
+                cnpj_ordem_s,
+                cnpj_dv_s,
+                cnpj_completo,
+                safe_int(matriz_filial),
+                nome_fantasia or None,
+                safe_int(situacao_cadastral),
+                None,
+                None,
+                None,
+                None,
+                safe_int(cnae_int),
+                None,
+                None,
+                None,
+                (logradouro or "").strip(),
+                (numero or "").strip(),
+                None,
+                (bairro or "").strip(),
+                str(cep).strip() if cep else None,
+                "PR",
+                None,
+                municipio,
+                ddd_1.strip() if ddd_1 else None,
+                str(telefone_1).strip() if telefone_1 else None,
+                None,
+                None,
+                None,
+                None,
+                email.strip() if email else None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                btype,
+            )
+        )
 
     # 4. Insertar en PostgreSQL
-    print(f"\n[4/4] Insertando {len(pg_rows)} registros en estabelecimentos (Railway)...")
+    print(
+        f"\n[4/4] Insertando {len(pg_rows)} registros en estabelecimentos (Railway)..."
+    )
     pg_conn = get_db_connection()
     try:
         ensure_table_schema(pg_conn)
@@ -315,7 +340,9 @@ def main():
         psycopg2.extras.execute_batch(cursor, insert_sql, pg_rows, page_size=500)
         pg_conn.commit()
         cursor.close()
-        print(f"  [OK] {len(pg_rows)} registros insertados/actualizados en estabelecimentos.")
+        print(
+            f"  [OK] {len(pg_rows)} registros insertados/actualizados en estabelecimentos."
+        )
     except Exception as e:
         pg_conn.rollback()
         print(f"  [ERROR] Falló inserción en PostgreSQL: {e}")
@@ -328,10 +355,10 @@ def main():
     print("  MÉTRICAS DE VERIFICACIÓN")
     print("=" * 60)
     print(f"  Total tech registros:  {len(rows)}")
-    print(f"  Desglose:")
+    print("  Desglose:")
     for k, v in type_counts.items():
         print(f"    - {k:8s}: {v}")
-    print(f"  Por municipio:")
+    print("  Por municipio:")
     for k, v in sorted(mun_counts.items(), key=lambda x: x[1], reverse=True):
         print(f"    - {k:20s}: {v}")
     print("=" * 60)
