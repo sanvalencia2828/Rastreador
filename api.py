@@ -288,10 +288,16 @@ def assign_geographic_coords(
 
     # Determine centroid based on prefix to prevent encoding conflicts (e.g. UTF-8 vs Latin1)
     center_lng, center_lat = None, None
-    if city_key.startswith("camb"):
+    if city_key.startswith("cambir"):
+        center_lng, center_lat = [-51.5778, -23.5828]  # Cambira
+    elif city_key.startswith("camb"):
         center_lng, center_lat = [-51.2782, -23.2758]  # Cambé
     elif city_key.startswith("ibipor"):
         center_lng, center_lat = [-51.0478, -23.2694]  # Ibiporã
+    elif city_key.startswith("roland"):
+        center_lng, center_lat = [-51.3897, -23.3105]  # Rolândia
+    elif city_key.startswith("arapong"):
+        center_lng, center_lat = [-51.4244, -23.4194]  # Arapongas
     elif city_key.startswith("apucar") or "apucar" in city_key:
         center_lng, center_lat = [-51.4614, -23.5521]  # Apucarana
     elif "janda" in city_key or "jata" in city_key:
@@ -637,6 +643,111 @@ def get_commercial_streets_analytics():
 
     print(f"Returning analytics for {len(result_list)} streets.")
     return result_list
+
+
+# ==============================================================================
+# BR-369 INTELLIGENT CORRIDOR
+# ==============================================================================
+
+# BR-369 corridor: ordered list of cities from Londrina → Jandaia do Sul
+BR369_CITIES = [
+    {"name": "Londrina",      "lat": -23.3110, "lng": -51.1610},
+    {"name": "Cambé",         "lat": -23.2758, "lng": -51.2782},
+    {"name": "Rolândia",      "lat": -23.3105, "lng": -51.3897},
+    {"name": "Arapongas",     "lat": -23.4194, "lng": -51.4244},
+    {"name": "Apucarana",     "lat": -23.5521, "lng": -51.4614},
+    {"name": "Cambira",       "lat": -23.5828, "lng": -51.5778},
+    {"name": "Jandaia do Sul","lat": -23.6064, "lng": -51.6447},
+]
+
+
+@app.get("/api/corridor/br369")
+def get_br369_corridor():
+    """
+    Intelligent BR-369 commercial corridor analysis.
+    Returns GeoJSON with:
+      - Route line (LineString through all cities)
+      - City point features with business stats per municipio
+      - Route metadata (total km, total businesses, density)
+    """
+    cache_key = "br369_corridor"
+    cached = get_cached_response(cache_key)
+    if cached is not None:
+        print("Returning cached BR-369 corridor.")
+        return cached
+
+    businesses = load_businesses()
+
+    # Count businesses per municipio + tech/repairs breakdown
+    city_stats = {}
+    for c in BR369_CITIES:
+        city_stats[c["name"]] = {"total": 0, "tech": 0, "repairs": 0}
+
+    for biz in businesses:
+        mun = (biz.get("municipio") or "").strip()
+        btype = biz.get("business_type", "")
+        for c in BR369_CITIES:
+            if mun.lower() == c["name"].lower() or mun.lower().startswith(c["name"].lower()[:5]):
+                city_stats[c["name"]]["total"] += 1
+                if btype == "tech":
+                    city_stats[c["name"]]["tech"] += 1
+                elif btype == "repairs":
+                    city_stats[c["name"]]["repairs"] += 1
+                break
+
+    total_businesses = sum(s["total"] for s in city_stats.values())
+    total_tech = sum(s["tech"] for s in city_stats.values())
+    total_repairs = sum(s["repairs"] for s in city_stats.values())
+
+    # Route line through all city centers
+    route_coords = [[c["lng"], c["lat"]] for c in BR369_CITIES]
+
+    # City point features
+    features = []
+    for c in BR369_CITIES:
+        stats = city_stats[c["name"]]
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [c["lng"], c["lat"]]},
+            "properties": {
+                "name": c["name"],
+                "total_businesses": stats["total"],
+                "tech_businesses": stats["tech"],
+                "repairs_businesses": stats["repairs"],
+                "type": "city",
+            },
+        })
+
+    # Route line feature
+    features.append({
+        "type": "Feature",
+        "geometry": {"type": "LineString", "coordinates": route_coords},
+        "properties": {
+            "name": "BR-369 Corridor",
+            "type": "route",
+            "total_cities": len(BR369_CITIES),
+            "total_businesses": total_businesses,
+            "total_tech": total_tech,
+            "total_repairs": total_repairs,
+        },
+    })
+
+    result = {
+        "type": "FeatureCollection",
+        "features": features,
+        "metadata": {
+            "corridor": "BR-369",
+            "cities": [c["name"] for c in BR369_CITIES],
+            "total_businesses": total_businesses,
+            "total_tech": total_tech,
+            "total_repairs": total_repairs,
+            "tech_pct": round(total_tech / total_businesses * 100, 1) if total_businesses else 0,
+        },
+    }
+
+    set_cached_response(cache_key, result, ttl=300)
+    print(f"Returning BR-369 corridor with {total_businesses} businesses across {len(BR369_CITIES)} cities.")
+    return result
 
 
 # ==============================================================================

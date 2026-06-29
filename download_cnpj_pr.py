@@ -30,14 +30,17 @@ def load_env_list(env_key: str, default_value: str) -> List[str]:
 
 
 TARGET_MUNICIPIOS = load_env_list(
-    "TARGET_MUNICIPIOS", "LONDRINA,CAMBE,IBIPORA,APUCARANA,JANDAIA DO SUL"
+    "TARGET_MUNICIPIOS", "LONDRINA,CAMBE,IBIPORA,ROLANDIA,ARAPONGAS,APUCARANA,CAMBIRA,JANDAIA DO SUL"
 )
 
 MUN_NAME_MAP = {
     "LONDRINA": "Londrina",
     "CAMBE": "Cambé",
     "IBIPORA": "Ibiporã",
+    "ROLANDIA": "Rolândia",
+    "ARAPONGAS": "Arapongas",
     "APUCARANA": "Apucarana",
+    "CAMBIRA": "Cambira",
     "JANDAIA DO SUL": "Jandaia do Sul",
 }
 

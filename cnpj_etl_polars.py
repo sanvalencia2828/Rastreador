@@ -43,8 +43,17 @@ def load_env_file(dotenv_path: str = ".env") -> None:
 load_env_file()
 
 
-# Regional cities IBGE codes (Londrina, Cambé, Ibiporã, Apucarana, Jandaia do Sul)
-REGIONAL_IBGE_CODES = [4113700, 4103701, 4109807, 4101408, 4112108]
+# BR-369 corridor cities IBGE codes (Londrina → Jandaia do Sul) + Ibiporã
+REGIONAL_IBGE_CODES = [
+    4113700,  # Londrina
+    4103701,  # Cambé
+    4109807,  # Ibiporã
+    4122404,  # Rolândia
+    4101507,  # Arapongas
+    4101408,  # Apucarana
+    4103800,  # Cambira
+    4112108,  # Jandaia do Sul
+]
 
 # CNAE codes for Tech + Repairs ONLY
 TECH_CNAE_CODES = [

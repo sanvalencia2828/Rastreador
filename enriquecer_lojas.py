@@ -76,12 +76,15 @@ HUBS = {
     5: {"coords": [-51.1550, -23.3180]},
 }
 
-# Centros de ciudades vecinas para fallback
+# Centros de ciudades para fallback (BR-369 corridor)
 CITY_CENTERS = {
-    "camb": [-51.2782, -23.2758],
-    "ibipor": [-51.0478, -23.2694],
-    "apucar": [-51.4614, -23.5521],
-    "janda": [-51.6447, -23.6064],
+    "camb": [-51.2782, -23.2758],       # Cambé
+    "ibipor": [-51.0478, -23.2694],     # Ibiporã
+    "roland": [-51.3897, -23.3105],     # Rolândia
+    "arapong": [-51.4244, -23.4194],    # Arapongas
+    "apucar": [-51.4614, -23.5521],     # Apucarana
+    "cambir": [-51.5778, -23.5828],     # Cambira
+    "janda": [-51.6447, -23.6064],      # Jandaia do Sul
 }
 
 
