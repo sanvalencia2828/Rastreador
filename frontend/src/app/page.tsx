@@ -1,266 +1,130 @@
 "use client";
 
-// Tech-only filters for Londrina Tech Radar: all, software, support, repairs (no gastronomy or general retail)
-import React, { useState, useRef, useMemo } from "react";
-import useSWR from "swr";
-import { MapRef } from "react-map-gl/maplibre";
-import Sidebar, { Cluster } from "@/components/sidebar";
-import MapView from "@/components/map-view";
-import { AlertCircle, Terminal, HelpCircle, Layers, Map } from "lucide-react";
+import { useState, useRef, useCallback } from "react";
+import dynamic from "next/dynamic";
+import SearchBar from "./components/SearchBar";
+import StatusMessage from "./components/StatusMessage";
+import ResultCard from "./components/ResultCard";
 
-// Generic JSON fetcher utility for SWR
-const fetcher = async (url: string) => {
-  const res = await fetch(url);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch: ${res.statusText}`);
-  }
-  return res.json();
-};
+const MapView = dynamic(() => import("./components/MapView"), { ssr: false });
 
-export default function DashboardPage() {
-  // Shared interactive states
-  const [activeClusterId, setActiveClusterId] = useState<number | null>(null);
-  const [hoveredClusterId, setHoveredClusterId] = useState<number | null>(null);
-  
-  // Layer toggle states
-  const [showHeatmap, setShowHeatmap] = useState(true);
-  const [showClusters, setShowClusters] = useState(true);
+type Status = "empty" | "loading" | "error" | "success";
 
-  // Sector filter state ("all" | "software" | "support" | "repairs")
-  const [selectedType, setSelectedType] = useState<"all" | "software" | "support" | "repairs">("all");
+interface GeoData {
+  lat: number;
+  lon: number;
+  display_name: string;
+  cep: string | null;
+}
 
-  // State for mobile view toggle ("map" | "list")
-  const [mobileView, setMobileView] = useState<"map" | "list">("map");
+export default function Home() {
+  const [status, setStatus] = useState<Status>("empty");
+  const [errorMessage, setErrorMessage] = useState<string | undefined>();
+  const [geoData, setGeoData] = useState<GeoData | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  // Reference for smooth fly-to camera controls on MapLibre canvas
-  const mapRef = useRef<MapRef | null>(null);
+  const handleSearch = useCallback(async (address: string) => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
 
-  // Dynamic API base URL resolver for local networks / mobile testing
-  const apiBaseUrl = useMemo(() => {
-    const defaultUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
-    if (typeof window !== "undefined") {
-      const hostname = window.location.hostname;
-      try {
-        const url = new URL(defaultUrl);
-        if (url.hostname === "localhost" || url.hostname === "127.0.0.1") {
-          url.hostname = hostname;
-        }
-        return url.toString().replace(/\/$/, "");
-      } catch (e) {
-        return defaultUrl;
+    setStatus("loading");
+    setErrorMessage(undefined);
+    setGeoData(null);
+
+    try {
+      const res = await fetch("/api/geocode", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address }),
+        signal: controller.signal,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setStatus("error");
+        setErrorMessage(data.error || "Error desconocido.");
+        return;
       }
+
+      setGeoData(data);
+      setStatus("success");
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        return;
+      }
+      setStatus("error");
+      setErrorMessage("No se pudo conectar al servidor. Verificá tu conexión.");
     }
-    return defaultUrl;
   }, []);
 
-  // Fetch Heatmap GeoJSON points from the local API
-  const {
-    data: heatmapData,
-    error: heatmapError,
-    isLoading: heatmapLoading,
-  } = useSWR(`${apiBaseUrl}/api/heatmap`, fetcher, {
-    revalidateOnFocus: false,
-    shouldRetryOnError: true,
-    errorRetryInterval: 5000, // Retry every 5 seconds if local API is not up yet
-  });
-
-  // Fetch Clusters JSON ranking list from the local API
-  const {
-    data: clustersData,
-    error: clustersError,
-    isLoading: clustersLoading,
-  } = useSWR<Cluster[]>(`${apiBaseUrl}/api/clusters/emergentes`, fetcher, {
-    revalidateOnFocus: false,
-    shouldRetryOnError: true,
-    errorRetryInterval: 5000,
-  });
-
-  // Camera animation handler
-  const handleFlyTo = (lng: number, lat: number, zoom = 14.5) => {
-    if (mapRef.current) {
-      mapRef.current.flyTo({
-        center: [lng, lat],
-        zoom,
-        duration: 2000,
-        essential: true,
-      });
-    }
-  };
-
-  // Helper to find nearest hub coordinates for client-side local filtering
-  const HUBS = useMemo(() => [
-    { id: 1, coords: [-51.1610, -23.3110] },
-    { id: 2, coords: [-51.1890, -23.3310] },
-    { id: 3, coords: [-51.1670, -23.3220] },
-    { id: 4, coords: [-51.1480, -23.2720] },
-    { id: 5, coords: [-51.1550, -23.3180] }
-  ], []);
-
-  const getNearestHub = (lng: number, lat: number) => {
-    let minDistance = Infinity;
-    let nearestHubId = 1;
-    for (const hub of HUBS) {
-      const dx = lng - hub.coords[0];
-      const dy = lat - hub.coords[1];
-      const dist = dx * dx + dy * dy;
-      if (dist < minDistance) {
-        minDistance = dist;
-        nearestHubId = hub.id;
-      }
-    }
-    return nearestHubId;
-  };
-
-  // 1. Local filtering of Heatmap Data based on selectedType
-  const filteredHeatmapData = useMemo(() => {
-    if (!heatmapData) return null;
-    if (selectedType === "all") return heatmapData;
-    return {
-      ...heatmapData,
-      features: heatmapData.features.filter((f: any) => {
-        const cnae = String(f.properties?.cnae || "").trim();
-        if (selectedType === "software") {
-          return cnae === "6201501" || cnae === "6202300";
-        }
-        if (selectedType === "support") {
-          return cnae === "6209100";
-        }
-        if (selectedType === "repairs") {
-          return cnae === "9511800" || cnae === "9512600";
-        }
-        return false;
-      }),
-    };
-  }, [heatmapData, selectedType]);
-
-  // 2. Recalculate cluster totals dynamically based on selected sector!
-  const filteredClusters = useMemo(() => {
-    if (!clustersData) return [];
-    if (selectedType === "all") return clustersData;
-
-    // Initialize counts for hubs
-    const counts: Record<number, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
-
-    if (heatmapData && heatmapData.features) {
-      const sectorFeatures = heatmapData.features.filter((f: any) => {
-        const cnae = String(f.properties?.cnae || "").trim();
-        if (selectedType === "software") {
-          return cnae === "6201501" || cnae === "6202300";
-        }
-        if (selectedType === "support") {
-          return cnae === "6209100";
-        }
-        if (selectedType === "repairs") {
-          return cnae === "9511800" || cnae === "9512600";
-        }
-        return false;
-      });
-      for (const f of sectorFeatures) {
-        if (f.geometry && f.geometry.coordinates) {
-          const [lng, lat] = f.geometry.coordinates;
-          const hubId = getNearestHub(lng, lat);
-          counts[hubId] = (counts[hubId] || 0) + 1;
-        }
-      }
-    }
-
-    return clustersData
-      .map((c) => ({
-        ...c,
-        total_lojas: counts[c.cluster_id] || 0,
-      }))
-      .sort((a, b) => b.total_lojas - a.total_lojas);
-  }, [clustersData, heatmapData, selectedType]);
-
-  const hasErrors = heatmapError || clustersError;
-  const isLoading = heatmapLoading || clustersLoading;
-
   return (
-    <main className="w-screen h-screen flex flex-col md:flex-row bg-zinc-950 overflow-hidden text-white relative font-sans">
-      {/* 1. Left Sidebar - Dynamic Rankings & Metrics */}
-      <div className={`h-screen md:h-auto flex-shrink-0 ${mobileView === "list" ? "w-full flex" : "hidden md:flex md:w-[350px]"}`}>
-        <Sidebar
-          clusters={filteredClusters}
-          isLoading={isLoading}
-          error={hasErrors}
-          activeClusterId={activeClusterId}
-          setActiveClusterId={setActiveClusterId}
-          hoveredClusterId={hoveredClusterId}
-          setHoveredClusterId={setHoveredClusterId}
-          onFlyTo={handleFlyTo}
-          showHeatmap={showHeatmap}
-          setShowHeatmap={setShowHeatmap}
-          showClusters={showClusters}
-          setShowClusters={setShowClusters}
-          selectedType={selectedType}
-          setSelectedType={setSelectedType}
-          apiBaseUrl={apiBaseUrl}
-          heatmapData={filteredHeatmapData}
-        />
+    <main
+      className="flex flex-col min-h-dvh"
+      style={{ padding: "24px 20px", maxWidth: "1200px", margin: "0 auto", width: "100%" }}
+    >
+      <header className="mb-6">
+        <h1
+          className="text-xl font-semibold tracking-tight"
+          style={{ color: "var(--fg)" }}
+        >
+          Geolocalizador de Lojas
+        </h1>
+        <p
+          className="text-xs mt-1"
+          style={{ color: "var(--muted)" }}
+        >
+          Buscá una dirección para marcar el punto y escanear lojas en un radio de 500m.
+        </p>
+      </header>
+
+      <div className="mb-5">
+        <SearchBar onSearch={handleSearch} isLoading={status === "loading"} />
       </div>
 
-      {/* 2. Right Pane - Interactive MapLibre GL Canvas */}
-      <div className={`flex-1 h-screen relative ${mobileView === "map" ? "block" : "hidden md:block"}`}>
-        <MapView
-          heatmapData={filteredHeatmapData}
-          clusters={filteredClusters}
-          activeClusterId={activeClusterId}
-          setActiveClusterId={setActiveClusterId}
-          hoveredClusterId={hoveredClusterId}
-          setHoveredClusterId={setHoveredClusterId}
-          mapRef={mapRef}
-          showHeatmap={showHeatmap}
-          showClusters={showClusters}
-          selectedType={selectedType}
-        />
-      </div>
-
-      {/* Floating Mobile Toggle Button */}
-      <button
-        onClick={() => setMobileView(mobileView === "map" ? "list" : "map")}
-        className="md:hidden absolute bottom-6 left-1/2 -translate-x-1/2 z-40 bg-zinc-900/90 backdrop-blur-md border border-white/10 hover:bg-zinc-800 text-white font-black text-xs px-6 py-3.5 rounded-full shadow-2xl flex items-center gap-2 cursor-pointer uppercase tracking-wider transition-all duration-300 active:scale-95"
-      >
-        {mobileView === "map" ? (
-          <>
-            <Terminal className="w-4 h-4 text-primary" />
-            <span>Ver Lista de Polos</span>
-          </>
-        ) : (
-          <>
-            <Layers className="w-4 h-4 text-primary" />
-            <span>Ver Mapa de Calor</span>
-          </>
-        )}
-      </button>
-
-      {/* 3. Helpful Offline Overlay Banner in case the Local API has not started */}
-      {hasErrors && (
-        <div className="absolute top-4 right-4 z-50 max-w-sm glass-panel p-4 rounded-2xl border-destructive/30 shadow-2xl flex gap-3 animate-fade-in">
-          <div className="w-8 h-8 rounded-lg bg-destructive/10 border border-destructive/20 flex-shrink-0 flex items-center justify-center text-destructive">
-            <AlertCircle className="w-5 h-5" />
-          </div>
-          <div className="space-y-1">
-            <h4 className="text-xs font-black text-white leading-tight">
-              API Fuera de Línea
-            </h4>
-            <p className="text-[10px] text-muted-foreground leading-normal">
-              No pudimos conectar con <code className="text-primary font-mono font-bold">{apiBaseUrl}</code>. El panel reintentará automáticamente cada 5 segundos.
-            </p>
-            <div className="pt-2 flex flex-col gap-1">
-              <span className="text-[9px] text-zinc-400 font-bold uppercase flex items-center gap-1">
-                <Terminal className="w-3 h-3 text-primary" /> Comando para levantar API:
-              </span>
-              <pre className="text-[9px] bg-black/40 border border-white/5 p-1.5 rounded font-mono text-zinc-300 overflow-x-auto">
-                uvicorn main:app --reload
-              </pre>
-            </div>
-            <div className="pt-1.5 text-[9px] text-muted-foreground flex items-center gap-1 font-semibold">
-              <HelpCircle className="w-3 h-3" />
-              Tip: Verifica CORS en tu backend de Python.
-            </div>
-          </div>
+      <div className="flex flex-col lg:flex-row gap-5 flex-1">
+        <div
+          className="lg:w-2/3"
+          style={{ minHeight: "400px", height: "100%" }}
+        >
+          <MapView lat={geoData?.lat ?? null} lon={geoData?.lon ?? null} />
         </div>
-      )}
+
+        <aside className="lg:w-1/3 flex flex-col gap-4">
+          {status !== "success" && (
+            <StatusMessage
+              type={status}
+              message={status === "error" ? errorMessage : undefined}
+            />
+          )}
+
+          {status === "success" && geoData && (
+            <ResultCard
+              displayName={geoData.display_name}
+              lat={geoData.lat}
+              lon={geoData.lon}
+              cep={geoData.cep}
+            />
+          )}
+
+          <div className="hidden lg:block flex-1" />
+
+          <div
+            className="text-xs"
+            style={{ color: "var(--muted)", lineHeight: "1.5" }}
+          >
+            <p>
+              <span style={{ color: "var(--fg-secondary)", fontWeight: 500 }}>Fuente:</span>{" "}
+              OpenStreetMap vía Nominatim
+            </p>
+            <p className="mt-1">
+              <span style={{ color: "var(--fg-secondary)", fontWeight: 500 }}>Radio:</span>{" "}
+              500m — adecuado para densidad urbana de lojas
+            </p>
+          </div>
+        </aside>
+      </div>
     </main>
   );
 }
