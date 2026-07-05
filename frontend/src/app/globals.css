@@ -1,200 +1,93 @@
-@import "tailwindcss";
-@import "maplibre-gl/dist/maplibre-gl.css";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* ==============================================================================
-   CUSTOM THEME — Rastreador Comercial Londrina
-   TailwindCSS v4 @theme extension for semantic color tokens
-   ============================================================================== */
-@theme {
-  --color-primary: #00F2FE;
-  --color-destructive: #EF4444;
-  --color-muted-foreground: #A1A1AA;
-  --color-border: rgba(255, 255, 255, 0.08);
-  --color-background: #09090B;
+:root {
+  --bg: #0f0f0f;
+  --bg-elevated: #141414;
+  --fg: #e8e8e8;
+  --fg-secondary: #a8a8a8;
+  --muted: #6b6b6b;
+  --accent: #00c9a7;
+  --accent-dim: #00c9a733;
+  --accent-hover: #00e6bf;
+  --card: #1a1a1a;
+  --border: #2a2a2a;
+  --error: #ff5c5c;
+  --error-dim: #ff5c5c22;
+  --success: #00c9a7;
+  --radius: 10px;
+}
 
-  /* Custom animations */
-  --animate-fade-in: fade-in 0.5s ease-out both;
-  --animate-scan: scan 4s linear infinite;
-  --animate-radar-glow: radar-glow 2s ease-in-out infinite;
-  --animate-shimmer: shimmer 2s ease-in-out infinite;
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
 
-  @keyframes fade-in {
-    from {
-      opacity: 0;
-      transform: translateY(8px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  line-height: 1.6;
+  min-height: 100dvh;
+}
+
+input,
+button {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  border: none;
+  outline: none;
+  background: none;
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+
+@layer utilities {
+  .text-accent {
+    color: var(--accent);
   }
-
-  @keyframes scan {
-    0% {
-      transform: translateY(-100%);
-    }
-    100% {
-      transform: translateY(200%);
-    }
+  .text-muted {
+    color: var(--muted);
   }
-
-  @keyframes radar-glow {
-    0%, 100% {
-      filter: drop-shadow(0 0 4px rgba(0, 242, 254, 0.4));
-    }
-    50% {
-      filter: drop-shadow(0 0 12px rgba(0, 242, 254, 0.8)) drop-shadow(0 0 24px rgba(0, 242, 254, 0.3));
-    }
+  .text-error {
+    color: var(--error);
   }
-
-  @keyframes shimmer {
-    0% {
-      background-position: -200% 0;
-    }
-    100% {
-      background-position: 200% 0;
-    }
+  .bg-card {
+    background: var(--card);
   }
-}
-
-/* ==============================================================================
-   BASE LAYER — Root reset & dark mode defaults
-   ============================================================================== */
-@layer base {
-  html,
-  body {
-    margin: 0 !important;
-    padding: 0 !important;
-    width: 100vw;
-    height: 100vh;
-    overflow: hidden;
-    background-color: var(--color-background);
-    color: white;
+  .border-default {
+    border-color: var(--border);
   }
-
-  /* Custom scrollbar — ultra-thin, dark, blends with sidebar */
-  ::-webkit-scrollbar {
-    width: 5px;
-    height: 5px;
-  }
-
-  ::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.08);
-    border-radius: 999px;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.15);
-  }
-
-  /* Firefox scrollbar */
-  * {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.08) transparent;
-  }
-}
-
-/* ==============================================================================
-   COMPONENT CLASSES — Glassmorphism & Utility Effects
-   ============================================================================== */
-
-/* Glass Panel — backdrop-blur frosted container */
-.glass-panel {
-  background: rgba(9, 9, 11, 0.85);
-  backdrop-filter: blur(20px) saturate(1.4);
-  -webkit-backdrop-filter: blur(20px) saturate(1.4);
-  border: 1px solid rgba(255, 255, 255, 0.06);
-}
-
-/* Glass Card — elevated card with subtle border */
-.glass-card {
-  background: linear-gradient(
-    to bottom,
-    rgba(30, 30, 40, 0.6),
-    rgba(15, 15, 22, 0.8)
-  );
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.05);
-  transition: all 0.3s ease;
-}
-
-.glass-card:hover {
-  border-color: rgba(0, 242, 254, 0.15);
-  box-shadow: 0 0 20px -5px rgba(0, 242, 254, 0.08);
-}
-
-/* Glass Card Active — selected/active state */
-.glass-card-active {
-  background: linear-gradient(
-    to bottom,
-    rgba(0, 242, 254, 0.08),
-    rgba(15, 15, 22, 0.9)
-  );
-  border-color: rgba(0, 242, 254, 0.35) !important;
-  box-shadow:
-    0 0 20px -5px rgba(0, 242, 254, 0.15),
-    inset 0 1px 0 rgba(0, 242, 254, 0.1);
-}
-
-/* Scan Line — animated scanning beam for sidebar */
-.scan-line {
-  background: linear-gradient(
-    to bottom,
-    transparent 0%,
-    rgba(0, 242, 254, 0.06) 40%,
-    rgba(0, 242, 254, 0.12) 50%,
-    rgba(0, 242, 254, 0.06) 60%,
-    transparent 100%
-  );
-  animation: var(--animate-scan);
-}
-
-/* Radar Glow — pulsing glow effect on radar icon */
-.radar-glow {
-  animation: var(--animate-radar-glow);
-}
-
-/* ==============================================================================
-   MAPLIBRE OVERRIDES — Clean up default control styles for dark mode
-   ============================================================================== */
-.maplibregl-ctrl-group {
-  background: rgba(9, 9, 11, 0.85) !important;
-  backdrop-filter: blur(12px) !important;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 12px !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
-}
-
-.maplibregl-ctrl-group button {
-  border: none !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
-}
-
-.maplibregl-ctrl-group button:last-child {
-  border-bottom: none !important;
-}
-
-.maplibregl-ctrl-group button + button {
-  border-top: none !important;
-}
-
-.maplibregl-ctrl button .maplibregl-ctrl-icon {
-  filter: invert(1) brightness(0.8);
-}
-
-.maplibregl-ctrl-attrib {
-  background: rgba(0, 0, 0, 0.5) !important;
-  color: rgba(255, 255, 255, 0.3) !important;
-  font-size: 9px !important;
-  border-radius: 8px !important;
-  padding: 2px 6px !important;
-}
-
-.maplibregl-ctrl-attrib a {
-  color: rgba(255, 255, 255, 0.4) !important;
 }

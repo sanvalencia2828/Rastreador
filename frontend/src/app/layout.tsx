@@ -1,39 +1,24 @@
-import type { Metadata } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import type { Metadata, Viewport } from "next";
+import { Geist } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
-  variable: "--font-inter",
+const geistSans = Geist({
   subsets: ["latin"],
-  display: "swap",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  variable: "--font-jetbrains",
-  subsets: ["latin"],
-  display: "swap",
+  variable: "--font-geist-sans",
 });
 
 export const metadata: Metadata = {
-  title: "Londrina Radar Comercial | Dashboard de Inteligencia Geográfica",
+  title: "Geolocalizador — Busca direcciones en el mapa",
   description:
-    "Plataforma analítica geoespacial para el rastreo y análisis de comercios y polos emergentes en Londrina, PR. Panel 100% de código abierto sin APIs comerciales.",
-  keywords: [
-    "Londrina",
-    "comercio",
-    "radar comercial",
-    "inteligencia geográfica",
-    "GIS",
-    "heatmap",
-    "CNPJ",
-    "ETL",
-  ],
-  authors: [{ name: "Rastreador Comercial" }],
-  manifest: "/manifest.json",
-  appleWebApp: {
-    capable: true,
-    statusBarStyle: "black-translucent",
-  },
+    "Ingresa una dirección y obtené las coordenadas exactas con un radio de 500m en el mapa.",
+  robots: "noindex, nofollow",
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: "#0f0f0f",
 };
 
 export default function RootLayout({
@@ -42,31 +27,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="es"
-      className={`${inter.variable} ${jetbrainsMono.variable} h-full antialiased`}
-    >
-      <head>
-        <meta name="theme-color" content="#09090b" />
-      </head>
-      <body className="min-h-full flex flex-col font-[family-name:var(--font-inter)]">
-        {children}
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/service-worker.js').then(function(reg) {
-                    console.log('Service Worker registrado con éxito:', reg.scope);
-                  }).catch(function(err) {
-                    console.log('Fallo al registrar Service Worker:', err);
-                  });
-                });
-              }
-            `,
-          }}
-        />
-      </body>
+    <html lang="es" className={geistSans.variable}>
+      <body>{children}</body>
     </html>
   );
 }
