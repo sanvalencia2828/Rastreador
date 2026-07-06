@@ -1624,6 +1624,82 @@ def delete_daily_route(
         raise HTTPException(status_code=500, detail=f"Failed to delete route: {e}")
 
 
+# ── NEARBY BUSINESSES (SPATIAL) ──────────────────────────────
+class NearbyBusiness(TechBusiness):
+    lat: float
+    lon: float
+    distance_m: float
+
+class NearbyBusinessesResponse(BaseModel):
+    total: int
+    items: List[NearbyBusiness]
+
+@app.get("/api/businesses/near")
+def get_nearby_businesses(
+    lat: float,
+    lon: float,
+    radius: int = 500,
+    limit: int = 50,
+):
+    """
+    Returns businesses within radius meters of a point.
+    Uses PostGIS ST_DWithin on geography for accurate meter-based distance.
+    """
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+
+    if radius <= 0 or radius > 2000:
+        raise HTTPException(status_code=400, detail="Radius must be between 1 and 2000 meters")
+
+    try:
+        with db_engine.connect() as conn:
+            rows = conn.execute(
+                text("""
+                    SELECT
+                        cnpj, nome_fantasia, cnae, cnae_label, cnae_icon,
+                        bairro, logradouro, municipio, business_type,
+                        ST_Y(geom::geometry) as lat,
+                        ST_X(geom::geometry) as lon,
+                        ST_Distance(
+                            geom::geography,
+                            ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography
+                        ) as distance_m
+                    FROM estabelecimentos
+                    WHERE situacao_cadastral = 2
+                      AND geom IS NOT NULL
+                      AND ST_DWithin(
+                          geom::geography,
+                          ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography,
+                          :radius
+                      )
+                    ORDER BY distance_m
+                    LIMIT :limit
+                """),
+                {"lat": lat, "lon": lon, "radius": radius, "limit": limit},
+            ).fetchall()
+
+            items = [
+                NearbyBusiness(
+                    cnpj=r[0],
+                    nome_fantasia=r[1],
+                    cnae=r[2],
+                    cnae_label=r[3],
+                    cnae_icon=r[4],
+                    bairro=r[5],
+                    logradouro=r[6],
+                    municipio=r[7],
+                    business_type=r[8],
+                    lat=float(r[9]),
+                    lon=float(r[10]),
+                    distance_m=round(float(r[11]), 1),
+                )
+                for r in rows
+            ]
+            return NearbyBusinessesResponse(total=len(items), items=items)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Spatial query failed: {e}")
+
+
 @app.get("/api/daily-routes/{route_id}/businesses")
 def get_route_businesses(
     route_id: str,

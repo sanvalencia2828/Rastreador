@@ -1,10 +1,13 @@
-import type { NextConfig } from "next";
-import path from "path";
+const backendUrl = process.env.BACKEND_URL || "http://localhost:8000";
 
-const nextConfig: NextConfig = {
-  output: "standalone",
-  turbopack: {
-    root: path.resolve(__dirname, ".."),
+const nextConfig = {
+  async rewrites() {
+    return [
+      {
+        source: "/api/businesses/:path*",
+        destination: `${backendUrl}/api/businesses/:path*`,
+      },
+    ];
   },
 };
 
