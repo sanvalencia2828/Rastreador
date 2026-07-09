@@ -60,3 +60,10 @@ desktop.ini
 # Large CNPJ raw data files
 K3241*
 *.ESTABELE
+
+# Local project notes / specs (personal)
+espc.md
+
+# Claude Code local config
+.claude/
+
