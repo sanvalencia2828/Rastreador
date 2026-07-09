@@ -67,3 +67,6 @@ espc.md
 # Claude Code local config
 .claude/
 
+# Opencode local agent instructions
+.opencode/
+
