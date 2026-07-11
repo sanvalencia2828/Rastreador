@@ -41,7 +41,9 @@ CREATE TABLE IF NOT EXISTS estabelecimentos (
     data_situacao_especial DATE,
     latitude DECIMAL(10, 8),
     longitude DECIMAL(11, 8),
+    geom geometry(Point, 4326),
     geocoded BOOLEAN DEFAULT FALSE,
+    business_type VARCHAR(20),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -75,6 +77,25 @@ CREATE TABLE IF NOT EXISTS heatmap_data (
 CREATE INDEX IF NOT EXISTS idx_clusters_center_geom ON clusters USING GIST(center_geom);
 CREATE INDEX IF NOT EXISTS idx_heatmap_data_geom ON heatmap_data USING GIST(geom);
 
+-- Users table for auth
+CREATE TABLE IF NOT EXISTS users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    username VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Daily routes table (BR-369 corridor / daily walk routes with street lists)
+CREATE TABLE IF NOT EXISTS daily_routes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id),
+    name VARCHAR(255) NOT NULL,
+    day_of_week VARCHAR(20),
+    streets TEXT[] DEFAULT '{}',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Create a function to update the updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -98,6 +119,8 @@ CREATE TRIGGER update_estabelecimentos_updated_at
 GRANT ALL PRIVILEGES ON TABLE estabelecimentos TO postgres;
 GRANT ALL PRIVILEGES ON TABLE clusters TO postgres;
 GRANT ALL PRIVILEGES ON TABLE heatmap_data TO postgres;
+GRANT ALL PRIVILEGES ON TABLE users TO postgres;
+GRANT ALL PRIVILEGES ON TABLE daily_routes TO postgres;
 GRANT ALL PRIVILEGES ON SEQUENCE estabelecimentos_id_seq TO postgres;
 GRANT ALL PRIVILEGES ON SEQUENCE clusters_cluster_id_seq TO postgres;
 GRANT ALL PRIVILEGES ON SEQUENCE heatmap_data_id_seq TO postgres;

@@ -850,6 +850,146 @@ def get_tech_businesses(limit: int = 50, offset: int = 0, search: str = ""):
 
 
 # ==============================================================================
+# NEARBY BUSINESSES (PostGIS spatial search)
+# ==============================================================================
+from math import radians, sin, cos, asin, sqrt
+
+
+def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> int:
+    r"""Great-circle distance in meters between two coordinate pairs."""
+    r = 6371000
+    la1, lo1, la2, lo2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlat, dlon = la2 - la1, lo2 - lo1
+    a = sin(dlat / 2) ** 2 + cos(la1) * cos(la2) * sin(dlon / 2) ** 2
+    return int(2 * r * asin(sqrt(a)))
+
+
+@app.get("/api/businesses/near")
+def get_businesses_near(lat: float, lon: float, radius: int = 500):
+    """
+    Returns businesses within `radius` meters of (lat, lon).
+    Uses PostGIS ST_DWithin on the geography column for accurate meter-based search.
+    Fallback to load_businesses() + haversine if geom column is unavailable.
+    """
+    if radius > 2000:
+        radius = 2000
+    if radius < 1:
+        radius = 500
+
+    cache_key = f"near_{lat}_{lon}_{radius}"
+    cached = get_cached_response(cache_key)
+    if cached is not None:
+        return cached
+
+    # Try PostGIS spatial query first
+    conn_str = os.environ.get("DATABASE_URL")
+    if not conn_str:
+        db_user = os.environ.get("DB_USER")
+        db_password = os.environ.get("DB_PASSWORD")
+        db_host = os.environ.get("DB_HOST")
+        db_port = os.environ.get("DB_PORT", "5432")
+        db_name = os.environ.get("DB_NAME")
+        if all([db_user, db_password, db_host, db_name]):
+            conn_str = (
+                f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+            )
+
+    if conn_str:
+        try:
+            engine = create_engine(conn_str)
+            with engine.connect() as conn:
+                query = text("""
+                    SELECT
+                        cnpj_completo,
+                        nome_fantasia,
+                        business_type,
+                        cnae_fiscal,
+                        logradouro,
+                        numero,
+                        bairro,
+                        municipio,
+                        porte_empresa,
+                        latitude,
+                        longitude,
+                        ST_Distance(
+                            geom::geography,
+                            ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography
+                        )::int as distance_m
+                    FROM estabelecimentos
+                    WHERE ST_DWithin(
+                        geom::geography,
+                        ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography,
+                        :radius
+                    )
+                      AND situacao_cadastral = 2
+                      AND geom IS NOT NULL
+                    ORDER BY distance_m ASC
+                    LIMIT 200
+                """)
+                result = conn.execute(query, {"lat": lat, "lon": lon, "radius": radius})
+                items = []
+                for row in result:
+                    r = dict(row._mapping)
+                    items.append({
+                        "cnpj": r.get("cnpj_completo", ""),
+                        "nome_fantasia": r.get("nome_fantasia") or "",
+                        "business_type": r.get("business_type") or "",
+                        "cnae": str(r.get("cnae_fiscal") or ""),
+                        "logradouro": r.get("logradouro") or "",
+                        "numero": r.get("numero") or "",
+                        "bairro": r.get("bairro") or "",
+                        "municipio": r.get("municipio") or "",
+                        "lat": float(r["latitude"]) if r.get("latitude") else 0,
+                        "lon": float(r["longitude"]) if r.get("longitude") else 0,
+                        "distance_m": r.get("distance_m", 0),
+                        "cnae_label": cnae_to_category(r.get("cnae_fiscal")),
+                        "cnae_icon": "",
+                        "porte_empresa": str(r.get("porte_empresa") or ""),
+                    })
+                response = {"items": items, "total": len(items), "radius": radius}
+                set_cached_response(cache_key, response, ttl=120)
+                return response
+        except Exception as e:
+            print(f"PostGIS /businesses/near failed: {e}. Falling back to haversine.")
+
+    # Fallback: load all businesses and filter by haversine
+    businesses = load_businesses()
+    items = []
+    for biz in businesses:
+        biz_lat = biz.get("latitude")
+        biz_lon = biz.get("longitude")
+        if biz_lat is None or biz_lon is None:
+            continue
+        dist = haversine_m(lat, lon, float(biz_lat), float(biz_lon))
+        if dist <= radius:
+            cnpj = format_cnpj(biz)
+            cnae_raw = str(
+                biz.get("cnae_fiscal") or biz.get("cnae_fiscal_principal") or ""
+            )
+            items.append({
+                "cnpj": cnpj,
+                "nome_fantasia": biz.get("nome_fantasia") or "",
+                "business_type": biz.get("business_type") or "",
+                "cnae": cnae_raw,
+                "logradouro": biz.get("logradouro") or "",
+                "numero": biz.get("numero") or "",
+                "bairro": biz.get("bairro") or "",
+                "municipio": biz.get("municipio") or "",
+                "lat": float(biz_lat),
+                "lon": float(biz_lon),
+                "distance_m": dist,
+                "cnae_label": cnae_to_category(cnae_raw),
+                "cnae_icon": "",
+                "porte_empresa": str(biz.get("porte_empresa") or ""),
+            })
+    items.sort(key=lambda x: x["distance_m"])
+    items = items[:200]
+    response = {"items": items, "total": len(items), "radius": radius}
+    set_cached_response(cache_key, response, ttl=120)
+    return response
+
+
+# ==============================================================================
 # MAIN METHOD
 # ==============================================================================
 # ==============================================================================
