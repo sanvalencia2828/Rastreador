@@ -20,4 +20,5 @@ export interface Business {
   lat: number;
   lon: number;
   distance_m: number;
+  status?: "new" | "visited" | "client";
 }

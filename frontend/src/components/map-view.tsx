@@ -343,21 +343,34 @@ export default function MapView({
   // Save visit handler
   const handleSaveVisit = async (notes: string, visited: boolean) => {
     if (!selectedSegment) return;
+    // The new visits table records every INSERT as a visit. Only register when
+    // the user confirms "visited"; otherwise just dismiss the modal.
+    if (!visited) return;
 
     const currentToken = token || localStorage.getItem("auth_token");
+
+    // Prefer the user's GPS location; fall back to the map click point.
+    const lat = userLocation ? userLocation[1] : selectedSegment.clickLat;
+    const lon = userLocation ? userLocation[0] : selectedSegment.clickLng;
+    if (lat == null || lon == null) {
+      alert("No se pudo determinar tu ubicación. Activa el GPS o toca sobre una calle.");
+      return;
+    }
+
     const visitPayload: OfflineVisit = {
-      segment_id: selectedSegment.id,
-      visited,
-      visited_at: new Date().toISOString(),
+      lat,
+      lon,
+      logradouro: selectedSegment.name,
+      bairro: null,
       notes,
-      source: "mobile"
+      visited_at: new Date().toISOString(),
     };
 
     if (!navigator.onLine) {
       // Guardar localmente
       await savePendingVisit(visitPayload);
       await checkPendingQueue();
-      
+
       // Update local layer in-memory instantly
       if (segmentsData) {
         const updatedFeatures = segmentsData.features.map((f: any) => {
@@ -366,7 +379,7 @@ export default function MapView({
               ...f,
               properties: {
                 ...f.properties,
-                visited_by_user: visited,
+                visited_by_user: true,
                 notes
               }
             };
@@ -504,7 +517,9 @@ export default function MapView({
           name: props.name,
           length_m: props.length_m,
           visited_by_user: props.visited_by_user === "true" || props.visited_by_user === true,
-          notes: props.notes
+          notes: props.notes,
+          clickLng: event.lngLat?.lng,
+          clickLat: event.lngLat?.lat,
         });
         setIsVisitModalOpen(true);
       }
@@ -974,7 +989,9 @@ export default function MapView({
                   <div>
                     <h4 className="text-xs font-extrabold text-white">{visit.street_name}</h4>
                     <span className="text-[9px] text-zinc-500 block mt-0.5">
-                      Fecha: {new Date(visit.visited_at).toLocaleDateString()} | Disp: {visit.source}
+                      Fecha: {new Date(visit.visited_at).toLocaleDateString()}
+                      {visit.bairro ? ` | ${visit.bairro}` : ""}
+                      {visit.cnpj ? ` | CNPJ: ${visit.cnpj}` : ""}
                     </span>
                     {visit.notes && (
                       <p className="text-[10px] text-zinc-400 mt-1.5 flex items-start gap-1">

@@ -7,6 +7,9 @@ interface Business {
   bairro: string;
   logradouro: string;
   distance_m: number;
+  lat?: number;
+  lon?: number;
+  status?: "new" | "visited" | "client";
 }
 
 interface StopCardProps {
@@ -16,6 +19,7 @@ interface StopCardProps {
   businesses: Business[];
   loadingBusinesses: boolean;
   onRemove: () => void;
+  onMarkVisited: (cnpj: string, logradouro: string, bairro: string, lat: number, lon: number) => void;
 }
 
 function parseAddressParts(displayName: string) {
@@ -23,8 +27,19 @@ function parseAddressParts(displayName: string) {
   return { street: parts[0] ?? "", district: parts[1] ?? "", city: parts.slice(2, 4).join(", ") ?? "" };
 }
 
-export default function StopCard({ index, displayName, cep, businesses, loadingBusinesses, onRemove }: StopCardProps) {
+export default function StopCard({ index, displayName, cep, businesses, loadingBusinesses, onRemove, onMarkVisited }: StopCardProps) {
   const { street, district, city } = parseAddressParts(displayName);
+
+  async function handleVisit(b: Business) {
+    if (!b.lat || !b.lon) return;
+    await fetch("/api/visits", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ cnpj: b.cnpj, lat: b.lat, lon: b.lon, logradouro: b.logradouro, bairro: b.bairro }),
+    });
+    onMarkVisited(b.cnpj, b.logradouro, b.bairro, b.lat, b.lon);
+  }
+
   return (
     <div className="slide-up" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "16px" }}>
       <div className="flex items-center justify-between mb-3">
@@ -32,7 +47,7 @@ export default function StopCard({ index, displayName, cep, businesses, loadingB
           <span className="flex items-center justify-center text-xs font-bold" style={{ width: "24px", height: "24px", borderRadius: "50%", background: "var(--accent)", color: "#0f0f0f" }}>{index + 1}</span>
           <span className="text-xs font-medium" style={{ color: "var(--accent)" }}>Parada {index + 1}</span>
         </div>
-        <button onClick={onRemove} className="flex items-center justify-center" style={{ width: "28px", height: "28px", borderRadius: "6px", color: "var(--muted)", transition: "color 0.2s, background 0.2s" }} onMouseEnter={e => { e.currentTarget.style.color = "var(--error)"; e.currentTarget.style.background = "var(--error-dim)"; }} onMouseLeave={e => { e.currentTarget.style.color = "var(--muted)"; e.currentTarget.style.background = "transparent"; }} aria-label="Eliminar parada">
+        <button onClick={onRemove} className="flex items-center justify-center" style={{ width: "28px", height: "28px", borderRadius: "6px", color: "var(--muted)" }} aria-label="Eliminar parada">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
         </button>
       </div>
@@ -48,16 +63,24 @@ export default function StopCard({ index, displayName, cep, businesses, loadingB
       </p>
       {businesses.length > 0 ? (
         <div className="space-y-2" style={{ maxHeight: "200px", overflowY: "auto" }}>
-          {businesses.map(b => (
-            <div key={b.cnpj} className="flex items-start gap-2 text-xs" style={{ padding: "8px", background: "var(--bg-elevated)", borderRadius: "6px" }}>
-              <span className="flex-shrink-0 mt-0.5" style={{ width: "8px", height: "8px", borderRadius: "50%", background: "#f59e0b" }} />
-              <div>
-                <p className="font-medium" style={{ color: "var(--fg)" }}>{b.nome_fantasia || b.cnpj}</p>
-                <p style={{ color: "var(--muted)" }}>{b.cnae_label} · {b.bairro}</p>
-                <p style={{ color: "var(--accent)", fontSize: "11px" }}>{b.distance_m}m</p>
+          {businesses.map(b => {
+            const isVisited = b.status === "visited" || b.status === "client";
+            return (
+              <div key={b.cnpj} className="flex items-start gap-2 text-xs" style={{ padding: "8px", background: isVisited ? "#22c55e08" : "var(--bg-elevated)", borderRadius: "6px", borderLeft: isVisited ? "2px solid #22c55e" : "2px solid transparent" }}>
+                <span className="flex-shrink-0 mt-0.5" style={{ width: "8px", height: "8px", borderRadius: "50%", background: b.status === "client" ? "#8b5cf6" : isVisited ? "#22c55e" : "#f59e0b" }} />
+                <div className="flex-1">
+                  <p className="font-medium" style={{ color: "var(--fg)" }}>{b.nome_fantasia || b.cnpj}</p>
+                  <p style={{ color: "var(--muted)" }}>{b.cnae_label} · {b.bairro}</p>
+                  <p style={{ color: b.status === "client" ? "#8b5cf6" : isVisited ? "#22c55e" : "var(--accent)", fontSize: "11px" }}>{b.status === "client" ? "✓ Cliente" : isVisited ? "✓ Visitada" : `${b.distance_m}m`}</p>
+                </div>
+                {!isVisited && b.lat && b.lon && (
+                  <button onClick={() => handleVisit(b)} className="flex-shrink-0 text-xs font-medium" style={{ padding: "4px 10px", borderRadius: "4px", background: "#22c55e15", color: "#22c55e", border: "1px solid #22c55e30", cursor: "pointer" }}>
+                    Visitar
+                  </button>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       ) : !loadingBusinesses ? (
         <p className="text-xs" style={{ color: "var(--muted)" }}>Sin lojas en este radio.</p>

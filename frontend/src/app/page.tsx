@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useMemo } from "react";
 import dynamic from "next/dynamic";
 import SearchBar from "./components/SearchBar";
 import StatusMessage from "./components/StatusMessage";
@@ -10,11 +10,13 @@ import type { Stop, Business } from "./types";
 const MapView = dynamic(() => import("./components/MapView"), { ssr: false });
 
 type Status = "empty" | "loading" | "error" | "success";
+type FilterType = "all" | "new" | "visited" | "client";
 
 export default function Home() {
   const [status, setStatus] = useState<Status>("empty");
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
   const [stops, setStops] = useState<Stop[]>([]);
+  const [filter, setFilter] = useState<FilterType>("all");
   const abortRef = useRef<AbortController | null>(null);
 
   const fetchBusinesses = useCallback(async (stopId: string, lat: number, lon: number) => {
@@ -58,39 +60,71 @@ export default function Home() {
     });
   }, []);
 
-  const allBusinesses = stops.flatMap(s => s.businesses);
-  const totalBusinesses = allBusinesses.length;
+  const handleMarkVisited = useCallback((cnpj: string) => {
+    setStops(prev => prev.map(stop => ({
+      ...stop,
+      businesses: stop.businesses.map(b => b.cnpj === cnpj ? { ...b, status: "visited" as const } : b),
+    })));
+  }, []);
+
+  const allBusinesses = useMemo(() => stops.flatMap(s => s.businesses), [stops]);
+
+  const filteredBusinesses = useMemo(() => {
+    if (filter === "all") return allBusinesses;
+    return allBusinesses.filter(b => b.status === filter);
+  }, [allBusinesses, filter]);
+
+  const counts = useMemo(() => ({
+    all: allBusinesses.length,
+    new: allBusinesses.filter(b => !b.status || b.status === "new").length,
+    visited: allBusinesses.filter(b => b.status === "visited").length,
+    client: allBusinesses.filter(b => b.status === "client").length,
+  }), [allBusinesses]);
+
+  const mapBusinesses = useMemo(() => filteredBusinesses.map(b => ({ lat: b.lat, lon: b.lon, nome_fantasia: b.nome_fantasia, distance_m: b.distance_m, status: b.status })), [filteredBusinesses]);
 
   return (
     <main className="flex flex-col min-h-dvh" style={{ padding: "24px 20px", maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
       <header className="mb-6">
         <h1 className="text-xl font-semibold tracking-tight" style={{ color: "var(--fg)" }}>Rastreador de Lojas</h1>
-        <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Agregá direcciones para escanear lojas en un radio de 500m alrededor de cada punto.</p>
+        <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Agregá direcciones para escanear lojas en un radio de 500m.</p>
       </header>
       <div className="mb-5">
         <SearchBar onSearch={handleSearch} isLoading={status === "loading"} />
       </div>
       <div className="flex flex-col lg:flex-row gap-5 flex-1">
         <div className="lg:w-2/3" style={{ minHeight: "400px", height: "100%" }}>
-          <MapView stops={stops.map(s => ({ id: s.id, lat: s.lat, lon: s.lon }))} businesses={allBusinesses} />
+          <MapView stops={stops.map(s => ({ id: s.id, lat: s.lat, lon: s.lon }))} businesses={mapBusinesses} />
         </div>
         <aside className="lg:w-1/3 flex flex-col gap-4">
           {stops.length > 0 && (
-            <div className="flex items-center gap-4 text-xs" style={{ padding: "12px 16px", background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
-              <span><span className="font-semibold" style={{ color: "var(--accent)" }}>{stops.length}</span><span style={{ color: "var(--muted)" }}> paradas</span></span>
-              <span><span className="font-semibold" style={{ color: "#f59e0b" }}>{totalBusinesses}</span><span style={{ color: "var(--muted)" }}> lojas</span></span>
-            </div>
+            <>
+              <div className="flex items-center gap-4 text-xs" style={{ padding: "12px 16px", background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
+                <span><span className="font-semibold" style={{ color: "var(--accent)" }}>{stops.length}</span><span style={{ color: "var(--muted)" }}> paradas</span></span>
+                <span><span className="font-semibold" style={{ color: "#f59e0b" }}>{counts.all}</span><span style={{ color: "var(--muted)" }}> lojas</span></span>
+                <span><span className="font-semibold" style={{ color: "#22c55e" }}>{counts.visited}</span><span style={{ color: "var(--muted)" }}> visitadas</span></span>
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {(["all", "new", "visited", "client"] as FilterType[]).map(f => (
+                  <button key={f} onClick={() => setFilter(f)} className="text-xs font-medium" style={{ padding: "5px 10px", borderRadius: "6px", border: "1px solid", borderColor: filter === f ? (f === "new" ? "#f59e0b" : f === "visited" ? "#22c55e" : f === "client" ? "#8b5cf6" : "var(--fg-secondary)") : "var(--border)", background: filter === f ? (f === "new" ? "#f59e0b15" : f === "visited" ? "#22c55e15" : f === "client" ? "#8b5cf615" : "transparent") : "transparent", color: filter === f ? (f === "new" ? "#f59e0b" : f === "visited" ? "#22c55e" : f === "client" ? "#8b5cf6" : "var(--fg-secondary)") : "var(--muted)", cursor: "pointer", transition: "all 0.2s" }}>
+                    {f === "all" ? "Todas" : f === "new" ? "Nuevas" : f === "visited" ? "Visitadas" : "Clientes"} ({counts[f]})
+                  </button>
+                ))}
+              </div>
+            </>
           )}
           {stops.length === 0 && <StatusMessage type={status} message={status === "error" ? errorMessage : undefined} />}
-          <div className="flex flex-col gap-3" style={{ maxHeight: "calc(100dvh - 280px)", overflowY: "auto" }}>
+          <div className="flex flex-col gap-3" style={{ maxHeight: "calc(100dvh - 340px)", overflowY: "auto" }}>
             {stops.map((stop, i) => (
-              <StopCard key={stop.id} index={i} displayName={stop.displayName} cep={stop.cep} businesses={stop.businesses} loadingBusinesses={stop.loadingBusinesses} onRemove={() => handleRemoveStop(stop.id)} />
+              <StopCard key={stop.id} index={i} displayName={stop.displayName} cep={stop.cep} businesses={stop.businesses} loadingBusinesses={stop.loadingBusinesses} onRemove={() => handleRemoveStop(stop.id)} onMarkVisited={handleMarkVisited} />
             ))}
           </div>
           <div className="hidden lg:block flex-1" />
           <div className="text-xs" style={{ color: "var(--muted)", lineHeight: "1.5" }}>
-            <p><span style={{ color: "var(--accent)", fontWeight: 500 }}>● Verde:</span> Parada de ruta</p>
-            <p><span style={{ color: "#f59e0b", fontWeight: 500 }}>● Naranja:</span> Loja cercana</p>
+            <p><span style={{ color: "var(--accent)", fontWeight: 500 }}>●</span> Parada</p>
+            <p><span style={{ color: "#f59e0b", fontWeight: 500 }}>●</span> Nueva</p>
+            <p><span style={{ color: "#22c55e", fontWeight: 500 }}>●</span> Visitada</p>
+            <p><span style={{ color: "#8b5cf6", fontWeight: 500 }}>■</span> Cliente</p>
           </div>
         </aside>
       </div>

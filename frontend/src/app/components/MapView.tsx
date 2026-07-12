@@ -25,9 +25,29 @@ const businessIcon = L.divIcon({
   className: "",
 });
 
+const visitedIcon = L.divIcon({
+  html: `<svg width="12" height="12" viewBox="0 0 12 12" xmlns="http://www.w3.org/2000/svg"><circle cx="6" cy="6" r="5" fill="#22c55e" stroke="#0f0f0f" stroke-width="1.5"/></svg>`,
+  iconSize: [12, 12],
+  iconAnchor: [6, 6],
+  className: "",
+});
+
+const clientIcon = L.divIcon({
+  html: `<svg width="14" height="14" viewBox="0 0 14 14" xmlns="http://www.w3.org/2000/svg"><rect x="1" y="1" width="12" height="12" rx="2" fill="#8b5cf6" stroke="#0f0f0f" stroke-width="1.5"/></svg>`,
+  iconSize: [14, 14],
+  iconAnchor: [7, 7],
+  className: "",
+});
+
 interface MapStop { id: string; lat: number; lon: number; }
-interface MapBusiness { lat: number; lon: number; nome_fantasia: string; distance_m: number; }
+interface MapBusiness { lat: number; lon: number; nome_fantasia: string; distance_m: number; status?: string; }
 interface MapViewProps { stops: MapStop[]; businesses: MapBusiness[]; }
+
+function getIcon(status?: string) {
+  if (status === "client") return clientIcon;
+  if (status === "visited") return visitedIcon;
+  return businessIcon;
+}
 
 export default function MapView({ stops, businesses }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -62,11 +82,11 @@ export default function MapView({ stops, businesses }: MapViewProps) {
   useEffect(() => {
     businessesLayerRef.current.clearLayers();
     businesses.forEach(b => {
-      L.marker([b.lat, b.lon], { icon: businessIcon }).bindPopup(`<b>${b.nome_fantasia}</b><br>${b.distance_m}m`).addTo(businessesLayerRef.current);
+      L.marker([b.lat, b.lon], { icon: getIcon(b.status) }).bindPopup(`<b>${b.nome_fantasia}</b><br>${b.distance_m}m`).addTo(businessesLayerRef.current);
     });
   }, [businesses]);
 
   return (
-    <div ref={containerRef} role="application" aria-label="Mapa con paradas y lojas cercanas" style={{ width: "100%", height: "100%", minHeight: "400px", borderRadius: "var(--radius)", overflow: "hidden" }} />
+    <div ref={containerRef} role="application" aria-label="Mapa con paradas y lojas" style={{ width: "100%", height: "100%", minHeight: "400px", borderRadius: "var(--radius)", overflow: "hidden" }} />
   );
 }

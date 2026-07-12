@@ -2,14 +2,19 @@
 // Native 0-dependency IndexedDB wrapper for offline Street Tracking cache and sync queue
 
 const DB_NAME = "LondrinaRadarOfflineDB";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 export interface OfflineVisit {
-  segment_id: number;
-  visited: boolean;
+  cnpj?: string | null;
+  lat: number;
+  lon: number;
+  logradouro: string;
+  bairro?: string | null;
+  route_id?: string | null;
+  notes?: string | null;
   visited_at: string;
-  notes: string;
-  source: string;
+  // Auto-incremented local id used as the IndexedDB key for de-duplication on re-sync
+  local_id?: number;
 }
 
 let dbInstance: IDBDatabase | null = null;
@@ -30,8 +35,16 @@ function getDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains("segments_cache")) {
         db.createObjectStore("segments_cache", { keyPath: "bbox" });
       }
+      // Bump version: recreate pending_visits store keyed by local_id instead of segment_id
+      if (db.objectStoreNames.contains("pending_visits")) {
+        db.deleteObjectStore("pending_visits");
+      }
       if (!db.objectStoreNames.contains("pending_visits")) {
-        db.createObjectStore("pending_visits", { keyPath: "segment_id" });
+        const store = db.createObjectStore("pending_visits", {
+          keyPath: "local_id",
+          autoIncrement: true,
+        });
+        store.createIndex("by_visited_at", "visited_at", { unique: false });
       }
     };
 
@@ -126,13 +139,13 @@ export async function getPendingVisits(): Promise<OfflineVisit[]> {
   }
 }
 
-export async function removePendingVisit(segmentId: number): Promise<void> {
+export async function removePendingVisit(localId: number): Promise<void> {
   try {
     const db = await getDB();
     return new Promise((resolve, reject) => {
       const tx = db.transaction("pending_visits", "readwrite");
       const store = tx.objectStore("pending_visits");
-      store.delete(segmentId);
+      store.delete(localId);
 
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);

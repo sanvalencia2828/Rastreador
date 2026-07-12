@@ -134,42 +134,21 @@ class Cluster(BaseModel):
 
 # CNAE code prefixes → human-readable categories
 CNAE_CATEGORY_MAP: Dict[str, str] = {
-    "47": "Moda y Calzado",
-    "46": "Comercio Mayorista",
-    "56": "Alimentos y Bebidas",
-    "55": "Alimentos y Bebidas",
-    "45": "Automotriz",
+    "47": "Comercio varejista",
+    "56": "Alimentación",
     "62": "Tecnología",
-    "63": "Tecnología",
-    "26": "Electrónica",
-    "27": "Electrónica",
-    "86": "Salud",
-    "87": "Salud",
-    "96": "Servicios",
-    "95": "Servicios",
-    "64": "Servicios Financieros",
-    "65": "Servicios Financieros",
-    "66": "Servicios Financieros",
-    "70": "Consultoría",
-    "71": "Consultoría",
-    "41": "Construcción",
-    "42": "Construcción",
-    "43": "Construcción",
-    "85": "Educación",
-    "84": "Administración Pública",
-    "49": "Transporte",
-    "50": "Transporte",
-    "51": "Transporte",
-    "52": "Logística",
+    "86": "Saúde",
+    "95": "Serviços",
 }
 
 
 def cnae_to_category(cnae) -> str:
-    """Maps a CNAE code (int or str) to a human-readable category."""
+    """Maps a CNAE code (int or str) to a human-readable category.
+    Unmapped prefixes fall back to 'Outros'."""
     if cnae is None:
-        return "Otros"
+        return "Outros"
     prefix = str(cnae)[:2]
-    return CNAE_CATEGORY_MAP.get(prefix, "Otros")
+    return CNAE_CATEGORY_MAP.get(prefix, "Outros")
 
 
 class RubroDistribucion(BaseModel):
@@ -881,7 +860,6 @@ def get_businesses_near(lat: float, lon: float, radius: int = 500):
     if cached is not None:
         return cached
 
-    # Try PostGIS spatial query first
     conn_str = os.environ.get("DATABASE_URL")
     if not conn_str:
         db_user = os.environ.get("DB_USER")
@@ -1071,19 +1049,25 @@ class UserLogin(BaseModel):
 
 
 class VisitCreate(BaseModel):
-    segment_id: int
-    visited: bool
-    visited_at: str
+    cnpj: Optional[str] = None
+    lat: float
+    lon: float
+    logradouro: str
+    bairro: Optional[str] = None
+    route_id: Optional[str] = None
     notes: Optional[str] = None
-    source: Optional[str] = "mobile"
+    visited_at: Optional[str] = None
 
 
 class VisitSyncItem(BaseModel):
-    segment_id: int
-    visited: bool
-    visited_at: str
+    cnpj: Optional[str] = None
+    lat: float
+    lon: float
+    logradouro: str
+    bairro: Optional[str] = None
+    route_id: Optional[str] = None
     notes: Optional[str] = None
-    source: Optional[str] = "mobile"
+    visited_at: str
 
 
 class RouteCreate(BaseModel):
@@ -1277,9 +1261,13 @@ def get_street_segments(
             if user_id:
                 query = text("""
                     SELECT s.id, s.osm_id, s.name, s.length_m, ST_AsGeoJSON(s.geom) as geom_geojson,
-                           COALESCE(v.visited, FALSE) as visited_by_user, v.notes, v.visited_at
+                           EXISTS(
+                               SELECT 1 FROM visits v
+                               WHERE v.logradouro = s.name AND v.user_id = :user_id
+                           ) as visited_by_user,
+                           (SELECT MAX(v.visited_at) FROM visits v
+                              WHERE v.logradouro = s.name AND v.user_id = :user_id) as last_visited
                     FROM street_segments s
-                    LEFT JOIN user_visits v ON s.id = v.segment_id AND v.user_id = :user_id
                     WHERE ST_Intersects(s.geom, ST_MakeEnvelope(:lng1, :lat1, :lng2, :lat2, 4326))
                 """)
                 params = {
@@ -1292,7 +1280,7 @@ def get_street_segments(
             else:
                 query = text("""
                     SELECT s.id, s.osm_id, s.name, s.length_m, ST_AsGeoJSON(s.geom) as geom_geojson,
-                           FALSE as visited_by_user, NULL as notes, NULL as visited_at
+                           FALSE as visited_by_user, NULL as last_visited
                     FROM street_segments s
                     WHERE ST_Intersects(s.geom, ST_MakeEnvelope(:lng1, :lat1, :lng2, :lat2, 4326))
                 """)
@@ -1314,10 +1302,10 @@ def get_street_segments(
                             float(row_dict["length_m"]) if row_dict["length_m"] else 0.0
                         ),
                         "visited_by_user": row_dict["visited_by_user"],
-                        "notes": row_dict["notes"],
+                        "notes": None,
                         "visited_at": (
-                            row_dict["visited_at"].isoformat()
-                            if row_dict["visited_at"]
+                            row_dict["last_visited"].isoformat()
+                            if row_dict["last_visited"]
                             else None
                         ),
                     },
@@ -1336,7 +1324,8 @@ def get_user_visits(
     current_user_id: str = Depends(get_current_user_id),
 ):
     """
-    Returns user visits. If user_id is not supplied, uses the authenticated current_user_id.
+    Returns the authenticated user's business-level visits (history).
+    Optional bbox filter restricts results to a geographic envelope.
     """
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
@@ -1344,10 +1333,10 @@ def get_user_visits(
     target_user_id = user_id if user_id else current_user_id
 
     query_str = """
-        SELECT v.id, v.segment_id, v.visited, v.visited_at, v.notes, v.source,
-               s.name as street_name, s.length_m, ST_AsGeoJSON(s.geom) as geom_geojson
-        FROM user_visits v
-        JOIN street_segments s ON v.segment_id = s.id
+        SELECT v.id, v.cnpj, v.lat, v.lon, v.logradouro, v.bairro,
+               v.notes, v.route_id, v.visited_at,
+               ST_AsGeoJSON(ST_SetSRID(ST_MakePoint(v.lon, v.lat), 4326)) as geom_geojson
+        FROM visits v
         WHERE v.user_id = :user_id
     """
     params: Dict[str, Any] = {"user_id": target_user_id}
@@ -1357,7 +1346,11 @@ def get_user_visits(
             parts = bbox.split(",")
             if len(parts) == 4:
                 lng1, lat1, lng2, lat2 = map(float, parts)
-                query_str += " AND ST_Intersects(s.geom, ST_MakeEnvelope(:lng1, :lat1, :lng2, :lat2, 4326))"
+                query_str += (
+                    " AND ST_Intersects("
+                    "ST_SetSRID(ST_MakePoint(v.lon, v.lat), 4326), "
+                    "ST_MakeEnvelope(:lng1, :lat1, :lng2, :lat2, 4326))"
+                )
                 params.update({"lng1": lng1, "lat1": lat1, "lng2": lng2, "lat2": lat2})
         except ValueError:
             pass
@@ -1372,15 +1365,15 @@ def get_user_visits(
                 visits.append(
                     {
                         "id": row_dict["id"],
-                        "segment_id": row_dict["segment_id"],
-                        "visited": row_dict["visited"],
-                        "visited_at": row_dict["visited_at"].isoformat(),
+                        "cnpj": row_dict["cnpj"],
+                        "lat": float(row_dict["lat"]),
+                        "lon": float(row_dict["lon"]),
+                        "logradouro": row_dict["logradouro"],
+                        "bairro": row_dict["bairro"],
                         "notes": row_dict["notes"],
-                        "source": row_dict["source"],
-                        "street_name": row_dict["street_name"],
-                        "length_m": (
-                            float(row_dict["length_m"]) if row_dict["length_m"] else 0.0
-                        ),
+                        "route_id": str(row_dict["route_id"]) if row_dict["route_id"] else None,
+                        "visited_at": row_dict["visited_at"].isoformat(),
+                        "street_name": row_dict["logradouro"],
                         "geometry": geom,
                     }
                 )
@@ -1390,42 +1383,43 @@ def get_user_visits(
 
 
 @app.post("/api/visits")
-def upsert_visit(visit: VisitCreate, user_id: str = Depends(get_current_user_id)):
+def create_visit(visit: VisitCreate, user_id: str = Depends(get_current_user_id)):
     """
-    Upsert individual user visit.
+    Record a new business/street visit. `visited_at` defaults to server NOW()
+    if omitted. `street_coverage` is updated automatically via DB trigger.
     """
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
 
-    try:
-        visited_at = datetime.fromisoformat(visit.visited_at.replace("Z", "+00:00"))
-    except ValueError:
-        raise HTTPException(
-            status_code=400, detail="Invalid visited_at timestamp format"
-        )
+    visited_at = None
+    if visit.visited_at:
+        try:
+            visited_at = datetime.fromisoformat(visit.visited_at.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(
+                status_code=400, detail="Invalid visited_at timestamp format"
+            )
 
     try:
         with db_engine.connect() as conn:
             query = text("""
-                INSERT INTO user_visits (user_id, segment_id, visited, visited_at, notes, source, synced)
-                VALUES (:user_id, :segment_id, :visited, :visited_at, :notes, :source, TRUE)
-                ON CONFLICT (user_id, segment_id) DO UPDATE SET
-                    visited = EXCLUDED.visited,
-                    visited_at = EXCLUDED.visited_at,
-                    notes = EXCLUDED.notes,
-                    source = EXCLUDED.source,
-                    synced = TRUE
+                INSERT INTO visits (user_id, route_id, cnpj, lat, lon, logradouro, bairro, notes, visited_at)
+                VALUES (:user_id, :route_id, :cnpj, :lat, :lon, :logradouro, :bairro, :notes,
+                        COALESCE(:visited_at, NOW()))
                 RETURNING id
             """)
             result = conn.execute(
                 query,
                 {
                     "user_id": user_id,
-                    "segment_id": visit.segment_id,
-                    "visited": visit.visited,
-                    "visited_at": visited_at,
+                    "route_id": visit.route_id,
+                    "cnpj": visit.cnpj,
+                    "lat": visit.lat,
+                    "lon": visit.lon,
+                    "logradouro": visit.logradouro,
+                    "bairro": visit.bairro,
                     "notes": visit.notes,
-                    "source": visit.source,
+                    "visited_at": visited_at,
                 },
             )
             row = result.fetchone()
@@ -1434,10 +1428,11 @@ def upsert_visit(visit: VisitCreate, user_id: str = Depends(get_current_user_id)
                     status_code=500, detail="Database did not return the visit ID"
                 )
             visit_id = row[0]
+            conn.commit()
             return {"status": "success", "visit_id": visit_id, "synced": True}
     except Exception as e:
         raise HTTPException(
-            status_code=500, detail=f"Database insert/update failed: {e}"
+            status_code=500, detail=f"Database insert failed: {e}"
         )
 
 
@@ -1446,14 +1441,16 @@ def sync_visits(
     visits: List[VisitSyncItem], user_id: str = Depends(get_current_user_id)
 ):
     """
-    Sync offline visits. Implements conflict resolution by visited_at timestamp (last write wins).
-    Returns synced count and conflicts list with server state.
+    Sync offline visits in batch. Each item becomes a new visit row (the new
+    visits table records history rather than upserts). Exact-duplicate detection
+    by (user_id, logradouro, lat, lon, visited_at) prevents repeat-sync issues.
+    Returns the number of visits actually inserted.
     """
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
 
-    synced_count = 0
-    conflicts = []
+    inserted_count = 0
+    skipped_count = 0
 
     try:
         with db_engine.connect() as conn:
@@ -1463,58 +1460,56 @@ def sync_visits(
                         item.visited_at.replace("Z", "+00:00")
                     )
                 except ValueError:
+                    skipped_count += 1
                     continue
 
-                # Check current server state
-                check_query = text("""
-                    SELECT visited, visited_at, notes
-                    FROM user_visits
-                    WHERE user_id = :user_id AND segment_id = :segment_id
+                # Skip if an identical visit already exists (idempotent re-sync)
+                dup_check = text("""
+                    SELECT 1 FROM visits
+                     WHERE user_id = :user_id
+                       AND logradouro = :logradouro
+                       AND lat = :lat
+                       AND lon = :lon
+                       AND visited_at = :visited_at
+                    LIMIT 1
                 """)
                 existing = conn.execute(
-                    check_query, {"user_id": user_id, "segment_id": item.segment_id}
-                ).fetchone()
-
-                if existing:
-                    server_visited, server_time, server_notes = existing
-                    if server_time > client_time:
-                        conflicts.append(
-                            {
-                                "segment_id": item.segment_id,
-                                "client_visited": item.visited,
-                                "client_visited_at": item.visited_at,
-                                "server_visited": server_visited,
-                                "server_visited_at": server_time.isoformat(),
-                                "server_notes": server_notes,
-                            }
-                        )
-                        continue
-
-                # Otherwise, upsert client state
-                upsert_query = text("""
-                    INSERT INTO user_visits (user_id, segment_id, visited, visited_at, notes, source, synced)
-                    VALUES (:user_id, :segment_id, :visited, :visited_at, :notes, :source, TRUE)
-                    ON CONFLICT (user_id, segment_id) DO UPDATE SET
-                        visited = EXCLUDED.visited,
-                        visited_at = EXCLUDED.visited_at,
-                        notes = EXCLUDED.notes,
-                        source = EXCLUDED.source,
-                        synced = TRUE
-                """)
-                conn.execute(
-                    upsert_query,
+                    dup_check,
                     {
                         "user_id": user_id,
-                        "segment_id": item.segment_id,
-                        "visited": item.visited,
+                        "logradouro": item.logradouro,
+                        "lat": item.lat,
+                        "lon": item.lon,
                         "visited_at": client_time,
+                    },
+                ).fetchone()
+                if existing:
+                    skipped_count += 1
+                    continue
+
+                insert_query = text("""
+                    INSERT INTO visits
+                        (user_id, route_id, cnpj, lat, lon, logradouro, bairro, notes, visited_at)
+                    VALUES
+                        (:user_id, :route_id, :cnpj, :lat, :lon, :logradouro, :bairro, :notes, :visited_at)
+                """)
+                conn.execute(
+                    insert_query,
+                    {
+                        "user_id": user_id,
+                        "route_id": item.route_id,
+                        "cnpj": item.cnpj,
+                        "lat": item.lat,
+                        "lon": item.lon,
+                        "logradouro": item.logradouro,
+                        "bairro": item.bairro,
                         "notes": item.notes,
-                        "source": item.source,
+                        "visited_at": client_time,
                     },
                 )
-                synced_count += 1
+                inserted_count += 1
 
-            return {"synced": synced_count, "conflicts": conflicts}
+            return {"synced": inserted_count, "skipped": skipped_count, "conflicts": []}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Sync process failed: {e}")
 
@@ -1571,12 +1566,83 @@ def create_route(route: RouteCreate, user_id: str = Depends(get_current_user_id)
             route_id, geom_json = row
             return {
                 "status": "success",
-                "route_id": route_id,
+                "route_id": str(route_id),
                 "name": route.name,
                 "geometry": json.loads(geom_json),
             }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create route: {e}")
+
+
+# ==============================================================================
+# STREET COVERAGE — aggregated per-street visit stats
+# ==============================================================================
+@app.get("/api/street-coverage")
+def get_street_coverage(
+    municipio: Optional[str] = None,
+    only_unvisited: bool = False,
+    limit: int = 200,
+):
+    """
+    Returns aggregated street coverage rows ordered by least-recently-visited
+    first (so the worker can pick the next street to walk).
+
+    - `municipio` filters by municipality (default: all).
+    - `only_unvisited=true` returns only streets with `last_visited IS NULL`.
+    - `limit` caps the number of rows returned (default 200).
+    """
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+
+    query_str = """
+        SELECT id, logradouro, bairro, municipio, state, last_visited,
+               visit_count, total_businesses, covered_businesses,
+               ST_AsGeoJSON(geom) as geom_geojson, updated_at
+        FROM street_coverage
+        WHERE 1=1
+    """
+    params: Dict[str, Any] = {}
+    if municipio:
+        query_str += " AND municipio = :municipio"
+        params["municipio"] = municipio
+    if only_unvisited:
+        query_str += " AND last_visited IS NULL"
+    query_str += " ORDER BY last_visited ASC NULLS FIRST, covered_businesses ASC LIMIT :limit"
+    params["limit"] = limit
+
+    try:
+        with db_engine.connect() as conn:
+            result = conn.execute(text(query_str), params)
+            rows = []
+            for row in result:
+                row_dict = dict(row._mapping)
+                geom = json.loads(row_dict["geom_geojson"]) if row_dict["geom_geojson"] else None
+                rows.append(
+                    {
+                        "id": row_dict["id"],
+                        "logradouro": row_dict["logradouro"],
+                        "bairro": row_dict["bairro"],
+                        "municipio": row_dict["municipio"],
+                        "state": row_dict["state"],
+                        "last_visited": (
+                            row_dict["last_visited"].isoformat()
+                            if row_dict["last_visited"]
+                            else None
+                        ),
+                        "visit_count": row_dict["visit_count"],
+                        "total_businesses": row_dict["total_businesses"],
+                        "covered_businesses": row_dict["covered_businesses"],
+                        "geometry": geom,
+                        "updated_at": (
+                            row_dict["updated_at"].isoformat()
+                            if row_dict["updated_at"]
+                            else None
+                        ),
+                    }
+                )
+            return rows
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Coverage query failed: {e}")
 
 
 # ==============================================================================
@@ -1764,82 +1830,6 @@ def delete_daily_route(
         raise HTTPException(status_code=500, detail=f"Failed to delete route: {e}")
 
 
-# ── NEARBY BUSINESSES (SPATIAL) ──────────────────────────────
-class NearbyBusiness(TechBusiness):
-    lat: float
-    lon: float
-    distance_m: float
-
-class NearbyBusinessesResponse(BaseModel):
-    total: int
-    items: List[NearbyBusiness]
-
-@app.get("/api/businesses/near")
-def get_nearby_businesses(
-    lat: float,
-    lon: float,
-    radius: int = 500,
-    limit: int = 50,
-):
-    """
-    Returns businesses within radius meters of a point.
-    Uses PostGIS ST_DWithin on geography for accurate meter-based distance.
-    """
-    if not db_engine:
-        raise HTTPException(status_code=500, detail="Database connection unavailable")
-
-    if radius <= 0 or radius > 2000:
-        raise HTTPException(status_code=400, detail="Radius must be between 1 and 2000 meters")
-
-    try:
-        with db_engine.connect() as conn:
-            rows = conn.execute(
-                text("""
-                    SELECT
-                        cnpj, nome_fantasia, cnae, cnae_label, cnae_icon,
-                        bairro, logradouro, municipio, business_type,
-                        ST_Y(geom::geometry) as lat,
-                        ST_X(geom::geometry) as lon,
-                        ST_Distance(
-                            geom::geography,
-                            ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography
-                        ) as distance_m
-                    FROM estabelecimentos
-                    WHERE situacao_cadastral = 2
-                      AND geom IS NOT NULL
-                      AND ST_DWithin(
-                          geom::geography,
-                          ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography,
-                          :radius
-                      )
-                    ORDER BY distance_m
-                    LIMIT :limit
-                """),
-                {"lat": lat, "lon": lon, "radius": radius, "limit": limit},
-            ).fetchall()
-
-            items = [
-                NearbyBusiness(
-                    cnpj=r[0],
-                    nome_fantasia=r[1],
-                    cnae=r[2],
-                    cnae_label=r[3],
-                    cnae_icon=r[4],
-                    bairro=r[5],
-                    logradouro=r[6],
-                    municipio=r[7],
-                    business_type=r[8],
-                    lat=float(r[9]),
-                    lon=float(r[10]),
-                    distance_m=round(float(r[11]), 1),
-                )
-                for r in rows
-            ]
-            return NearbyBusinessesResponse(total=len(items), items=items)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Spatial query failed: {e}")
-
-
 @app.get("/api/daily-routes/{route_id}/businesses")
 def get_route_businesses(
     route_id: str,
@@ -1942,6 +1932,59 @@ def get_route_businesses(
             "total": len(features),
         },
     }
+
+
+# ── CITIES ENDPOINTS ──────────────────────────────────────
+
+class City(BaseModel):
+    id: int
+    name: str
+    state: str
+    lat: float | None
+    lon: float | None
+
+class CityStats(BaseModel):
+    id: int
+    name: str
+    state: str
+    lat: float | None
+    lon: float | None
+    total_businesses: int
+
+@app.get("/api/cities")
+def get_cities():
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    try:
+        with db_engine.connect() as conn:
+            rows = conn.execute(text("SELECT id, name, state, lat, lon FROM cities ORDER BY id")).fetchall()
+            return [dict(r._mapping) for r in rows]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch cities: {e}")
+
+@app.get("/api/cities/{city_id}/stats")
+def get_city_stats(city_id: int):
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    try:
+        with db_engine.connect() as conn:
+            row = conn.execute(
+                text("SELECT id, name, state, lat, lon FROM cities WHERE id = :city_id"),
+                {"city_id": city_id},
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="City not found")
+            city = dict(row._mapping)
+            count = conn.execute(
+                text("SELECT COUNT(*) FROM estabelecimentos WHERE UPPER(municipio) = UPPER(:city_name) AND situacao_cadastral = 2 AND geom IS NOT NULL"),
+                {"city_name": city["name"]},
+            ).scalar()
+            city["total_businesses"] = count
+            return city
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch city stats: {e}")
 
 
 # ==============================================================================

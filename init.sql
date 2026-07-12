@@ -96,6 +96,29 @@ CREATE TABLE IF NOT EXISTS daily_routes (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Cities table (lookup of covered municipalities in Paraná)
+CREATE TABLE IF NOT EXISTS cities (
+    id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    state VARCHAR(2) NOT NULL DEFAULT 'PR',
+    lat NUMERIC(10,7),
+    lon NUMERIC(10,7),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(name, state)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cities_state ON cities(state);
+
+-- Seed the 6 covered cities (idempotent)
+INSERT INTO cities (name, state, lat, lon) VALUES
+('Londrina', 'PR', -23.3103, -51.1628),
+('Cambé', 'PR', -23.2778, -51.2675),
+('Apucarana', 'PR', -23.5489, -51.4594),
+('Pirapó', 'PR', -23.4167, -51.6500),
+('Cambira', 'PR', -23.3500, -51.5667),
+('Jandaia do Sul', 'PR', -23.2003, -51.5822)
+ON CONFLICT (name, state) DO NOTHING;
+
 -- Create a function to update the updated_at timestamp
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
@@ -121,9 +144,11 @@ GRANT ALL PRIVILEGES ON TABLE clusters TO postgres;
 GRANT ALL PRIVILEGES ON TABLE heatmap_data TO postgres;
 GRANT ALL PRIVILEGES ON TABLE users TO postgres;
 GRANT ALL PRIVILEGES ON TABLE daily_routes TO postgres;
+GRANT ALL PRIVILEGES ON TABLE cities TO postgres;
 GRANT ALL PRIVILEGES ON SEQUENCE estabelecimentos_id_seq TO postgres;
 GRANT ALL PRIVILEGES ON SEQUENCE clusters_cluster_id_seq TO postgres;
 GRANT ALL PRIVILEGES ON SEQUENCE heatmap_data_id_seq TO postgres;
+GRANT ALL PRIVILEGES ON SEQUENCE cities_id_seq TO postgres;
 
 -- Output success message
 SELECT 'Database initialization completed successfully' as message;
