@@ -1,23 +1,63 @@
 "use client";
 
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect, use } from "react";
+import Link from "next/link";
 import dynamic from "next/dynamic";
-import SearchBar from "./components/SearchBar";
-import StatusMessage from "./components/StatusMessage";
-import StopCard from "./components/StopCard";
-import type { Stop, Business } from "./types";
+import SearchBar from "../../components/SearchBar";
+import StatusMessage from "../../components/StatusMessage";
+import StopCard from "../../components/StopCard";
+import type { Stop, Business } from "../../types";
 
-const MapView = dynamic(() => import("./components/MapView"), { ssr: false });
+const MapView = dynamic(() => import("../../components/MapView"), { ssr: false });
 
 type Status = "empty" | "loading" | "error" | "success";
 type FilterType = "all" | "new" | "visited" | "client";
 
-export default function Home() {
+interface CityStats {
+  id: number | string;
+  name: string;
+  state: string;
+  lat: number;
+  lon: number;
+  total_businesses: number;
+}
+
+export default function CityPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
+
+  const [city, setCity] = useState<CityStats | null>(null);
+  const [cityError, setCityError] = useState<string | undefined>();
+  const [cityLoading, setCityLoading] = useState(true);
+
   const [status, setStatus] = useState<Status>("empty");
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
   const [stops, setStops] = useState<Stop[]>([]);
   const [filter, setFilter] = useState<FilterType>("all");
   const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadCity = async () => {
+      try {
+        const res = await fetch(`/api/cities/${id}/stats`);
+        if (!res.ok) throw new Error("fail");
+        const data: CityStats = await res.json();
+        if (!isMounted) return;
+        setCity(data);
+      } catch {
+        if (isMounted) setCityError("No se pudo cargar la ciudad.");
+      } finally {
+        if (isMounted) setCityLoading(false);
+      }
+    };
+
+    loadCity();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [id]);
 
   const fetchBusinesses = useCallback(async (stopId: string, lat: number, lon: number) => {
     setStops(prev => prev.map(s => s.id === stopId ? { ...s, loadingBusinesses: true } : s));
@@ -52,9 +92,9 @@ export default function Home() {
     }
   }, [fetchBusinesses]);
 
-  const handleRemoveStop = useCallback((id: string) => {
+  const handleRemoveStop = useCallback((stopId: string) => {
     setStops(prev => {
-      const next = prev.filter(s => s.id !== id);
+      const next = prev.filter(s => s.id !== stopId);
       if (next.length === 0) setStatus("empty");
       return next;
     });
@@ -90,18 +130,44 @@ export default function Home() {
 
   const mapBusinesses = useMemo(() => filteredBusinesses.map(b => ({ lat: b.lat, lon: b.lon, nome_fantasia: b.nome_fantasia, distance_m: b.distance_m, status: b.status })), [filteredBusinesses]);
 
+  const mapCenter = city ? { lat: city.lat, lon: city.lon } : undefined;
+
+  if (cityLoading) {
+    return (
+      <main className="flex flex-col min-h-dvh" style={{ padding: "24px 20px", maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
+        <p className="text-xs" style={{ color: "var(--muted)" }}>Cargando ciudad...</p>
+      </main>
+    );
+  }
+
+  if (cityError || !city) {
+    return (
+      <main className="flex flex-col min-h-dvh" style={{ padding: "24px 20px", maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
+        <Link href="/cities" className="inline-flex items-center gap-1 text-xs font-medium mb-4" style={{ color: "var(--accent)", textDecoration: "none" }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
+          Cidades
+        </Link>
+        <StatusMessage type="error" message={cityError ?? "Ciudad no encontrada."} />
+      </main>
+    );
+  }
+
   return (
     <main className="flex flex-col min-h-dvh" style={{ padding: "24px 20px", maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
       <header className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight" style={{ color: "var(--fg)" }}>Rastreador de Lojas</h1>
-        <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Agregá direcciones para escanear lojas en un radio de 500m.</p>
+        <Link href="/cities" className="inline-flex items-center gap-1 text-xs font-medium mb-3" style={{ color: "var(--accent)", textDecoration: "none" }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
+          Cidades
+        </Link>
+        <h1 className="text-xl font-semibold tracking-tight" style={{ color: "var(--fg)" }}>{city.name}</h1>
+        <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>{city.total_businesses} lojas registradas · {city.state}</p>
       </header>
       <div className="mb-5">
         <SearchBar onSearch={handleSearch} isLoading={status === "loading"} />
       </div>
       <div className="flex flex-col lg:flex-row gap-5 flex-1">
         <div className="lg:w-2/3" style={{ minHeight: "400px", height: "100%" }}>
-          <MapView stops={stops.map(s => ({ id: s.id, lat: s.lat, lon: s.lon }))} businesses={mapBusinesses} />
+          <MapView stops={stops.map(s => ({ id: s.id, lat: s.lat, lon: s.lon }))} businesses={mapBusinesses} center={mapCenter} />
         </div>
         <aside className="lg:w-1/3 flex flex-col gap-4">
           {stops.length > 0 && (
