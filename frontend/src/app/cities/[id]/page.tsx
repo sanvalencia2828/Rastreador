@@ -6,7 +6,7 @@ import dynamic from "next/dynamic";
 import SearchBar from "../../components/SearchBar";
 import StatusMessage from "../../components/StatusMessage";
 import StopCard from "../../components/StopCard";
-import type { Stop, Business } from "../../types";
+import type { Stop, Business, SavedRoute } from "../../types";
 
 const MapView = dynamic(() => import("../../components/MapView"), { ssr: false });
 
@@ -33,6 +33,9 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
   const [errorMessage, setErrorMessage] = useState<string | undefined>();
   const [stops, setStops] = useState<Stop[]>([]);
   const [filter, setFilter] = useState<FilterType>("all");
+  const [savedRoutes, setSavedRoutes] = useState<SavedRoute[]>([]);
+  const [loadingRouteId, setLoadingRouteId] = useState<string | undefined>();
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -53,6 +56,20 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
     };
 
     loadCity();
+
+    const loadRoutes = async () => {
+      try {
+        const res = await fetch(`/api/cities/${id}/routes`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!isMounted) return;
+        setSavedRoutes(data);
+      } catch {
+        /* silencioso */
+      }
+    };
+
+    loadRoutes();
 
     return () => {
       isMounted = false;
@@ -99,6 +116,82 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
       return next;
     });
   }, []);
+
+  const handleLoadRoute = useCallback(async (route: SavedRoute) => {
+    setLoadingRouteId(route.id);
+    const newStops: Stop[] = route.stops.map(s => ({
+      id: crypto.randomUUID(),
+      address: s.address,
+      lat: s.lat,
+      lon: s.lon,
+      displayName: s.display_name || s.address,
+      cep: s.cep,
+      businesses: [],
+      loadingBusinesses: true,
+    }));
+    setStops(newStops);
+    setStatus("success");
+
+    const allBusinesses: Business[] = [];
+    await Promise.all(newStops.map(async (stop) => {
+      try {
+        const res = await fetch(`/api/businesses/near?lat=${stop.lat}&lon=${stop.lon}&radius=500`);
+        if (!res.ok) return;
+        const data = await res.json();
+        const businesses: Business[] = data.items;
+        allBusinesses.push(...businesses);
+        setStops(prev => prev.map(s => s.id === stop.id ? { ...s, businesses, loadingBusinesses: false } : s));
+      } catch {
+        setStops(prev => prev.map(s => s.id === stop.id ? { ...s, loadingBusinesses: false } : s));
+      }
+    }));
+
+    const allCnpjs = allBusinesses.map(b => b.cnpj).filter(Boolean);
+    if (allCnpjs.length > 0) {
+      try {
+        const res = await fetch(`/api/businesses/status?cnpjs=${allCnpjs.join(",")}`);
+        if (res.ok) {
+          const statusMap = await res.json();
+          setStops(prev => prev.map(stop => ({
+            ...stop,
+            businesses: stop.businesses.map(b => ({
+              ...b,
+              status: (statusMap[b.cnpj] as "visited" | "client") || b.status || "new",
+            })),
+          })));
+        }
+      } catch { /* silencioso */ }
+    }
+
+    setLoadingRouteId(undefined);
+  }, []);
+
+  const handleConfirmDelete = useCallback(async () => {
+    const routeId = confirmDeleteId;
+    if (!routeId) return;
+
+    const route = savedRoutes.find(r => r.id === routeId);
+
+    try {
+      const res = await fetch(`/api/routes/${routeId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("delete failed");
+
+      setSavedRoutes(prev => prev.filter(r => r.id !== routeId));
+
+      if (route && stops.length === route.stops.length) {
+        const routeAddrs = new Set(route.stops.map(s => s.address));
+        const matches = stops.every(s => routeAddrs.has(s.address));
+        if (matches) {
+          setStops([]);
+          setStatus("empty");
+        }
+      }
+
+      setConfirmDeleteId(null);
+    } catch (err) {
+      console.error("Error deleting route:", err);
+    }
+  }, [confirmDeleteId, savedRoutes, stops]);
 
   const handleMarkVisited = useCallback((cnpj: string) => {
     setStops(prev => prev.map(stop => ({
@@ -170,6 +263,74 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
           <MapView stops={stops.map(s => ({ id: s.id, lat: s.lat, lon: s.lon }))} businesses={mapBusinesses} center={mapCenter} />
         </div>
         <aside className="lg:w-1/3 flex flex-col gap-4">
+          {savedRoutes.length > 0 && (
+            <div className="flex flex-col gap-2" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "12px" }}>
+              <p className="text-xs font-medium" style={{ color: "var(--muted)" }}>Rutas guardadas</p>
+              {savedRoutes.map(route => (
+                <div key={route.id} className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between gap-2" style={{ padding: "8px 10px", background: "var(--bg-elevated)", borderRadius: "6px", border: "1px solid var(--border)" }}>
+                    <div className="flex flex-col" style={{ minWidth: 0, flex: 1 }}>
+                      <span className="text-xs font-medium truncate" style={{ color: "var(--fg)" }}>{route.name}</span>
+                      <span className="text-xs" style={{ color: "var(--muted)" }}>{route.stops.length} paradas</span>
+                    </div>
+                    <button
+                      onClick={() => handleLoadRoute(route)}
+                      disabled={loadingRouteId === route.id}
+                      className="text-xs font-medium inline-flex items-center gap-1"
+                      style={{
+                        padding: "5px 10px",
+                        borderRadius: "6px",
+                        border: "1px solid var(--accent)",
+                        background: "var(--accent)",
+                        color: "var(--bg)",
+                        cursor: loadingRouteId === route.id ? "wait" : "pointer",
+                        opacity: loadingRouteId === route.id ? 0.6 : 1,
+                        whiteSpace: "nowrap",
+                        transition: "opacity 0.2s",
+                      }}
+                    >
+                      {loadingRouteId === route.id ? (
+                        <>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ animation: "spin 1s linear infinite" }}>
+                            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+                          </svg>
+                          Cargando
+                        </>
+                      ) : "Cargar"}
+                    </button>
+                    <button
+                      onClick={() => setConfirmDeleteId(route.id)}
+                      onMouseEnter={(e) => { e.currentTarget.style.color = "var(--error)"; e.currentTarget.style.background = "var(--error-dim)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.color = "var(--muted)"; e.currentTarget.style.background = "transparent"; }}
+                      style={{ width: "28px", height: "28px", borderRadius: "6px", color: "var(--muted)", display: "inline-flex", alignItems: "center", justifyContent: "center", border: "none", cursor: "pointer", flexShrink: 0, transition: "all 0.2s" }}
+                      aria-label="Eliminar ruta"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                    </button>
+                  </div>
+                  {confirmDeleteId === route.id && (
+                    <div className="flex items-center gap-2" style={{ padding: "4px 10px" }}>
+                      <span className="text-xs" style={{ color: "var(--fg)" }}>¿Eliminar esta ruta?</span>
+                      <button
+                        onClick={handleConfirmDelete}
+                        className="text-xs font-medium"
+                        style={{ background: "var(--error)", color: "white", padding: "4px 12px", borderRadius: "4px", border: "none", cursor: "pointer" }}
+                      >
+                        Sí
+                      </button>
+                      <button
+                        onClick={() => setConfirmDeleteId(null)}
+                        className="text-xs font-medium"
+                        style={{ background: "var(--bg-elevated)", color: "var(--fg-secondary)", border: "1px solid var(--border)", padding: "4px 12px", borderRadius: "4px", cursor: "pointer" }}
+                      >
+                        No
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           {stops.length > 0 && (
             <>
               <div className="flex items-center gap-4 text-xs" style={{ padding: "12px 16px", background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)" }}>
@@ -201,6 +362,7 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
           </div>
         </aside>
       </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </main>
   );
 }

@@ -4,91 +4,75 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import StatusMessage from "../components/StatusMessage";
 
-interface City {
+interface CityWithStats {
   id: string | number;
   name: string;
   state: string;
   lat: number;
   lon: number;
-  total_businesses?: number;
+  total_businesses: number | null;
 }
 
 const skeletonCards = Array.from({ length: 6 }, (_, index) => index);
 
 export default function CitiesPage() {
-  const [cities, setCities] = useState<City[]>([]);
+  const [citiesWithStats, setCitiesWithStats] = useState<CityWithStats[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | undefined>();
 
   useEffect(() => {
     let isMounted = true;
 
-    const loadCities = async () => {
+    const load = async () => {
       try {
         const res = await fetch("/api/cities");
         if (!res.ok) throw new Error("Unable to fetch cities");
-        const data: City[] = await res.json();
+        const data = await res.json();
+        if (!isMounted) return;
+
+        const baseCities: CityWithStats[] = (data as Array<{ id: string | number; name: string; state: string; lat: number; lon: number }>).map(c => ({
+          id: c.id,
+          name: c.name,
+          state: c.state,
+          lat: c.lat,
+          lon: c.lon,
+          total_businesses: null,
+        }));
+        setCitiesWithStats(baseCities);
+        setLoading(false);
+
+        const statsResults = await Promise.allSettled(
+          baseCities.map(async (city) => {
+            const statRes = await fetch(`/api/cities/${city.id}/stats`);
+            if (!statRes.ok) throw new Error(`Unable to fetch stats for ${city.id}`);
+            const stat = await statRes.json();
+            return stat.total_businesses ?? null;
+          })
+        );
 
         if (!isMounted) return;
-        setCities(data);
+
+        setCitiesWithStats(prev =>
+          prev.map((city, i) => {
+            const result = statsResults[i];
+            if (!result || result.status === "rejected") return city;
+            return { ...city, total_businesses: result.value };
+          })
+        );
       } catch {
         if (isMounted) {
           setError("No se pudieron cargar las ciudades en este momento.");
-        }
-      } finally {
-        if (isMounted) {
           setLoading(false);
         }
       }
     };
 
-    loadCities();
+    load();
 
     return () => {
       isMounted = false;
     };
   }, []);
-
-  useEffect(() => {
-    if (cities.length === 0) return;
-
-    let isMounted = true;
-
-    const loadStats = async () => {
-      try {
-        const results = await Promise.all(
-          cities.map(async (city) => {
-            const res = await fetch(`/api/cities/${city.id}/stats`);
-            if (!res.ok) throw new Error(`Unable to fetch stats for ${city.id}`);
-            return (await res.json()) as City;
-          })
-        );
-
-        if (!isMounted) return;
-
-        setCities((prev) =>
-          prev.map((city) => {
-            const stat = results.find((item) => String(item.id) === String(city.id));
-            return {
-              ...city,
-              ...stat,
-              total_businesses: stat?.total_businesses ?? city.total_businesses ?? 0,
-            };
-          })
-        );
-      } catch {
-        if (isMounted) {
-          setError("No se pudo cargar el conteo de lojas de las ciudades.");
-        }
-      }
-    };
-
-    loadStats();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [cities.length]);
 
   return (
     <main
@@ -108,7 +92,7 @@ export default function CitiesPage() {
         </p>
       </header>
 
-      {loading && cities.length === 0 ? (
+      {loading && citiesWithStats.length === 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {skeletonCards.map((item) => (
             <div
@@ -171,9 +155,9 @@ export default function CitiesPage() {
 
       {error && !loading ? <StatusMessage type="error" message={error} /> : null}
 
-      {!error && cities.length > 0 ? (
+      {!error && citiesWithStats.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {cities.map((city) => (
+          {citiesWithStats.map((city) => (
             <article
               key={city.id}
               className="flex flex-col gap-4 rounded-[var(--radius)] border"
@@ -192,9 +176,11 @@ export default function CitiesPage() {
                 </p>
               </div>
 
-              <p className="text-xs" style={{ color: "var(--accent)" }}>
-                {city.total_businesses ?? 0} lojas registradas
-              </p>
+              {city.total_businesses !== null && (
+                <p className="text-xs" style={{ color: "var(--accent)" }}>
+                  {city.total_businesses} lojas registradas
+                </p>
+              )}
 
               <Link
                 href={`/cities/${city.id}`}
