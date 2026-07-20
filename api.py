@@ -8,6 +8,7 @@ Date: 2026-05-24
 """
 
 import os
+import time
 import json
 import hashlib
 from typing import List, Dict, Any, Optional
@@ -40,28 +41,48 @@ def load_env_file(dotenv_path: str = ".env") -> None:
             print(f"Warning: Could not read {dotenv_path}: {e}")
 
 
-load_env_file()
+def load_environment_files() -> None:
+    """Loads environment files in a predictable precedence order."""
+    app_env = os.getenv("APP_ENV", "development").strip().lower()
+    env_files = [".env"]
+    if app_env:
+        env_files.append(f".env.{app_env}")
+    env_files.append(".env.local")
 
+    for env_file in env_files:
+        load_env_file(env_file)
+
+
+load_environment_files()
+
+
+# ==============================================================================
+# APP INSTANCE & CORS
+# ==============================================================================
 app = FastAPI(
-    title="Rastreador CNPJ API",
-    description="API para mapas y clústeres de comercios en Londrina, PR",
+    title="Londrina Radar Comercial API",
+    description="Plataforma analítica geoespacial para rastreo de comercios en Londrina, PR",
     version="1.0.0",
 )
 
+cors_origins_raw = os.environ.get(
+    "CORS_ORIGINS",
+    "http://localhost:3000,http://localhost:3001,http://localhost:8000",
+)
+cors_origins = [o.strip() for o in cors_origins_raw.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex="https?://.*",
+    allow_origins=cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# ==============================================================================
-# IN-MEMORY CACHE HELPER (ZERO-DEPENDENCY)
-# ==============================================================================
-import time
 
-_RESPONSE_CACHE = {}
+# ==============================================================================
+# IN-MEMORY RESPONSE CACHE
+# ==============================================================================
+_RESPONSE_CACHE: Dict[str, Any] = {}
 
 
 def get_cached_response(key: str) -> Optional[Any]:
@@ -843,6 +864,16 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> int:
     return int(2 * r * asin(sqrt(a)))
 
 
+def fix_encoding(text):
+    r"""Repair double-encoded UTF-8 mojibake (e.g. 'InformaÃ§Ã£o' -> 'Informação')."""
+    if not isinstance(text, str):
+        return text
+    try:
+        return text.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+
+
 @app.get("/api/businesses/near")
 def get_businesses_near(lat: float, lon: float, radius: int = 500):
     """
@@ -910,13 +941,13 @@ def get_businesses_near(lat: float, lon: float, radius: int = 500):
                     r = dict(row._mapping)
                     items.append({
                         "cnpj": r.get("cnpj_completo", ""),
-                        "nome_fantasia": r.get("nome_fantasia") or "",
+                        "nome_fantasia": fix_encoding(r.get("nome_fantasia") or ""),
                         "business_type": r.get("business_type") or "",
                         "cnae": str(r.get("cnae_fiscal") or ""),
-                        "logradouro": r.get("logradouro") or "",
+                        "logradouro": fix_encoding(r.get("logradouro") or ""),
                         "numero": r.get("numero") or "",
-                        "bairro": r.get("bairro") or "",
-                        "municipio": r.get("municipio") or "",
+                        "bairro": fix_encoding(r.get("bairro") or ""),
+                        "municipio": fix_encoding(r.get("municipio") or ""),
                         "lat": float(r["latitude"]) if r.get("latitude") else 0,
                         "lon": float(r["longitude"]) if r.get("longitude") else 0,
                         "distance_m": r.get("distance_m", 0),
@@ -946,13 +977,13 @@ def get_businesses_near(lat: float, lon: float, radius: int = 500):
             )
             items.append({
                 "cnpj": cnpj,
-                "nome_fantasia": biz.get("nome_fantasia") or "",
+                "nome_fantasia": fix_encoding(biz.get("nome_fantasia") or ""),
                 "business_type": biz.get("business_type") or "",
                 "cnae": cnae_raw,
-                "logradouro": biz.get("logradouro") or "",
+                "logradouro": fix_encoding(biz.get("logradouro") or ""),
                 "numero": biz.get("numero") or "",
-                "bairro": biz.get("bairro") or "",
-                "municipio": biz.get("municipio") or "",
+                "bairro": fix_encoding(biz.get("bairro") or ""),
+                "municipio": fix_encoding(biz.get("municipio") or ""),
                 "lat": float(biz_lat),
                 "lon": float(biz_lon),
                 "distance_m": dist,
@@ -980,7 +1011,8 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi import Depends
 
 security = HTTPBearer(auto_error=False)
-SECRET_KEY = "super_secret_key_londrina_radar_2026"
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "super_secret_key_londrina_radar_2026")
+SECRET_KEY = JWT_SECRET_KEY
 
 
 # ------------------------------------------------------------------------------
@@ -1070,9 +1102,36 @@ class VisitSyncItem(BaseModel):
     visited_at: str
 
 
+class RouteStopCreate(BaseModel):
+    address: str
+    lat: float
+    lon: float
+    cep: Optional[str] = None
+    display_name: Optional[str] = None
+
+
+class RouteStopResponse(BaseModel):
+    id: str
+    stop_order: int
+    address: str
+    lat: float
+    lon: float
+    cep: Optional[str]
+    display_name: Optional[str]
+
+
 class RouteCreate(BaseModel):
     name: str
-    segment_ids: List[int]
+    city_id: int
+    stops: List[RouteStopCreate] = []
+
+
+class RouteResponse(BaseModel):
+    id: str
+    name: str
+    city_id: int
+    created_at: str
+    stops: List[RouteStopResponse] = []
 
 
 class DailyRouteCreate(BaseModel):
@@ -1136,6 +1195,40 @@ if db_engine:
     except Exception as e:
         print(f"Error initializing daily_routes table: {e}")
 
+if db_engine:
+    try:
+        with db_engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS routes (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    user_id UUID NOT NULL,
+                    city_id INTEGER REFERENCES cities(id),
+                    name VARCHAR(255) NOT NULL,
+                    geom GEOMETRY(LineString, 4326),
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS city_id INTEGER REFERENCES cities(id);"))
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS route_stops (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    route_id UUID REFERENCES routes(id) ON DELETE CASCADE,
+                    stop_order INTEGER NOT NULL,
+                    address TEXT NOT NULL,
+                    lat NUMERIC(10,7) NOT NULL,
+                    lon NUMERIC(10,7) NOT NULL,
+                    cep VARCHAR(10),
+                    display_name TEXT,
+                    created_at TIMESTAMPTZ DEFAULT NOW()
+                );
+            """))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_stops_route ON route_stops(route_id);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_routes_city_id ON routes(city_id);"))
+            conn.commit()
+            print("Successfully initialized routes tables in DB.")
+    except Exception as e:
+        print(f"Error initializing routes tables: {e}")
+
 
 # ------------------------------------------------------------------------------
 # DEPENDENCY FOR AUTHENTICATION
@@ -1162,6 +1255,17 @@ def get_optional_user_id(
     return payload.get("user_id") if payload else None
 
 
+def get_effective_user_id(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> str:
+    if credentials:
+        token = credentials.credentials
+        payload = decode_jwt_token(token)
+        if payload and "user_id" in payload:
+            return payload["user_id"]
+    return os.getenv("DEV_USER_ID", "00000000-0000-0000-0000-000000000001")
+
+
 # ------------------------------------------------------------------------------
 # AUTH ENDPOINTS
 # ------------------------------------------------------------------------------
@@ -1182,10 +1286,13 @@ def register_user(user: UserRegister):
             if not row:
                 raise HTTPException(status_code=500, detail="User creation failed")
             user_id = row[0]
+            conn.commit()
             token = create_jwt_token(
                 {"user_id": str(user_id), "username": user.username}
             )
             return {"user_id": str(user_id), "username": user.username, "token": token}
+    except HTTPException:
+        raise
     except Exception as e:
         if "unique" in str(e).lower():
             raise HTTPException(status_code=400, detail="Username already registered")
@@ -1430,6 +1537,8 @@ def create_visit(visit: VisitCreate, user_id: str = Depends(get_current_user_id)
             visit_id = row[0]
             conn.commit()
             return {"status": "success", "visit_id": visit_id, "synced": True}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500, detail=f"Database insert failed: {e}"
@@ -1509,6 +1618,7 @@ def sync_visits(
                 )
                 inserted_count += 1
 
+            conn.commit()
             return {"synced": inserted_count, "skipped": skipped_count, "conflicts": []}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Sync process failed: {e}")
@@ -1564,6 +1674,7 @@ def create_route(route: RouteCreate, user_id: str = Depends(get_current_user_id)
                 )
 
             route_id, geom_json = row
+            conn.commit()
             return {
                 "status": "success",
                 "route_id": str(route_id),
@@ -1709,6 +1820,7 @@ def create_daily_route(
             if not row:
                 raise HTTPException(status_code=500, detail="Route creation failed")
             row_dict = dict(row._mapping)
+            conn.commit()
             return {
                 "id": str(row_dict["id"]),
                 "name": row_dict["name"],
@@ -1716,6 +1828,8 @@ def create_daily_route(
                 "streets": row_dict["streets"] or [],
                 "created_at": row_dict["created_at"].isoformat() if row_dict["created_at"] else None,
             }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create route: {e}")
 
@@ -1795,6 +1909,7 @@ def update_daily_route(
             if not row:
                 raise HTTPException(status_code=404, detail="Route not found")
             row_dict = dict(row._mapping)
+            conn.commit()
             return {
                 "id": str(row_dict["id"]),
                 "name": row_dict["name"],
@@ -1802,6 +1917,8 @@ def update_daily_route(
                 "streets": row_dict["streets"] or [],
                 "updated_at": row_dict["updated_at"].isoformat() if row_dict["updated_at"] else None,
             }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update route: {e}")
 
@@ -1825,7 +1942,10 @@ def delete_daily_route(
             row = result.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail="Route not found")
+            conn.commit()
             return {"status": "deleted", "route_id": route_id}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to delete route: {e}")
 
@@ -1951,6 +2071,37 @@ class CityStats(BaseModel):
     lon: float | None
     total_businesses: int
 
+
+# ── INTELLIGENT ROUTE GENERATION MODELS ────────────────────
+class RouteGenerateRequest(BaseModel):
+    city_id: int
+    max_lojas: int = 80
+    min_days_without_visit: int = 30
+
+
+class GeneratedStop(BaseModel):
+    cnpj: str
+    nome_fantasia: str
+    cnae_label: str
+    bairro: str
+    logradouro: str
+    lat: float
+    lon: float
+    days_since_visit: int
+    priority: int
+
+
+class RouteGenerateResponse(BaseModel):
+    city: str
+    total_candidates: int
+    selected: int
+    stops: list[GeneratedStop]
+
+
+class RouteOptimizeRequest(BaseModel):
+    stops: list[dict]
+
+
 @app.get("/api/cities")
 def get_cities():
     if not db_engine:
@@ -1985,6 +2136,692 @@ def get_city_stats(city_id: int):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch city stats: {e}")
+
+
+# ==============================================================================
+# CITY ROUTES CRUD
+# ==============================================================================
+
+@app.get("/api/cities/{city_id}/routes")
+def list_city_routes(city_id: int, user_id: str = Depends(get_effective_user_id)):
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+
+    try:
+        with db_engine.connect() as conn:
+            result = conn.execute(
+                text("""
+                    SELECT id, name, city_id, created_at
+                    FROM routes
+                    WHERE city_id = :city_id AND user_id = :user_id
+                    ORDER BY created_at DESC, name
+                """),
+                {"city_id": city_id, "user_id": user_id},
+            )
+            routes = []
+            for row in result:
+                row_dict = dict(row._mapping)
+                stops_result = conn.execute(
+                    text("""
+                        SELECT id, stop_order, address, lat, lon, cep, display_name
+                        FROM route_stops
+                        WHERE route_id = :route_id
+                        ORDER BY stop_order
+                    """),
+                    {"route_id": row_dict["id"]},
+                )
+                stops = [
+                    {
+                        "id": str(stop_row[0]),
+                        "stop_order": stop_row[1],
+                        "address": stop_row[2],
+                        "lat": float(stop_row[3]),
+                        "lon": float(stop_row[4]),
+                        "cep": stop_row[5],
+                        "display_name": stop_row[6],
+                    }
+                    for stop_row in stops_result
+                ]
+                routes.append(
+                    {
+                        "id": str(row_dict["id"]),
+                        "name": row_dict["name"],
+                        "city_id": row_dict["city_id"],
+                        "created_at": row_dict["created_at"].isoformat() if row_dict["created_at"] else None,
+                        "stops": stops,
+                    }
+                )
+            return routes
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list city routes: {e}")
+
+
+@app.post("/api/cities/{city_id}/routes")
+def create_city_route(city_id: int, route: RouteCreate, user_id: str = Depends(get_effective_user_id)):
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    if not route.name.strip():
+        raise HTTPException(status_code=400, detail="Route name is required")
+    if route.city_id != city_id:
+        raise HTTPException(status_code=400, detail="City mismatch")
+    if not route.stops:
+        raise HTTPException(status_code=400, detail="At least one stop is required")
+
+    try:
+        with db_engine.connect() as conn:
+            route_result = conn.execute(
+                text("""
+                    INSERT INTO routes (user_id, city_id, name)
+                    VALUES (:user_id, :city_id, :name)
+                    RETURNING id, created_at
+                """),
+                {"user_id": user_id, "city_id": city_id, "name": route.name.strip()},
+            )
+            created_row = route_result.fetchone()
+            if not created_row:
+                raise HTTPException(status_code=500, detail="Route creation failed")
+            route_id = created_row[0]
+            for index, stop in enumerate(route.stops, start=1):
+                conn.execute(
+                    text("""
+                        INSERT INTO route_stops (route_id, stop_order, address, lat, lon, cep, display_name)
+                        VALUES (:route_id, :stop_order, :address, :lat, :lon, :cep, :display_name)
+                    """),
+                    {
+                        "route_id": route_id,
+                        "stop_order": index,
+                        "address": stop.address,
+                        "lat": stop.lat,
+                        "lon": stop.lon,
+                        "cep": stop.cep,
+                        "display_name": stop.display_name,
+                    },
+                )
+            conn.commit()
+            return {
+                "id": str(route_id),
+                "name": route.name.strip(),
+                "city_id": city_id,
+                "created_at": created_row[1].isoformat() if created_row[1] else None,
+                "stops": [
+                    {
+                        "id": str(route_id),
+                        "stop_order": index,
+                        "address": stop.address,
+                        "lat": stop.lat,
+                        "lon": stop.lon,
+                        "cep": stop.cep,
+                        "display_name": stop.display_name,
+                    }
+                    for index, stop in enumerate(route.stops, start=1)
+                ],
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create city route: {e}")
+
+
+@app.get("/api/routes/{route_id}")
+def get_route(route_id: str, user_id: str = Depends(get_effective_user_id)):
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+
+    try:
+        with db_engine.connect() as conn:
+            result = conn.execute(
+                text("""
+                    SELECT id, name, city_id, created_at
+                    FROM routes
+                    WHERE id = :route_id AND user_id = :user_id
+                """),
+                {"route_id": route_id, "user_id": user_id},
+            )
+            row = result.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Route not found")
+            row_dict = dict(row._mapping)
+            stops_result = conn.execute(
+                text("""
+                    SELECT id, stop_order, address, lat, lon, cep, display_name
+                    FROM route_stops
+                    WHERE route_id = :route_id
+                    ORDER BY stop_order
+                """),
+                {"route_id": row_dict["id"]},
+            )
+            stops = [
+                {
+                    "id": str(stop_row[0]),
+                    "stop_order": stop_row[1],
+                    "address": stop_row[2],
+                    "lat": float(stop_row[3]),
+                    "lon": float(stop_row[4]),
+                    "cep": stop_row[5],
+                    "display_name": stop_row[6],
+                }
+                for stop_row in stops_result
+            ]
+            return {
+                "id": str(row_dict["id"]),
+                "name": row_dict["name"],
+                "city_id": row_dict["city_id"],
+                "created_at": row_dict["created_at"].isoformat() if row_dict["created_at"] else None,
+                "stops": stops,
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch route: {e}")
+
+
+@app.put("/api/routes/{route_id}")
+def update_route(route_id: str, route: RouteCreate, user_id: str = Depends(get_effective_user_id)):
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    if not route.name.strip():
+        raise HTTPException(status_code=400, detail="Route name is required")
+    if not route.stops:
+        raise HTTPException(status_code=400, detail="At least one stop is required")
+
+    try:
+        with db_engine.connect() as conn:
+            existing = conn.execute(
+                text("SELECT id FROM routes WHERE id = :route_id AND user_id = :user_id"),
+                {"route_id": route_id, "user_id": user_id},
+            ).fetchone()
+            if not existing:
+                raise HTTPException(status_code=404, detail="Route not found")
+            conn.execute(
+                text("""
+                    UPDATE routes
+                    SET name = :name, city_id = :city_id
+                    WHERE id = :route_id AND user_id = :user_id
+                """),
+                {"name": route.name.strip(), "city_id": route.city_id, "route_id": route_id, "user_id": user_id},
+            )
+            conn.execute(text("DELETE FROM route_stops WHERE route_id = :route_id"), {"route_id": route_id})
+            for index, stop in enumerate(route.stops, start=1):
+                conn.execute(
+                    text("""
+                        INSERT INTO route_stops (route_id, stop_order, address, lat, lon, cep, display_name)
+                        VALUES (:route_id, :stop_order, :address, :lat, :lon, :cep, :display_name)
+                    """),
+                    {
+                        "route_id": route_id,
+                        "stop_order": index,
+                        "address": stop.address,
+                        "lat": stop.lat,
+                        "lon": stop.lon,
+                        "cep": stop.cep,
+                        "display_name": stop.display_name,
+                    },
+                )
+            conn.commit()
+            return {
+                "id": route_id,
+                "name": route.name.strip(),
+                "city_id": route.city_id,
+                "created_at": None,
+                "stops": [
+                    {
+                        "id": str(route_id),
+                        "stop_order": index,
+                        "address": stop.address,
+                        "lat": stop.lat,
+                        "lon": stop.lon,
+                        "cep": stop.cep,
+                        "display_name": stop.display_name,
+                    }
+                    for index, stop in enumerate(route.stops, start=1)
+                ],
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update route: {e}")
+
+
+@app.delete("/api/routes/{route_id}")
+def delete_route(route_id: str, user_id: str = Depends(get_effective_user_id)):
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+
+    try:
+        with db_engine.connect() as conn:
+            result = conn.execute(
+                text("DELETE FROM routes WHERE id = :route_id AND user_id = :user_id RETURNING id"),
+                {"route_id": route_id, "user_id": user_id},
+            )
+            conn.commit()
+            if result.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Route not found")
+            return {"status": "deleted", "route_id": route_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete route: {e}")
+
+
+# ==============================================================================
+# BUSINESS STATUS (global per-loja flag: visited / client)
+# ==============================================================================
+class BusinessStatusUpdate(BaseModel):
+    status: str  # "visited" o "client"
+
+
+@app.patch("/api/businesses/{cnpj}/status")
+def update_business_status(cnpj: str, body: BusinessStatusUpdate):
+    if body.status not in ("visited", "client"):
+        raise HTTPException(status_code=400, detail="Status must be 'visited' or 'client'")
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    try:
+        with db_engine.connect() as conn:
+            # Verificar que la loja existe (el CNPJ se almacena en cnpj_completo)
+            exists = conn.execute(
+                text("SELECT cnpj_completo FROM estabelecimentos WHERE cnpj_completo = :cnpj"),
+                {"cnpj": cnpj},
+            ).fetchone()
+            if not exists:
+                raise HTTPException(status_code=404, detail="Business not found")
+
+            # Upsert en business_status (sin route_id por ahora, status global)
+            conn.execute(
+                text("""
+                    INSERT INTO business_status (cnpj, status, updated_at)
+                    VALUES (:cnpj, :status, NOW())
+                    ON CONFLICT (cnpj) DO UPDATE SET status = :status, updated_at = NOW()
+                """),
+                {"cnpj": cnpj, "status": body.status},
+            )
+            conn.commit()
+            return {"cnpj": cnpj, "status": body.status}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update status: {e}")
+
+
+@app.get("/api/businesses/status")
+def get_businesses_status(cnpjs: str):
+    """Get status for a comma-separated list of CNPJs."""
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    cnpj_list = [c.strip() for c in cnpjs.split(",") if c.strip()]
+    if not cnpj_list:
+        return []
+    try:
+        with db_engine.connect() as conn:
+            placeholders = ", ".join(f":cnpj_{i}" for i in range(len(cnpj_list)))
+            params = {f"cnpj_{i}": c for i, c in enumerate(cnpj_list)}
+            rows = conn.execute(
+                text(f"SELECT cnpj, status FROM business_status WHERE cnpj IN ({placeholders})"),
+                params,
+            ).fetchall()
+            return {r[0]: r[1] for r in rows}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch statuses: {e}")
+
+
+# ==============================================================================
+# INTELLIGENT ROUTE GENERATION
+# ==============================================================================
+@app.post("/api/routes/generate", response_model=RouteGenerateResponse)
+def generate_route(body: RouteGenerateRequest):
+    """
+    Generates an intelligent visiting route for a given city.
+
+    Selects businesses that have not been visited in `min_days_without_visit`
+    days (or never visited), orders them by days-since-visit descending, then
+    applies a Python-side diversity filter so no more than 3 stops share the
+    same street (logradouro), until `max_lojas` stops are selected.
+    """
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+
+    # 1. Resolve city name (404 if it doesn't exist)
+    try:
+        with db_engine.connect() as conn:
+            city_row = conn.execute(
+                text("SELECT name FROM cities WHERE id = :city_id"),
+                {"city_id": body.city_id},
+            ).fetchone()
+            if not city_row:
+                raise HTTPException(status_code=404, detail="City not found")
+            city_name = city_row[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to resolve city: {e}")
+
+    # 2. Candidate businesses with days since last visit (fetch 2x for diversity)
+    max_limit = body.max_lojas * 2
+    select_query = text("""
+        WITH candidate_businesses AS (
+            SELECT
+                e.cnpj_completo as cnpj,
+                e.nome_fantasia,
+                e.cnae_fiscal,
+                e.bairro,
+                e.logradouro,
+                e.municipio,
+                ST_Y(e.geom::geometry) as lat,
+                ST_X(e.geom::geometry) as lon,
+                COALESCE(
+                    EXTRACT(DAY FROM NOW() - MAX(v.visited_at))::INTEGER,
+                    999999
+                ) as days_since_visit
+            FROM estabelecimentos e
+            LEFT JOIN visits v ON v.cnpj = e.cnpj_completo
+            WHERE e.situacao_cadastral = 2
+              AND e.geom IS NOT NULL
+              AND e.municipio = :city_name
+            GROUP BY e.cnpj_completo, e.nome_fantasia, e.cnae_fiscal,
+                     e.bairro, e.logradouro, e.municipio, e.geom
+            HAVING COALESCE(
+                EXTRACT(DAY FROM NOW() - MAX(v.visited_at))::INTEGER,
+                999999
+            ) >= :min_days
+        )
+        SELECT * FROM candidate_businesses
+        ORDER BY days_since_visit DESC
+        LIMIT :max_limit
+    """)
+
+    try:
+        with db_engine.connect() as conn:
+            result = conn.execute(
+                select_query,
+                {
+                    "city_name": city_name,
+                    "min_days": body.min_days_without_visit,
+                    "max_limit": max_limit,
+                },
+            )
+            candidates = []
+            for row in result:
+                row_dict = dict(row._mapping)
+                candidates.append(row_dict)
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, detail=f"Failed to fetch candidate businesses: {e}"
+        )
+
+    total_candidates = len(candidates)
+
+    # 3. Diversity filter: no more than 3 stops per logradouro (street coverage)
+    street_counts: Dict[str, int] = {}
+    stops: List[GeneratedStop] = []
+
+    for row in candidates:
+        if len(stops) >= body.max_lojas:
+            break
+
+        logradouro = (row.get("logradouro") or "").strip()
+        # Apply per-street cap; empty logradouro is treated as its own bucket
+        key = logradouro if logradouro else "<sem logradouro>"
+        if street_counts.get(key, 0) >= 3:
+            continue
+        street_counts[key] = street_counts.get(key, 0) + 1
+
+        days_since = int(row.get("days_since_visit") or 0)
+
+        stops.append(
+            GeneratedStop(
+                cnpj=str(row.get("cnpj") or ""),
+                nome_fantasia=fix_encoding(str(row.get("nome_fantasia") or "")),
+                cnae_label=fix_encoding(cnae_to_category(row.get("cnae_fiscal"))),
+                bairro=fix_encoding(str(row.get("bairro") or "")),
+                logradouro=fix_encoding(logradouro),
+                lat=float(row.get("lat") or 0.0),
+                lon=float(row.get("lon") or 0.0),
+                days_since_visit=days_since,
+                # 4. priority = days_since_visit
+                priority=days_since,
+            )
+        )
+
+    print(
+        f"Generated route for '{city_name}': {total_candidates} candidates, "
+        f"{len(stops)} selected (max_lojas={body.max_lojas}, "
+        f"min_days={body.min_days_without_visit})"
+    )
+
+    return RouteGenerateResponse(
+        city=city_name,
+        total_candidates=total_candidates,
+        selected=len(stops),
+        stops=stops,
+    )
+
+
+@app.get("/api/businesses/search")
+def search_businesses(q: str, limit: int = 50):
+    if len(q.strip()) < 3:
+        raise HTTPException(status_code=400, detail="Mínimo 3 caracteres")
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    try:
+        with db_engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT cnpj_completo, nome_fantasia, cnae_label, bairro,
+                           logradouro, municipio,
+                           ST_Y(geom::geometry) as lat, ST_X(geom::geometry) as lon
+                    FROM estabelecimentos
+                    WHERE situacao_cadastral = 2
+                      AND geom IS NOT NULL
+                      AND (
+                        nome_fantasia ILIKE :q
+                        OR cnpj_completo ILIKE :q
+                        OR logradouro ILIKE :q
+                      )
+                    ORDER BY nome_fantasia
+                    LIMIT :limit
+                    """
+                ),
+                {"q": f"%{q.strip()}%", "limit": limit},
+            ).fetchall()
+            return [
+                {
+                    "cnpj": r[0],
+                    "nome_fantasia": fix_encoding(r[1]),
+                    "cnae_label": fix_encoding(r[2]),
+                    "bairro": fix_encoding(r[3]),
+                    "logradouro": fix_encoding(r[4]),
+                    "municipio": fix_encoding(r[5]),
+                    "lat": float(r[6]),
+                    "lon": float(r[7]),
+                }
+                for r in rows
+            ]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Search failed: {e}")
+
+
+@app.get("/api/stats/summary")
+def get_stats_summary():
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    try:
+        with db_engine.connect() as conn:
+            total = conn.execute(
+                text(
+                    "SELECT COUNT(*) FROM estabelecimentos WHERE situacao_cadastral = 2 AND geom IS NOT NULL"
+                )
+            ).scalar() or 0
+            visited = conn.execute(
+                text("SELECT COUNT(DISTINCT cnpj) FROM visits")
+            ).scalar() or 0
+            clients = conn.execute(
+                text("SELECT COUNT(*) FROM business_status WHERE status = 'client'")
+            ).scalar() or 0
+
+            city_rows = conn.execute(
+                text(
+                    """
+                    SELECT c.id, c.name, c.state, c.lat, c.lon,
+                        (SELECT COUNT(*) FROM estabelecimentos e
+                         WHERE e.situacao_cadastral = 2 AND e.geom IS NOT NULL
+                           AND e.municipio = c.name) as total,
+                        (SELECT COUNT(DISTINCT v.cnpj) FROM visits v
+                         JOIN estabelecimentos e ON e.cnpj_completo = v.cnpj
+                         WHERE e.municipio = c.name) as visited
+                    FROM cities c
+                    ORDER BY c.name
+                    """
+                )
+            ).fetchall()
+            cities_stats = [
+                {
+                    "id": int(r[0]),
+                    "name": r[1],
+                    "state": r[2],
+                    "lat": float(r[3]) if r[3] else 0,
+                    "lon": float(r[4]) if r[4] else 0,
+                    "total": int(r[5] or 0),
+                    "visited": int(r[6] or 0),
+                }
+                for r in city_rows
+            ]
+
+            return {
+                "total_businesses": int(total),
+                "visited": int(visited),
+                "clients": int(clients),
+                "cities": cities_stats,
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Stats failed: {e}")
+
+
+@app.post("/api/routes/optimize")
+def optimize_route(body: RouteOptimizeRequest):
+    """Reordena stops por nearest neighbor para minimizar distancia."""
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    stops = body.stops
+    if not stops:
+        return {"stops": [], "total_distance_m": 0}
+
+    ordered = [stops[0]]
+    remaining = list(stops[1:])
+
+    total_distance = 0
+    while remaining:
+        last = ordered[-1]
+        best_idx = 0
+        best_dist = float("inf")
+        for i, s in enumerate(remaining):
+            d = haversine_m(last["lat"], last["lon"], s["lat"], s["lon"])
+            if d < best_dist:
+                best_dist = d
+                best_idx = i
+        total_distance += best_dist
+        ordered.append(remaining.pop(best_idx))
+
+    if len(ordered) > 1:
+        total_distance += haversine_m(
+            ordered[-1]["lat"], ordered[-1]["lon"],
+            ordered[0]["lat"], ordered[0]["lon"],
+        )
+
+    return {"stops": ordered, "total_distance_m": round(total_distance, 0)}
+
+
+@app.get("/api/businesses/clients")
+def get_clients(limit: int = 500):
+    """Lista todos los clientes (business_status = 'client')."""
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    try:
+        with db_engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT e.cnpj_completo, e.nome_fantasia, e.cnae_label, e.bairro,
+                           e.logradouro, e.municipio,
+                           ST_Y(e.geom::geometry) as lat, ST_X(e.geom::geometry) as lon
+                    FROM business_status bs
+                    JOIN estabelecimentos e ON e.cnpj_completo = bs.cnpj
+                    WHERE bs.status = 'client'
+                    LIMIT :limit
+                    """
+                ),
+                {"limit": limit},
+            ).fetchall()
+            return [
+                {
+                    "cnpj": r[0],
+                    "nome_fantasia": fix_encoding(r[1]),
+                    "cnae_label": fix_encoding(r[2]),
+                    "bairro": fix_encoding(r[3]),
+                    "logradouro": fix_encoding(r[4]),
+                    "municipio": fix_encoding(r[5]),
+                    "lat": float(r[6]),
+                    "lon": float(r[7]),
+                }
+                for r in rows
+            ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed: {e}")
+
+
+@app.get("/api/businesses/city-category")
+def get_businesses_by_city_and_category(city: str, category: str = "pizza", limit: int = 50):
+    """
+    Busca establecimientos por ciudad (municipio) y categoría (ej. pizza/pizzería).
+    Filtra los establecimientos activos (situacao_cadastral = 2).
+    """
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    try:
+        with db_engine.connect() as conn:
+            rows = conn.execute(
+                text(
+                    """
+                    SELECT cnpj_completo, nome_fantasia, cnae_label, cnae_fiscal_descricao,
+                           bairro, logradouro, municipio,
+                           ST_Y(geom::geometry) as lat, ST_X(geom::geometry) as lon
+                    FROM estabelecimentos
+                    WHERE situacao_cadastral = 2
+                      AND geom IS NOT NULL
+                      AND municipio ILIKE :city
+                      AND (
+                        nome_fantasia ILIKE :cat
+                        OR cnae_fiscal_descricao ILIKE :cat
+                        OR cnae_label ILIKE :cat
+                      )
+                    ORDER BY nome_fantasia
+                    LIMIT :limit
+                    """
+                ),
+                {
+                    "city": f"%{city.strip()}%",
+                    "cat": f"%{category.strip()}%",
+                    "limit": limit
+                },
+            ).fetchall()
+            return [
+                {
+                    "cnpj": r[0],
+                    "nome_fantasia": fix_encoding(r[1]),
+                    "cnae_label": fix_encoding(r[2]),
+                    "cnae_fiscal_descricao": fix_encoding(r[3]),
+                    "bairro": fix_encoding(r[4]),
+                    "logradouro": fix_encoding(r[5]),
+                    "municipio": fix_encoding(r[6]),
+                    "lat": float(r[7]) if r[7] is not None else None,
+                    "lon": float(r[8]) if r[8] is not None else None,
+                }
+                for r in rows
+            ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to query businesses: {e}")
 
 
 # ==============================================================================

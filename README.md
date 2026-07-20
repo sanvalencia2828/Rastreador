@@ -110,7 +110,10 @@ En el panel de Vercel → *Settings → Environment Variables*, configurar:
 | Variable | Valor |
 |----------|-------|
 | `DATABASE_URL` | `postgresql://user:pass@host:5432/dbname` |
+| `JWT_SECRET_KEY` | Valor secreto para firmar tokens JWT | 
+| `CORS_ORIGINS` | Orígenes permitidos, por ejemplo `https://<tu-proyecto>.vercel.app` |
 | `NEXT_PUBLIC_API_URL` | `https://<tu-proyecto>.vercel.app` |
+| `BACKEND_URL` | URL del backend para el rewritting del frontend en Vercel |
 
 > **Nota:** Vercel asigna `$PORT` dinámicamente. El comando de arranque es:
 > ```bash
@@ -207,6 +210,9 @@ Todas las variables de configuración están documentadas en [`.env.example`](.e
 | `DB_NAME` | Nombre de la base de datos | `rastreador_db` |
 | `API_PORT` | Puerto del backend FastAPI | `8000` |
 | `NEXT_PUBLIC_API_URL` | URL pública del backend | `http://localhost:8000` |
+| `BACKEND_URL` | URL del backend para rewrites del frontend | `http://localhost:8000` |
+| `JWT_SECRET_KEY` | Secreto para JWT | `change-me-in-production` |
+| `CORS_ORIGINS` | Orígenes permitidos por CORS | `http://localhost:3000,http://localhost:3001,http://localhost:8000` |
 | `PORT` | Puerto del frontend Next.js | `3000` |
 
 ## 📋 API Endpoints

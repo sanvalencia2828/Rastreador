@@ -1,12 +1,28 @@
-const backendUrl = process.env.BACKEND_URL || "http://localhost:8001";
+const backendUrl = process.env.BACKEND_URL || process.env.NEXT_PUBLIC_API_URL || "http://localhost:8001";
 
 const nextConfig = {
   turbopack: { root: "../frontend" },
   async rewrites() {
     return [
       {
+        source: "/api/businesses/status",
+        destination: `${backendUrl}/api/businesses/status`,
+      },
+      {
+        source: "/api/businesses/search",
+        destination: `${backendUrl}/api/businesses/search`,
+      },
+      {
+        source: "/api/businesses/:cnpj/status",
+        destination: `${backendUrl}/api/businesses/:cnpj/status`,
+      },
+      {
         source: "/api/businesses/:path*",
         destination: `${backendUrl}/api/businesses/:path*`,
+      },
+      {
+        source: "/api/routes/:path*",
+        destination: `${backendUrl}/api/routes/:path*`,
       },
       {
         source: "/api/visits/:path*",
@@ -19,6 +35,14 @@ const nextConfig = {
       {
         source: "/api/street-coverage/:path*",
         destination: `${backendUrl}/api/street-coverage/:path*`,
+      },
+      {
+        source: "/api/cities/:path*",
+        destination: `${backendUrl}/api/cities/:path*`,
+      },
+      {
+        source: "/api/stats/:path*",
+        destination: `${backendUrl}/api/stats/:path*`,
       },
     ];
   },

@@ -14,6 +14,7 @@ build/
 # Python dependencies & cache
 __pycache__/
 *.py[cod]
+*.pyc
 *$py.class
 .venv/
 venv/
@@ -37,6 +38,7 @@ postgres_data/
 .env.local.production
 
 # Data files (do not commit large CNPJ files or local processed data)
+data/
 sample_estabelecimentos.csv
 londrina_businesses.json
 londrina_businesses_polars.json
