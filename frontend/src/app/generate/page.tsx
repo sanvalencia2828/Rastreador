@@ -47,6 +47,8 @@ export default function GeneratePage() {
   const [maxLojas, setMaxLojas] = useState(80);
   const [minDays, setMinDays] = useState(30);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [totalDistance, setTotalDistance] = useState<number | null>(null);
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [message, setMessage] = useState<MessageType | null>(null);
   const [fetchError, setFetchError] = useState<string | undefined>();
@@ -136,12 +138,39 @@ export default function GeneratePage() {
         return;
       }
       setResult(data as GenerateResult);
+      setTotalDistance(null);
     } catch {
       setMessage({ text: "Não foi possível conectar ao servidor.", type: "error" });
     } finally {
       setIsGenerating(false);
     }
   }, [selectedCity, maxLojas, minDays]);
+
+  const handleOptimize = useCallback(async () => {
+    if (!result || result.stops.length < 2) return;
+    setIsOptimizing(true);
+    setMessage(null);
+
+    try {
+      const res = await fetch("/api/routes/optimize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stops: result.stops }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessage({ text: data.detail || "Erro ao otimizar rota", type: "error" });
+        setIsOptimizing(false);
+        return;
+      }
+      setResult(prev => prev ? { ...prev, stops: data.stops } : prev);
+      setTotalDistance(data.total_distance_m);
+    } catch {
+      setMessage({ text: "Não foi possível conectar ao servidor.", type: "error" });
+    } finally {
+      setIsOptimizing(false);
+    }
+  }, [result]);
 
   const handleSave = useCallback(async () => {
     if (!result || !selectedCity) return;
@@ -195,7 +224,7 @@ export default function GeneratePage() {
   };
 
   return (
-    <main className="flex flex-col min-h-dvh" style={{ padding: "24px 20px", maxWidth: "900px", margin: "0 auto", width: "100%" }}>
+    <main className="flex flex-col min-h-dvh px-4 py-4 lg:px-6 lg:py-6" style={{ maxWidth: "900px", margin: "0 auto", width: "100%" }}>
       <header className="mb-6">
         <Link
           href="/cities"
@@ -217,7 +246,7 @@ export default function GeneratePage() {
 
       <section>
         <p className="text-xs font-medium mb-3" style={{ color: "var(--muted)" }}>Selecione a cidade</p>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
           {cities.length === 0 && !fetchError && (
             <p className="text-xs" style={{ color: "var(--muted)" }}>Carregando cidades...</p>
           )}
@@ -271,7 +300,7 @@ export default function GeneratePage() {
                 step={10}
                 value={maxLojas}
                 onChange={(e) => setMaxLojas(Number(e.target.value))}
-                style={{ width: "100%", accentColor: "var(--accent)", height: "6px" }}
+                style={{ width: "100%", accentColor: "var(--accent)", height: "6px", padding: "8px 0", touchAction: "manipulation" }}
               />
             </div>
 
@@ -288,7 +317,7 @@ export default function GeneratePage() {
                 step={7}
                 value={minDays}
                 onChange={(e) => setMinDays(Number(e.target.value))}
-                style={{ width: "100%", accentColor: "var(--accent)", height: "6px" }}
+                style={{ width: "100%", accentColor: "var(--accent)", height: "6px", padding: "8px 0", touchAction: "manipulation" }}
               />
             </div>
 
@@ -326,53 +355,86 @@ export default function GeneratePage() {
           <hr style={{ border: "none", borderTop: "1px solid var(--border)", margin: "24px 0" }} />
 
           <section>
-            <p className="text-sm mb-4" style={{ color: "var(--fg-secondary)" }}>
+            <p className="text-sm mb-1" style={{ color: "var(--fg-secondary)" }}>
               {result.selected} de {result.total_candidates} lojas candidatas selecionadas para {result.city}
             </p>
+            {totalDistance !== null && (
+              <p className="text-xs mb-4" style={{ color: "var(--muted)" }}>
+                Distância total: <span style={{ color: "var(--accent)", fontWeight: 600 }}>{(totalDistance / 1000).toFixed(1)} km</span>
+              </p>
+            )}
+            {totalDistance === null && <div className="mb-4" />}
 
-            <div style={{ maxHeight: "400px", overflowY: "auto", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "40px 1fr 1fr 1fr 80px", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--card)", zIndex: 1 }}>
-                {["#", "Nome Fantasia", "Bairro", "Rua", "Dias"].map((h, i) => (
-                  <div key={h} style={{ padding: "8px", fontSize: "12px", fontWeight: 600, color: "var(--muted)", textAlign: i === 4 ? "right" : "left" }}>{h}</div>
+            <div style={{ maxHeight: "400px", overflowY: "auto", overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
+              <div style={{ minWidth: "600px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "40px 1fr 1fr 1fr 80px", borderBottom: "1px solid var(--border)", position: "sticky", top: 0, background: "var(--card)", zIndex: 1 }}>
+                  {["#", "Nome Fantasia", "Bairro", "Rua", "Dias"].map((h, i) => (
+                    <div key={h} style={{ padding: "8px", fontSize: "12px", fontWeight: 600, color: "var(--muted)", textAlign: i === 4 ? "right" : "left" }}>{h}</div>
+                  ))}
+                </div>
+
+                {result.stops.map((stop, i) => (
+                  <div
+                    key={stop.cnpj}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "40px 1fr 1fr 1fr 80px",
+                      background: i % 2 === 1 ? "var(--bg-elevated)" : "transparent",
+                    }}
+                  >
+                    <div style={{ padding: "8px", fontSize: "12px", color: "var(--muted)" }}>{i + 1}</div>
+                    <div style={{ padding: "8px", fontSize: "12px", color: "var(--fg)" }}>{stop.nome_fantasia}</div>
+                    <div style={{ padding: "8px", fontSize: "12px", color: "var(--fg-secondary)" }}>{stop.bairro}</div>
+                    <div style={{ padding: "8px", fontSize: "12px", color: "var(--fg-secondary)" }}>{stop.logradouro}</div>
+                    <div style={{ padding: "8px", fontSize: "12px", color: daysColor(stop.days_since_visit), textAlign: "right", fontWeight: 600 }}>{stop.days_since_visit}</div>
+                  </div>
                 ))}
               </div>
-
-              {result.stops.map((stop, i) => (
-                <div
-                  key={stop.cnpj}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "40px 1fr 1fr 1fr 80px",
-                    background: i % 2 === 1 ? "var(--bg-elevated)" : "transparent",
-                  }}
-                >
-                  <div style={{ padding: "8px", fontSize: "12px", color: "var(--muted)" }}>{i + 1}</div>
-                  <div style={{ padding: "8px", fontSize: "12px", color: "var(--fg)" }}>{stop.nome_fantasia}</div>
-                  <div style={{ padding: "8px", fontSize: "12px", color: "var(--fg-secondary)" }}>{stop.bairro}</div>
-                  <div style={{ padding: "8px", fontSize: "12px", color: "var(--fg-secondary)" }}>{stop.logradouro}</div>
-                  <div style={{ padding: "8px", fontSize: "12px", color: daysColor(stop.days_since_visit), textAlign: "right", fontWeight: 600 }}>{stop.days_since_visit}</div>
-                </div>
-              ))}
             </div>
 
-            <button
-              onClick={handleSave}
-              className="inline-flex items-center justify-center gap-2 transition-opacity"
-              style={{
-                marginTop: "16px",
-                padding: "12px 24px",
-                background: "var(--accent)",
-                color: "#0f0f0f",
-                fontWeight: 500,
-                fontSize: "14px",
-                borderRadius: "var(--radius)",
-                width: "100%",
-                cursor: "pointer",
-                border: "none",
-              }}
-            >
-              Salvar como Rota
-            </button>
+            <div className="flex gap-3" style={{ marginTop: "16px" }}>
+              <button
+                onClick={handleOptimize}
+                disabled={isOptimizing || result.stops.length < 2}
+                className="inline-flex items-center justify-center gap-2 transition-opacity"
+                style={{
+                  padding: "12px 24px",
+                  background: "var(--bg-elevated)",
+                  color: "var(--fg-secondary)",
+                  fontWeight: 500,
+                  fontSize: "14px",
+                  borderRadius: "var(--radius)",
+                  flex: 1,
+                  cursor: isOptimizing ? "not-allowed" : "pointer",
+                  opacity: isOptimizing || result.stops.length < 2 ? 0.5 : 1,
+                  border: "1px solid var(--border)",
+                }}
+              >
+                {isOptimizing ? (
+                  <>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" style={{ animation: "spin 0.8s linear infinite", border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%" }} />
+                    Otimizando...
+                  </>
+                ) : "Otimizar Rota"}
+              </button>
+              <button
+                onClick={handleSave}
+                className="inline-flex items-center justify-center gap-2 transition-opacity"
+                style={{
+                  padding: "12px 24px",
+                  background: "var(--accent)",
+                  color: "#0f0f0f",
+                  fontWeight: 500,
+                  fontSize: "14px",
+                  borderRadius: "var(--radius)",
+                  flex: 1,
+                  cursor: "pointer",
+                  border: "none",
+                }}
+              >
+                Salvar como Rota
+              </button>
+            </div>
           </section>
         </>
       )}

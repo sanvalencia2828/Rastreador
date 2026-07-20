@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useMemo, useEffect, use } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
+import { useSearchParams } from "next/navigation";
 import SearchBar from "../../components/SearchBar";
 import StatusMessage from "../../components/StatusMessage";
 import StopCard from "../../components/StopCard";
@@ -24,6 +25,9 @@ interface CityStats {
 
 export default function CityPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
+  const searchParams = useSearchParams();
+  const paramLat = searchParams?.get("lat");
+  const paramLon = searchParams?.get("lon");
 
   const [city, setCity] = useState<CityStats | null>(null);
   const [cityError, setCityError] = useState<string | undefined>();
@@ -223,11 +227,15 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
 
   const mapBusinesses = useMemo(() => filteredBusinesses.map(b => ({ lat: b.lat, lon: b.lon, nome_fantasia: b.nome_fantasia, distance_m: b.distance_m, status: b.status })), [filteredBusinesses]);
 
-  const mapCenter = city ? { lat: city.lat, lon: city.lon } : undefined;
+  const paramLatNum = paramLat ? parseFloat(paramLat) : NaN;
+  const paramLonNum = paramLon ? parseFloat(paramLon) : NaN;
+  const mapCenter = !isNaN(paramLatNum) && !isNaN(paramLonNum)
+    ? { lat: paramLatNum, lon: paramLonNum }
+    : city ? { lat: city.lat, lon: city.lon } : undefined;
 
   if (cityLoading) {
     return (
-      <main className="flex flex-col min-h-dvh" style={{ padding: "24px 20px", maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
+      <main className="flex flex-col min-h-dvh px-4 py-4 lg:px-5 lg:py-6" style={{ maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
         <p className="text-xs" style={{ color: "var(--muted)" }}>Cargando ciudad...</p>
       </main>
     );
@@ -235,7 +243,7 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
 
   if (cityError || !city) {
     return (
-      <main className="flex flex-col min-h-dvh" style={{ padding: "24px 20px", maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
+      <main className="flex flex-col min-h-dvh px-4 py-4 lg:px-5 lg:py-6" style={{ maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
         <Link href="/cities" className="inline-flex items-center gap-1 text-xs font-medium mb-4" style={{ color: "var(--accent)", textDecoration: "none" }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
           Cidades
@@ -246,20 +254,20 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
   }
 
   return (
-    <main className="flex flex-col min-h-dvh" style={{ padding: "24px 20px", maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
-      <header className="mb-6">
+    <main className="flex flex-col min-h-dvh px-4 py-4 lg:px-5 lg:py-6" style={{ maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
+      <header className="mb-5 lg:mb-6">
         <Link href="/cities" className="inline-flex items-center gap-1 text-xs font-medium mb-3" style={{ color: "var(--accent)", textDecoration: "none" }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="19" y1="12" x2="5" y2="12" /><polyline points="12 19 5 12 12 5" /></svg>
           Cidades
         </Link>
-        <h1 className="text-xl font-semibold tracking-tight" style={{ color: "var(--fg)" }}>{city.name}</h1>
+        <h1 className="text-lg lg:text-xl font-semibold tracking-tight" style={{ color: "var(--fg)" }}>{city.name}</h1>
         <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>{city.total_businesses} lojas registradas · {city.state}</p>
       </header>
-      <div className="mb-5">
+      <div className="mb-4 lg:mb-5">
         <SearchBar onSearch={handleSearch} isLoading={status === "loading"} />
       </div>
-      <div className="flex flex-col lg:flex-row gap-5 flex-1">
-        <div className="lg:w-2/3" style={{ minHeight: "400px", height: "100%" }}>
+      <div className="flex flex-col lg:flex-row gap-4 lg:gap-5 flex-1">
+        <div className="lg:w-2/3 h-[50dvh] lg:h-full min-h-[300px] lg:min-h-[400px]">
           <MapView stops={stops.map(s => ({ id: s.id, lat: s.lat, lon: s.lon }))} businesses={mapBusinesses} center={mapCenter} />
         </div>
         <aside className="lg:w-1/3 flex flex-col gap-4">

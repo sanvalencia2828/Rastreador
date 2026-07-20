@@ -75,7 +75,7 @@ export default function StopCard({ index, displayName, cep, businesses, loadingB
         {!loadingBusinesses && <span style={{ color: "var(--accent)", marginLeft: "4px" }}>({businesses.length})</span>}
       </p>
       {businesses.length > 0 ? (
-        <div className="space-y-2" style={{ maxHeight: "200px", overflowY: "auto" }}>
+        <div className="space-y-2" style={{ maxHeight: "200px", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
           {businesses.map(b => {
             const isClient = b.status === "client";
             const isVisited = b.status === "visited" || isClient;
@@ -89,10 +89,10 @@ export default function StopCard({ index, displayName, cep, businesses, loadingB
                 </div>
                 {!isVisited && b.lat && b.lon && (
                   <div className="flex flex-col gap-1">
-                    <button onClick={() => handleVisit(b)} className="text-xs font-medium" style={{ padding: "3px 8px", borderRadius: "4px", background: "#22c55e15", color: "#22c55e", border: "1px solid #22c55e30", cursor: "pointer", whiteSpace: "nowrap" }}>
+                    <button onClick={() => handleVisit(b)} className="text-xs font-medium" style={{ padding: "10px 12px", borderRadius: "4px", background: "#22c55e15", color: "#22c55e", border: "1px solid #22c55e30", cursor: "pointer", whiteSpace: "nowrap", minHeight: "44px" }}>
                       Visitar
                     </button>
-                    <button onClick={() => handleSetClient(b)} className="text-xs font-medium" style={{ padding: "3px 8px", borderRadius: "4px", background: "#8b5cf615", color: "#8b5cf6", border: "1px solid #8b5cf630", cursor: "pointer", whiteSpace: "nowrap" }}>
+                    <button onClick={() => handleSetClient(b)} className="text-xs font-medium" style={{ padding: "10px 12px", borderRadius: "4px", background: "#8b5cf615", color: "#8b5cf6", border: "1px solid #8b5cf630", cursor: "pointer", whiteSpace: "nowrap", minHeight: "44px" }}>
                       Cliente
                     </button>
                   </div>

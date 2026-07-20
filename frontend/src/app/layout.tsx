@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Geist } from "next/font/google";
 import "./globals.css";
+import Navbar from "./components/Navbar";
 
 const geistSans = Geist({
   subsets: ["latin"],
@@ -28,7 +29,10 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es" className={geistSans.variable}>
-      <body>{children}</body>
+      <body>
+        <Navbar />
+        <div style={{ paddingTop: "48px" }}>{children}</div>
+      </body>
     </html>
   );
 }

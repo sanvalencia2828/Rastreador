@@ -9,6 +9,10 @@ const nextConfig = {
         destination: `${backendUrl}/api/businesses/status`,
       },
       {
+        source: "/api/businesses/search",
+        destination: `${backendUrl}/api/businesses/search`,
+      },
+      {
         source: "/api/businesses/:cnpj/status",
         destination: `${backendUrl}/api/businesses/:cnpj/status`,
       },
@@ -35,6 +39,10 @@ const nextConfig = {
       {
         source: "/api/cities/:path*",
         destination: `${backendUrl}/api/cities/:path*`,
+      },
+      {
+        source: "/api/stats/:path*",
+        destination: `${backendUrl}/api/stats/:path*`,
       },
     ];
   },
