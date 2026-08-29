@@ -109,14 +109,15 @@ CREATE TABLE IF NOT EXISTS cities (
 
 CREATE INDEX IF NOT EXISTS idx_cities_state ON cities(state);
 
--- Seed the 6 covered cities (idempotent)
+-- Seed the 7 covered cities (idempotent)
 INSERT INTO cities (name, state, lat, lon) VALUES
 ('Londrina', 'PR', -23.3103, -51.1628),
 ('Cambé', 'PR', -23.2778, -51.2675),
 ('Apucarana', 'PR', -23.5489, -51.4594),
 ('Pirapó', 'PR', -23.4167, -51.6500),
 ('Cambira', 'PR', -23.3500, -51.5667),
-('Jandaia do Sul', 'PR', -23.2003, -51.5822)
+('Jandaia do Sul', 'PR', -23.2003, -51.5822),
+('Maringá', 'PR', -23.4205, -51.9330)
 ON CONFLICT (name, state) DO NOTHING;
 
 -- Create a function to update the updated_at timestamp

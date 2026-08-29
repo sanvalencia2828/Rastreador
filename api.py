@@ -2063,6 +2063,12 @@ class City(BaseModel):
     lat: float | None
     lon: float | None
 
+class CityCreate(BaseModel):
+    name: str
+    state: str = "PR"
+    lat: float
+    lon: float
+
 class CityStats(BaseModel):
     id: int
     name: str
@@ -2112,6 +2118,41 @@ def get_cities():
             return [dict(r._mapping) for r in rows]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch cities: {e}")
+
+
+@app.post("/api/cities")
+def create_city(city: CityCreate):
+    """Crea una ciudad idempotentemente (ON CONFLICT DO NOTHING)."""
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    if not city.name.strip():
+        raise HTTPException(status_code=400, detail="City name is required")
+    try:
+        with db_engine.begin() as conn:
+            conn.execute(
+                text("""
+                    INSERT INTO cities (name, state, lat, lon)
+                    VALUES (:name, :state, :lat, :lon)
+                    ON CONFLICT (name, state) DO NOTHING
+                """),
+                {
+                    "name": city.name.strip(),
+                    "state": city.state.strip().upper() or "PR",
+                    "lat": city.lat,
+                    "lon": city.lon,
+                },
+            )
+            row = conn.execute(
+                text("SELECT id, name, state, lat, lon FROM cities WHERE name = :name AND state = :state"),
+                {"name": city.name.strip(), "state": city.state.strip().upper() or "PR"},
+            ).fetchone()
+            if not row:
+                raise HTTPException(status_code=500, detail="City creation failed")
+            return dict(row._mapping)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to create city: {e}")
 
 @app.get("/api/cities/{city_id}/stats")
 def get_city_stats(city_id: int):
