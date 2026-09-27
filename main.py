@@ -6,6 +6,11 @@
 # the core api.py implementation.
 
 
+from api import app  # noqa: E402
+
+__all__ = ["app"]
+
+
 if __name__ == "__main__":
     import uvicorn
     import os

@@ -63,6 +63,7 @@ app = FastAPI(
     title="Londrina Radar Comercial API",
     description="Plataforma analítica geoespacial para rastreo de comercios en Londrina, PR",
     version="1.0.0",
+    root_path=os.getenv("ROOT_PATH", ""),
 )
 
 cors_origins_raw = os.environ.get(
@@ -347,7 +348,7 @@ def assign_geographic_coords(
 @app.get("/health")
 def health_check():
     """Health check endpoint for Docker container checks"""
-    return {"status": "ok", "message": "Rastreador CNPJ backend is running"}
+    return {"ok": True, "status": "ok"}
 
 
 @app.get("/api/heatmap")
@@ -1149,7 +1150,9 @@ class DailyRouteUpdate(BaseModel):
 # ------------------------------------------------------------------------------
 # DB SETUP & GLOBAL ENGINE
 # ------------------------------------------------------------------------------
-conn_str = os.environ.get("DATABASE_URL")
+conn_str = os.environ.get("DATABASE_URL") or ""
+if conn_str.startswith("postgres://"):
+    conn_str = "postgresql://" + conn_str[len("postgres://") :]
 if not conn_str:
     db_user = os.environ.get("DB_USER")
     db_password = os.environ.get("DB_PASSWORD")
@@ -1159,7 +1162,15 @@ if not conn_str:
     if all([db_user, db_password, db_host, db_name]):
         conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 
-db_engine = create_engine(conn_str) if conn_str else None
+db_engine = (
+    create_engine(
+        conn_str,
+        pool_pre_ping=True,
+        connect_args={"connect_timeout": 8},
+    )
+    if conn_str
+    else None
+)
 
 # Initialize User Table
 if db_engine:
@@ -2835,3 +2846,24 @@ if __name__ == "__main__":
     host = os.environ.get("API_HOST", "0.0.0.0")
     print(f"Launching Rastreador CNPJ Backend API on http://{host}:{port}...")
     uvicorn.run("api:app", host=host, port=port, reload=True)
+
+
+def _wire_v1_and_spa() -> None:
+    """Imported at module bottom so existing routes stay registered first."""
+    from app.db import set_engine
+    from app.geocode import router as geocode_router
+    from app.migrate import apply_migrations
+    from app.spa import register_spa
+    from app.v1 import router as v1_router
+
+    set_engine(db_engine)
+    app.include_router(geocode_router)
+    app.include_router(v1_router)
+    if apply_migrations(db_engine):
+        print("Applied migration 021")
+    else:
+        print("Migration 021 not applied (no DATABASE_URL or database unavailable)")
+    register_spa(app)
+
+
+_wire_v1_and_spa()
