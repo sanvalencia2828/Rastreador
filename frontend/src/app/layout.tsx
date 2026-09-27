@@ -1,12 +1,6 @@
 import type { Metadata, Viewport } from "next";
-import { Geist } from "next/font/google";
 import "./globals.css";
 import Navbar from "./components/Navbar";
-
-const geistSans = Geist({
-  subsets: ["latin"],
-  variable: "--font-geist-sans",
-});
 
 export const metadata: Metadata = {
   title: "Geolocalizador — Busca direcciones en el mapa",
@@ -28,7 +22,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="es" className={geistSans.variable}>
+    <html lang="es">
       <body>
         <Navbar />
         <div style={{ paddingTop: "48px" }}>{children}</div>
