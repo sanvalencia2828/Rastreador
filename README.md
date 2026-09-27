@@ -92,6 +92,19 @@ npm run dev
 
 El dashboard se levanta en http://localhost:3000.
 
+## Vercel + Render (arquitectura partida)
+
+El frontend de producción es el proyecto Vercel (root `frontend/`). El backend es el Web Service de Render. `GET /` en Render puede ser 404: ahí no vive la app.
+
+Diagnóstico del 2026-09-27:
+
+- Vercel sirve el shell (mapa + “Buscar”), pero `/api/cities` responde `404 DNS_HOSTNAME_RESOLVED_PRIVATE`. El build había reescrito `/api/*` a `http://localhost:8001`.
+- `/cities` muestra “No se pudieron cargar las ciudades”.
+- Render `/health` sigue siendo el JSON viejo (`status`/`message`, sin `frontend_dist` en el log). Esa instancia no está en `arena/01a0e070-rastreador`.
+- Render `GET /api/cities` responde `Database connection unavailable`: el Web Service no tiene `DATABASE_URL`.
+
+El proxy de `frontend/src/app/api/[...path]/route.ts` lee, en runtime, `BACKEND_URL` o `VITE_API_URL`. No hay host de prod en el código. En Vercel hay que setear una de esas variables y redeployar. En Render hay que linkear la base y, si el browser llama a Render directo, `CORS_ORIGINS`.
+
 ## Por qué `GET /` sigue en 404
 
 Si el log de Render dice `HEAD / HTTP/1.1" 404 Not Found` y **no** imprime `frontend_dist=...`, ese proceso no está corriendo esta branch. El 404 genérico es el FastAPI viejo, sin SPA. Con este código, `/` es HTML (200) o `503 frontend not built`, nunca el 404 pelado.

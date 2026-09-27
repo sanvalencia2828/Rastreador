@@ -26,7 +26,11 @@ export default function CitiesPage() {
     const load = async () => {
       try {
         const res = await fetch("/api/cities");
-        if (!res.ok) throw new Error("Unable to fetch cities");
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          const detail = typeof body.detail === "string" ? body.detail : `Error ${res.status}`;
+          throw new Error(detail);
+        }
         const data = await res.json();
         if (!isMounted) return;
 
@@ -59,9 +63,9 @@ export default function CitiesPage() {
             return { ...city, total_businesses: result.value };
           })
         );
-      } catch {
+      } catch (err) {
         if (isMounted) {
-          setError("No se pudieron cargar las ciudades en este momento.");
+          setError(err instanceof Error ? err.message : "No se pudieron cargar las ciudades en este momento.");
           setLoading(false);
         }
       }
