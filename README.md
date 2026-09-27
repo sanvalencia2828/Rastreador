@@ -92,6 +92,19 @@ npm run dev
 
 El dashboard se levanta en http://localhost:3000.
 
+## Por qué `GET /` sigue en 404
+
+Si el log de Render dice `HEAD / HTTP/1.1" 404 Not Found` y **no** imprime `frontend_dist=...`, ese proceso no está corriendo esta branch. El 404 genérico es el FastAPI viejo, sin SPA. Con este código, `/` es HTML (200) o `503 frontend not built`, nunca el 404 pelado.
+
+El servicio `rastreador-hcyy` arranca con `uvicorn api:app --host 0.0.0.0 --port $PORT` (runtime Python, no Docker). Para que ese comando sirva el frontend:
+
+1. Settings → Branch → `arena/01a0e070-rastreador` (esta sesión no puede pushear otra branch).
+2. Dejá el start command como está.
+3. Manual Deploy. En el log tiene que aparecer `frontend_dist=...`.
+4. `GET /health` debe incluir `"frontend": true`. `GET /` debe ser HTML.
+
+El snapshot está commiteado en `static/` para que el runtime Python no necesite Node. Si cambiás el UI, regeneralo con `bash scripts/export_static.sh` y commiteá `static/`.
+
 ## ☁️ Despliegue en Render (un solo servicio)
 
 Producción (`rastreador-hcyy.onrender.com`) tiene que servir el frontend y la API en el mismo origen. FastAPI responde `GET /` con el `index.html` del export de Next; si el build no está, responde **503** `{"detail":"frontend not built"}` en lugar del 404 genérico.

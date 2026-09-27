@@ -348,7 +348,9 @@ def assign_geographic_coords(
 @app.get("/health")
 def health_check():
     """Health check endpoint for Docker container checks"""
-    return {"ok": True, "status": "ok"}
+    from app.spa import dist_root
+
+    return {"ok": True, "status": "ok", "frontend": dist_root() is not None}
 
 
 @app.get("/api/heatmap")
@@ -2853,16 +2855,18 @@ def _wire_v1_and_spa() -> None:
     from app.db import set_engine
     from app.geocode import router as geocode_router
     from app.migrate import apply_migrations
-    from app.spa import register_spa
+    from app.spa import dist_root, register_spa
     from app.v1 import router as v1_router
 
     set_engine(db_engine)
     app.include_router(geocode_router)
     app.include_router(v1_router)
-    if apply_migrations(db_engine):
-        print("Applied migration 021")
-    else:
-        print("Migration 021 not applied (no DATABASE_URL or database unavailable)")
+    migrated = apply_migrations(db_engine)
+    root = dist_root()
+    print(
+        f"frontend_dist={root if root else 'MISSING'} migration_021={'applied' if migrated else 'skipped'}",
+        flush=True,
+    )
     register_spa(app)
 
 

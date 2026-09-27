@@ -11,7 +11,15 @@ client = TestClient(app)
 def test_health_ok():
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json()["ok"] is True
+    body = response.json()
+    assert body["ok"] is True
+    assert "frontend" in body
+
+
+def test_committed_static_snapshot_exists():
+    root = Path("static")
+    assert (root / "index.html").is_file()
+    assert (root / "routes" / "index.html").is_file()
 
 
 def test_root_is_503_when_frontend_missing():

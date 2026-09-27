@@ -31,7 +31,7 @@ jobs:
       - name: Backend tests
         env:
           DATABASE_URL: ""
-          TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rastreador
+          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/rastreador
         run: pytest -q
 
     services:
