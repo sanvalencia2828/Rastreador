@@ -37,6 +37,10 @@ start_command = "uvicorn api:app --host 0.0.0.0 --port ${PORT}"
 runtime = "python3.11"
 max_lambda_size = "50mb"
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
 [tool.pyrefly]
 search-paths = ["."]
 

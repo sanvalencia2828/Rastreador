@@ -75,6 +75,29 @@ CREATE INDEX IF NOT EXISTS idx_visits_logradouro ON visits(logradouro);
 CREATE INDEX IF NOT EXISTS idx_visits_time ON visits(visited_at DESC);
 
 -- ==============================================================================
+-- 3b. BUSINESS STATUS (global per-business status: new / visited / client)
+--     Decoupled from visits history so a loja can be flagged as "client"
+--     without depending on a route. cnpj is the PK so ON CONFLICT (cnpj)
+--     upserts work. route_id is optional for future route-scoped status.
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS business_status (
+    cnpj       VARCHAR(20) PRIMARY KEY,
+    status     VARCHAR(10) NOT NULL DEFAULT 'new',
+    route_id   UUID REFERENCES routes(id) ON DELETE CASCADE,
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    CHECK (status IN ('new', 'visited', 'client'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_business_status_status ON business_status(status);
+
+-- Trigger to keep updated_at fresh on business_status
+DROP TRIGGER IF EXISTS update_business_status_updated_at ON business_status;
+CREATE TRIGGER update_business_status_updated_at
+    BEFORE UPDATE ON business_status
+    FOR EACH ROW
+    EXECUTE FUNCTION update_updated_at_column();
+
+-- ==============================================================================
 -- 4. STREET COVERAGE (aggregated per street + municipality)
 --    Automatically maintained by the `update_street_coverage()` trigger below.
 -- ==============================================================================
@@ -219,9 +242,10 @@ ON CONFLICT DO NOTHING;
 GRANT ALL PRIVILEGES ON TABLE street_segments TO postgres;
 GRANT ALL PRIVILEGES ON TABLE routes TO postgres;
 GRANT ALL PRIVILEGES ON TABLE visits TO postgres;
+GRANT ALL PRIVILEGES ON TABLE business_status TO postgres;
 GRANT ALL PRIVILEGES ON TABLE street_coverage TO postgres;
 GRANT ALL PRIVILEGES ON SEQUENCE street_segments_id_seq TO postgres;
 GRANT ALL PRIVILEGES ON SEQUENCE visits_id_seq TO postgres;
 GRANT ALL PRIVILEGES ON SEQUENCE street_coverage_id_seq TO postgres;
 
-SELECT 'Street tracking schema (visits + street_coverage) initialized successfully' as message;
+SELECT 'Street tracking schema (visits + business_status + street_coverage) initialized successfully' as message;
