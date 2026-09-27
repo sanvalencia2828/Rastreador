@@ -92,6 +92,57 @@ npm run dev
 
 El dashboard se levanta en http://localhost:3000.
 
+## ☁️ Despliegue en Render (un solo servicio)
+
+Producción (`rastreador-hcyy.onrender.com`) tiene que servir el frontend y la API en el mismo origen. FastAPI responde `GET /` con el `index.html` del export de Next; si el build no está, responde **503** `{"detail":"frontend not built"}` en lugar del 404 genérico.
+
+No hay `Procfile` histórico ni `render.yaml` previo: el arranque del repo era `uvicorn api:app` (Docker) y el frontend Next.js corría aparte en `:3000`, con rewrites a `http://localhost:8001`. Eso deja `GET /` en 404 cuando Render solo levanta la API.
+
+### Opción recomendada: Docker
+
+Root `Dockerfile` (multi-stage): `npm ci && NEXT_OUTPUT=export npm run build` y `pip install -r requirements.txt`. El output queda en `/app/frontend/out`.
+
+```bash
+uvicorn api:app --host 0.0.0.0 --port $PORT
+```
+
+También vale `uvicorn app.main:app --host 0.0.0.0 --port $PORT`.
+
+### Opción nativa (el runtime de Python tiene que tener Node)
+
+| Campo | Valor |
+|-------|--------|
+| **buildCommand** | `bash scripts/render_build.sh` |
+| **startCommand** | `uvicorn api:app --host 0.0.0.0 --port $PORT` |
+| **health check** | `/health` → `{"ok": true}` |
+
+### Variables de entorno
+
+| Variable | Obligatoria | Notas |
+|----------|-------------|--------|
+| `DATABASE_URL` | sí, para persistir rutas | URL **interna** de Render. No commitearla. |
+| `JWT_SECRET_KEY` | sí en prod | |
+| `CORS_ORIGINS` | no | Same-origin no la necesita. Lista explícita, sin `*`. |
+| `OSRM_URL` | no | Si está, completa `eta_s` / `distance_m`. Si no, la distancia es línea recta. |
+| `APP_TIMEZONE` | no | Default `America/Sao_Paulo` (“hoy” del import de Maps). |
+| `FRONTEND_DIST` | no | Default `frontend/out`. En la imagen Docker: `/app/frontend/out`. |
+| `ROOT_PATH` | no | Vacío. Render no publica la app bajo un prefijo. |
+
+La migración `migrations/021_planner_routes.sql` corre al arrancar y es idempotente. No existe una migración numerada 020: el baseline es `init.sql` + `street_tracking_schema.sql` + el DDL de `api.py`. `cities.id` es INTEGER. `routes.id` es UUID. `planned` se mapea a `locked`.
+
+El planner vive en `/routes` y llama `/api/v1/...` con paths relativos (no `localhost`).
+
+Verificación local:
+
+```bash
+NEXT_OUTPUT=export npm run build --prefix frontend
+DATABASE_URL= uvicorn api:app --host 0.0.0.0 --port 8000
+# GET /            → HTML
+# GET /routes      → HTML del planner
+# GET /api/v1/docs → JSON
+# GET /health      → {"ok": true}
+```
+
 ## ☁️ Despliegue en Vercel
 
 El proyecto soporta despliegue en Vercel con el backend FastAPI como **serverless function** y el frontend Next.js como build estático.
@@ -219,7 +270,11 @@ Todas las variables de configuración están documentadas en [`.env.example`](.e
 
 | Método | Endpoint | Descripción |
 |--------|----------|-------------|
-| `GET` | `/health` | Health check |
+| `GET` | `/health` | Health check `{"ok": true}` |
+| `GET` | `/api/v1/docs` | Índice JSON de la API v1 |
+| `GET/POST` | `/api/v1/routes` | Rutas del planner (UUID, draft/locked/committed) |
+| `POST` | `/api/v1/routes/import-maps` | Importa links de Google Maps con `visit_date` |
+| `PATCH` | `/api/v1/routes/{id}/stops/{stop_id}/tarjeta` | Estado de tarjeteo (`TT TS TC VV TF PT VS`) |
 | `GET` | `/api/heatmap` | GeoJSON FeatureCollection de todos los comercios |
 | `GET` | `/api/clusters/emergentes` | Ranking de los 5 polos comerciales con totales |
 

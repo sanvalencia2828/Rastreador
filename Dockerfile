@@ -1,34 +1,36 @@
-# Use python:3.12-slim as base
-FROM python:3.12-slim
+# Single-service image for Render: Next.js static export + FastAPI.
+# start: uvicorn api:app --host 0.0.0.0 --port $PORT
 
-# Set environment variables
+FROM node:20-alpine AS frontend
+WORKDIR /src
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci --legacy-peer-deps
+COPY frontend/ ./
+ENV NEXT_OUTPUT=export \
+    NEXT_PUBLIC_API_URL=
+RUN npm run build
+
+FROM python:3.11-slim
+WORKDIR /app
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8000
+    FRONTEND_DIST=/app/frontend/out \
+    APP_TIMEZONE=America/Sao_Paulo
 
-# Set working directory
-WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends gcc \
+    && rm -rf /var/lib/apt/lists/*
 
-# Copy uv binary from official ghcr.io image
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uv/bin/uv
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# Add uv to PATH
-ENV PATH="/uv/bin:${PATH}"
+COPY api.py main.py ./
+COPY app ./app
+COPY migrations ./migrations
+COPY cnpj_etl_polars.py enriquecer_lojas.py generate_sample_data.py download_cnpj_pr.py ./
+COPY --from=frontend /src/out /app/frontend/out
 
-# Copy pyproject.toml and uv.lock (if it exists)
-COPY pyproject.toml uv.lock* ./
-
-# Install project dependencies system-wide using uv
-RUN uv pip install --system --no-cache-dir .
-
-# Copy API implementation and utility ETL scripts
-COPY api.py ./
-COPY cnpj_etl_polars.py ./
-COPY enriquecer_lojas.py ./
-COPY generate_sample_data.py ./
-
-# Expose port 8000
 EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD python -c "import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('PORT','8000')+'/health')" || exit 1
 
-# Run uvicorn on startup
 CMD ["sh", "-c", "uvicorn api:app --host 0.0.0.0 --port ${PORT:-8000}"]

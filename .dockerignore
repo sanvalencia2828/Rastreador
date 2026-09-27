@@ -20,7 +20,14 @@ K3241.*
 *.zip
 *.csv
 *.json
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/tsconfig.json
+!frontend/public/**
 *.sql
+!migrations/*.sql
+!init.sql
+!street_tracking_schema.sql
 cnpj_data
 cnpj_downloader
 __pycache__
