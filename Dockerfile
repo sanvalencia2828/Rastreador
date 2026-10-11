@@ -23,6 +23,7 @@ RUN uv pip install --system --no-cache-dir .
 
 # Copy API implementation and utility ETL scripts
 COPY api.py ./
+COPY app ./app
 COPY cnpj_etl_polars.py ./
 COPY enriquecer_lojas.py ./
 COPY generate_sample_data.py ./
