@@ -11,11 +11,13 @@ import os
 import time
 import json
 import hashlib
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Literal, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from sqlalchemy import create_engine, text
+
+from app.routes.routes import router as semimanual_routes_router
 
 
 # ==============================================================================
@@ -77,6 +79,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.include_router(semimanual_routes_router, prefix="/api/v1")
 
 
 # ==============================================================================
@@ -1006,7 +1009,7 @@ def get_businesses_near(lat: float, lon: float, radius: int = 500):
 # ==============================================================================
 import hmac
 import base64
-from datetime import datetime
+from datetime import date, datetime, timezone
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi import Depends
 
@@ -1134,6 +1137,73 @@ class RouteResponse(BaseModel):
     stops: List[RouteStopResponse] = []
 
 
+class RouteStop(BaseModel):
+    id: str
+    route_id: str
+    business_id: Optional[int]
+    order: int
+    visited: bool
+    visited_at: Optional[str]
+    skipped: bool
+    skip_reason: Optional[str]
+    notes: Optional[str]
+    business: Optional[Dict[str, Any]] = None
+
+
+class Route(BaseModel):
+    id: str
+    user_id: Optional[str]
+    name: str
+    city_id: Optional[int]
+    start_lat: Optional[float]
+    start_lng: Optional[float]
+    status: str
+    planned_at: Optional[str]
+    started_at: Optional[str]
+    ended_at: Optional[str]
+    completed_at: Optional[str]
+    completed_date: Optional[str]
+    total_stops_planned: int
+    total_stops_done: int
+    total_distance_km: float
+    total_duration_min: float
+    notes: Optional[str]
+    stops: List[RouteStop] = []
+
+
+class RouteCoordinate(BaseModel):
+    lat: float
+    lng: float
+
+
+class PlannedRouteCreate(BaseModel):
+    name: str
+    city_id: Optional[int] = None
+    business_ids: List[int]
+    start_lat: Optional[float] = None
+    start_lng: Optional[float] = None
+    start: Optional[RouteCoordinate] = None
+    notes: Optional[str] = None
+
+
+class RouteStatusUpdate(BaseModel):
+    status: Literal["active", "cancelled"]
+
+
+class RouteCompletionStop(BaseModel):
+    business_id: int
+    status: Literal["visited", "skipped", "closed"]
+    notes: Optional[str] = None
+    skip_reason: Optional[str] = None
+
+
+class RouteCompleteRequest(BaseModel):
+    completed_date: date
+    started_at: Optional[datetime] = None
+    ended_at: Optional[datetime] = None
+    stops: List[RouteCompletionStop]
+
+
 class DailyRouteCreate(BaseModel):
     name: str
     day_of_week: Optional[str] = None
@@ -1160,6 +1230,127 @@ if not conn_str:
         conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 
 db_engine = create_engine(conn_str) if conn_str else None
+
+
+def _ensure_business_visit_metrics_schema() -> None:
+    """Apply the small idempotent schema change when no migration runner exists."""
+    if not db_engine:
+        return
+    try:
+        with db_engine.begin() as conn:
+            conn.execute(text("""
+                ALTER TABLE estabelecimentos
+                    ADD COLUMN IF NOT EXISTS last_visit_date DATE,
+                    ADD COLUMN IF NOT EXISTS visits_count INTEGER NOT NULL DEFAULT 0,
+                    ADD COLUMN IF NOT EXISTS avg_visit_interval_days DOUBLE PRECISION
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS idx_estabelecimentos_last_visit_date
+                    ON estabelecimentos(last_visit_date)
+            """))
+    except Exception as e:
+        print(f"Error initializing business visit metrics columns: {e}")
+
+
+_ensure_business_visit_metrics_schema()
+
+
+def _recalculate_visit_metrics_on_connection(conn, business_id: int) -> Dict[str, Any]:
+    """Recalculate one business's metrics using an existing DB connection."""
+    business = conn.execute(
+        text("""
+            SELECT cnpj_completo
+            FROM estabelecimentos
+            WHERE id = :business_id
+        """),
+        {"business_id": business_id},
+    ).fetchone()
+    if not business:
+        raise ValueError(f"Business {business_id} not found")
+
+    visit_dates = [
+        row[0]
+        for row in conn.execute(
+            text("""
+                SELECT DISTINCT CAST(v.visited_at AS DATE) AS visit_date
+                FROM visits v
+                WHERE v.cnpj = :cnpj
+                  AND v.visited_at IS NOT NULL
+                ORDER BY visit_date ASC
+            """),
+            {"cnpj": business[0]},
+        )
+    ]
+
+    visits_count = len(visit_dates)
+    last_visit_date = visit_dates[-1] if visit_dates else None
+    avg_visit_interval_days = None
+
+    if visits_count >= 2:
+        intervals = [
+            (current - previous).days
+            for previous, current in zip(visit_dates, visit_dates[1:])
+        ]
+        avg_visit_interval_days = sum(intervals) / len(intervals)
+
+    conn.execute(
+        text("""
+            UPDATE estabelecimentos
+            SET last_visit_date = :last_visit_date,
+                visits_count = :visits_count,
+                avg_visit_interval_days = :avg_visit_interval_days
+            WHERE id = :business_id
+        """),
+        {
+            "business_id": business_id,
+            "last_visit_date": last_visit_date,
+            "visits_count": visits_count,
+            "avg_visit_interval_days": avg_visit_interval_days,
+        },
+    )
+
+    return {
+        "business_id": business_id,
+        "last_visit_date": last_visit_date,
+        "visits_count": visits_count,
+        "avg_visit_interval_days": avg_visit_interval_days,
+    }
+
+
+def recalculate_visit_metrics(business_id: int) -> Dict[str, Any]:
+    """Persist visit metrics for a business from its complete visit history.
+
+    Visit timestamps are normalized to calendar dates before deduplication, so
+    multiple visits on the same day count as one visit for interval purposes.
+    The function owns and commits its transaction when called directly. Visit
+    creation passes its active connection internally so the insert and metric
+    update commit atomically.
+    """
+    if not db_engine:
+        raise RuntimeError("Database connection unavailable")
+
+    with db_engine.begin() as conn:
+        return _recalculate_visit_metrics_on_connection(conn, business_id)
+
+
+def recalculate_visit_interval(db_or_conn, business_id: int) -> Dict[str, Any]:
+    """Recalculate metrics using the caller's active transaction connection."""
+    return _recalculate_visit_metrics_on_connection(db_or_conn, business_id)
+
+
+def _business_id_for_cnpj(conn, cnpj: Optional[str]) -> Optional[int]:
+    """Resolve the canonical business id used by the metrics function."""
+    if not cnpj:
+        return None
+    return conn.execute(
+        text("""
+            SELECT id
+            FROM estabelecimentos
+            WHERE cnpj_completo = :cnpj
+            LIMIT 1
+        """),
+        {"cnpj": cnpj},
+    ).scalar()
 
 # Initialize User Table
 if db_engine:
@@ -1201,33 +1392,95 @@ if db_engine:
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS routes (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    user_id UUID NOT NULL,
+                    user_id UUID,
                     city_id INTEGER REFERENCES cities(id),
                     name VARCHAR(255) NOT NULL,
                     geom GEOMETRY(LineString, 4326),
+                    start_lat NUMERIC(10,7),
+                    start_lng NUMERIC(10,7),
+                    status VARCHAR(20) NOT NULL DEFAULT 'planned',
+                    planned_at TIMESTAMPTZ DEFAULT NOW(),
+                    started_at TIMESTAMPTZ,
+                    ended_at TIMESTAMPTZ,
+                    completed_at TIMESTAMPTZ,
+                    completed_date DATE,
+                    total_stops_planned INTEGER NOT NULL DEFAULT 0,
+                    total_stops_done INTEGER NOT NULL DEFAULT 0,
+                    total_distance_km DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    total_duration_min DOUBLE PRECISION NOT NULL DEFAULT 0,
+                    notes TEXT,
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 );
             """))
+            conn.execute(text("ALTER TABLE routes ALTER COLUMN user_id DROP NOT NULL;"))
             conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS city_id INTEGER REFERENCES cities(id);"))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS start_lat NUMERIC(10,7);"))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS start_lng NUMERIC(10,7);"))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'planned';"))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS planned_at TIMESTAMPTZ DEFAULT NOW();"))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;"))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ;"))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;"))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS completed_date DATE;"))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS total_stops_planned INTEGER NOT NULL DEFAULT 0;"))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS total_stops_done INTEGER NOT NULL DEFAULT 0;"))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS total_distance_km DOUBLE PRECISION NOT NULL DEFAULT 0;"))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS total_duration_min DOUBLE PRECISION NOT NULL DEFAULT 0;"))
+            conn.execute(text("ALTER TABLE routes ADD COLUMN IF NOT EXISTS notes TEXT;"))
+            conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM pg_constraint WHERE conname = 'routes_status_check'
+                    ) THEN
+                        ALTER TABLE routes ADD CONSTRAINT routes_status_check
+                            CHECK (status IN ('planned', 'active', 'completed', 'cancelled'));
+                    END IF;
+                END $$;
+            """))
             conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS route_stops (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
                     route_id UUID REFERENCES routes(id) ON DELETE CASCADE,
+                    business_id INTEGER REFERENCES estabelecimentos(id),
                     stop_order INTEGER NOT NULL,
                     address TEXT NOT NULL,
                     lat NUMERIC(10,7) NOT NULL,
                     lon NUMERIC(10,7) NOT NULL,
                     cep VARCHAR(10),
                     display_name TEXT,
+                    visited BOOLEAN NOT NULL DEFAULT FALSE,
+                    visited_at TIMESTAMPTZ,
+                    skipped BOOLEAN NOT NULL DEFAULT FALSE,
+                    skip_reason TEXT,
+                    notes TEXT,
                     created_at TIMESTAMPTZ DEFAULT NOW()
                 );
             """))
+            conn.execute(text("ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS business_id INTEGER REFERENCES estabelecimentos(id);"))
+            conn.execute(text("ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS visited BOOLEAN NOT NULL DEFAULT FALSE;"))
+            conn.execute(text("ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS visited_at TIMESTAMPTZ;"))
+            conn.execute(text("ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS skipped BOOLEAN NOT NULL DEFAULT FALSE;"))
+            conn.execute(text("ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS skip_reason TEXT;"))
+            conn.execute(text("ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS notes TEXT;"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_stops_route ON route_stops(route_id);"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS idx_routes_city_id ON routes(city_id);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_routes_status ON routes(status);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_routes_planned_at ON routes(planned_at DESC);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_route_stops_business ON route_stops(business_id);"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS idx_route_stops_route_order ON route_stops(route_id, stop_order);"))
             conn.commit()
             print("Successfully initialized routes tables in DB.")
     except Exception as e:
         print(f"Error initializing routes tables: {e}")
+
+
+if db_engine:
+    try:
+        with db_engine.begin() as conn:
+            conn.execute(text("ALTER TABLE visits ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'mobile';"))
+    except Exception as e:
+        print(f"Error initializing visit source column: {e}")
 
 
 # ------------------------------------------------------------------------------
@@ -1535,6 +1788,11 @@ def create_visit(visit: VisitCreate, user_id: str = Depends(get_current_user_id)
                     status_code=500, detail="Database did not return the visit ID"
                 )
             visit_id = row[0]
+
+            business_id = _business_id_for_cnpj(conn, visit.cnpj)
+            if business_id is not None:
+                recalculate_visit_interval(conn, business_id)
+
             conn.commit()
             return {"status": "success", "visit_id": visit_id, "synced": True}
     except HTTPException:
@@ -1560,6 +1818,7 @@ def sync_visits(
 
     inserted_count = 0
     skipped_count = 0
+    inserted_cnpjs = set()
 
     try:
         with db_engine.connect() as conn:
@@ -1617,6 +1876,13 @@ def sync_visits(
                     },
                 )
                 inserted_count += 1
+                if item.cnpj:
+                    inserted_cnpjs.add(item.cnpj)
+
+            for cnpj in inserted_cnpjs:
+                business_id = _business_id_for_cnpj(conn, cnpj)
+                if business_id is not None:
+                    recalculate_visit_interval(conn, business_id)
 
             conn.commit()
             return {"synced": inserted_count, "skipped": skipped_count, "conflicts": []}
@@ -1625,62 +1891,122 @@ def sync_visits(
 
 
 @app.post("/api/routes")
-def create_route(route: RouteCreate, user_id: str = Depends(get_current_user_id)):
-    """
-    Creates a route by collecting the geometries of multiple street segments
-    and merging them into a single track using PostGIS ST_LineMerge.
-    """
+def create_route(
+    route: PlannedRouteCreate,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """Persist an ordered business route with planned route stops."""
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
+    if not route.name.strip():
+        raise HTTPException(status_code=400, detail="Route name is required")
+    if not route.business_ids:
+        raise HTTPException(status_code=400, detail="At least one business is required")
+    if len(set(route.business_ids)) != len(route.business_ids):
+        raise HTTPException(status_code=400, detail="business_ids must be unique")
 
-    if not route.segment_ids:
-        raise HTTPException(
-            status_code=400, detail="A route must contain at least one segment"
-        )
+    start_lat = route.start.lat if route.start else route.start_lat
+    start_lng = route.start.lng if route.start else route.start_lng
+    if start_lat is None or start_lng is None:
+        raise HTTPException(status_code=400, detail="start_lat and start_lng are required")
 
     try:
-        with db_engine.connect() as conn:
-            # First collect the geometries of the segments and merge them
-            from sqlalchemy import bindparam
+        from sqlalchemy import bindparam
 
-            merge_query = text("""
-                INSERT INTO routes (user_id, name, geom)
-                VALUES (
-                    :user_id, 
-                    :name, 
-                    (
-                        SELECT ST_LineMerge(ST_Collect(geom))
-                        FROM street_segments
-                        WHERE id IN :segment_ids
-                    )
+        with db_engine.begin() as conn:
+            business_rows = conn.execute(
+                text("""
+                    SELECT id, nome_fantasia, cnpj_completo, logradouro,
+                           bairro, municipio, latitude, longitude
+                    FROM estabelecimentos
+                    WHERE id IN :business_ids
+                """).bindparams(bindparam("business_ids", expanding=True)),
+                {"business_ids": route.business_ids},
+            ).fetchall()
+            businesses_by_id = {int(row.id): dict(row._mapping) for row in business_rows}
+            missing_ids = [
+                business_id
+                for business_id in route.business_ids
+                if business_id not in businesses_by_id
+            ]
+            if missing_ids:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Business(es) not found: {missing_ids}",
                 )
-                RETURNING id, ST_AsGeoJSON(geom) as geom_geojson
-            """).bindparams(bindparam("segment_ids", expanding=True))
 
-            result = conn.execute(
-                merge_query,
-                {
-                    "user_id": user_id,
-                    "name": route.name,
-                    "segment_ids": route.segment_ids,
-                },
-            )
-
-            row = result.fetchone()
-            if not row or not row[1]:
+            ordered_businesses = [businesses_by_id[business_id] for business_id in route.business_ids]
+            if any(
+                business["latitude"] is None or business["longitude"] is None
+                for business in ordered_businesses
+            ):
                 raise HTTPException(
                     status_code=400,
-                    detail="Could not construct route geometry. Make sure segment IDs exist.",
+                    detail="All businesses must have latitude and longitude",
                 )
 
-            route_id, geom_json = row
-            conn.commit()
-            return {
-                "status": "success",
-                "route_id": str(route_id),
-                "name": route.name,
-                "geometry": json.loads(geom_json),
-            }
+            total_distance_km = _route_distance_km(
+                start_lat,
+                start_lng,
+                ordered_businesses,
+            )
+            total_duration_min = total_distance_km / 40.0 * 60.0
+            route_row = conn.execute(
+                text("""
+                    INSERT INTO routes (
+                        user_id, name, city_id, start_lat, start_lng, status,
+                        planned_at, total_stops_planned, total_stops_done,
+                        total_distance_km, total_duration_min, notes
+                    )
+                    VALUES (
+                        :user_id, :name, :city_id, :start_lat, :start_lng, 'planned',
+                        NOW(), :total_stops_planned, 0,
+                        :total_distance_km, :total_duration_min, :notes
+                    )
+                    RETURNING id
+                """),
+                {
+                    "user_id": user_id,
+                    "name": route.name.strip(),
+                    "city_id": route.city_id,
+                    "start_lat": start_lat,
+                    "start_lng": start_lng,
+                    "total_stops_planned": len(ordered_businesses),
+                    "total_distance_km": total_distance_km,
+                    "total_duration_min": total_duration_min,
+                    "notes": route.notes,
+                },
+            ).fetchone()
+            if not route_row:
+                raise HTTPException(status_code=500, detail="Route creation failed")
+
+            route_id = route_row[0]
+            for stop_order, business in enumerate(ordered_businesses, start=1):
+                conn.execute(
+                    text("""
+                        INSERT INTO route_stops (
+                            route_id, business_id, stop_order, address, lat, lon,
+                            display_name, visited, skipped
+                        )
+                        VALUES (
+                            :route_id, :business_id, :stop_order, :address, :lat, :lon,
+                            :display_name, FALSE, FALSE
+                        )
+                    """),
+                    {
+                        "route_id": route_id,
+                        "business_id": business["id"],
+                        "stop_order": stop_order,
+                        "address": business["logradouro"] or "",
+                        "lat": business["latitude"],
+                        "lon": business["longitude"],
+                        "display_name": business["nome_fantasia"] or "",
+                    },
+                )
+
+            return _get_route_detail(conn, route_id)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to create route: {e}")
 
@@ -2104,8 +2430,75 @@ class RouteGenerateResponse(BaseModel):
     stops: list[GeneratedStop]
 
 
+class RoutePoint(BaseModel):
+    id: int
+    lat: float
+    lng: float
+
+
 class RouteOptimizeRequest(BaseModel):
-    stops: list[dict]
+    start: RouteCoordinate
+    points: List[RoutePoint]
+
+
+def nearest_neighbor_order(
+    start_lat: float,
+    start_lng: float,
+    points: List[RoutePoint],
+) -> tuple[List[int], float]:
+    """Return point ids and meters for a greedy nearest-neighbor route.
+
+    The scan is O(n²) and uses O(n) extra memory, which is appropriate for a
+    city route without a road-network matrix or a map provider.
+    """
+    remaining = list(points)
+    current_lat = start_lat
+    current_lng = start_lng
+    ordered_ids: List[int] = []
+    total_distance_m = 0.0
+
+    while remaining:
+        next_index, next_point, next_distance = min(
+            (
+                (
+                    index,
+                    point,
+                    haversine_m(
+                        current_lat,
+                        current_lng,
+                        point.lat,
+                        point.lng,
+                    ),
+                )
+                for index, point in enumerate(remaining)
+            ),
+            key=lambda candidate: candidate[2],
+        )
+        remaining.pop(next_index)
+        total_distance_m += next_distance
+        ordered_ids.append(next_point.id)
+        current_lat = next_point.lat
+        current_lng = next_point.lng
+
+    return ordered_ids, total_distance_m
+
+
+def _route_distance_km(
+    start_lat: float,
+    start_lng: float,
+    ordered_businesses: List[Dict[str, Any]],
+) -> float:
+    """Calculate route distance from the start through ordered businesses."""
+    current_lat = start_lat
+    current_lng = start_lng
+    total_distance_m = 0.0
+    for business in ordered_businesses:
+        next_lat = float(business["latitude"])
+        next_lng = float(business["longitude"])
+        total_distance_m += haversine_m(current_lat, current_lng, next_lat, next_lng)
+        current_lat = next_lat
+        current_lng = next_lng
+    return total_distance_m / 1000.0
 
 
 @app.get("/api/cities")
@@ -2303,57 +2696,460 @@ def create_city_route(city_id: int, route: RouteCreate, user_id: str = Depends(g
         raise HTTPException(status_code=500, detail=f"Failed to create city route: {e}")
 
 
+def _get_route_detail(conn, route_id) -> Dict[str, Any]:
+    """Load a route and its business-enriched stops from one connection."""
+    route_row = conn.execute(
+        text("""
+            SELECT id, user_id, name, city_id, start_lat, start_lng, status,
+                   planned_at, started_at, ended_at, completed_at, completed_date,
+                   total_stops_planned, total_stops_done, total_distance_km,
+                   total_duration_min, notes
+            FROM routes
+            WHERE id = :route_id
+        """),
+        {"route_id": route_id},
+    ).fetchone()
+    if not route_row:
+        raise HTTPException(status_code=404, detail="Route not found")
+
+    route = dict(route_row._mapping)
+    stop_rows = conn.execute(
+        text("""
+            SELECT
+                rs.id AS stop_id,
+                rs.route_id,
+                rs.business_id,
+                rs.stop_order,
+                rs.visited,
+                rs.visited_at,
+                rs.skipped,
+                rs.skip_reason,
+                rs.notes AS stop_notes,
+                rs.address,
+                rs.lat AS stop_lat,
+                rs.lon AS stop_lng,
+                e.id AS business_row_id,
+                e.cnpj_completo,
+                e.nome_fantasia,
+                e.latitude AS business_lat,
+                e.longitude AS business_lng,
+                e.municipio,
+                e.bairro,
+                e.logradouro
+            FROM route_stops rs
+            LEFT JOIN estabelecimentos e ON e.id = rs.business_id
+            WHERE rs.route_id = :route_id
+            ORDER BY rs.stop_order
+        """),
+        {"route_id": route_id},
+    ).fetchall()
+
+    def iso(value):
+        return value.isoformat() if value is not None else None
+
+    stops = []
+    for stop_row in stop_rows:
+        stop = dict(stop_row._mapping)
+        business = None
+        if stop["business_row_id"] is not None:
+            business = {
+                "id": int(stop["business_row_id"]),
+                "cnpj": stop["cnpj_completo"],
+                "name": fix_encoding(stop["nome_fantasia"] or ""),
+                "lat": float(stop["business_lat"]) if stop["business_lat"] is not None else None,
+                "lng": float(stop["business_lng"]) if stop["business_lng"] is not None else None,
+                "city": fix_encoding(stop["municipio"] or ""),
+                "bairro": fix_encoding(stop["bairro"] or ""),
+                "logradouro": fix_encoding(stop["logradouro"] or ""),
+            }
+        stops.append({
+            "id": str(stop["stop_id"]),
+            "route_id": str(stop["route_id"]),
+            "business_id": int(stop["business_id"]) if stop["business_id"] is not None else None,
+            "order": stop["stop_order"],
+            "visited": bool(stop["visited"]),
+            "visited_at": iso(stop["visited_at"]),
+            "skipped": bool(stop["skipped"]),
+            "skip_reason": stop["skip_reason"],
+            "notes": stop["stop_notes"],
+            "address": stop["address"],
+            "lat": float(stop["stop_lat"]),
+            "lng": float(stop["stop_lng"]),
+            "business": business,
+        })
+
+    return {
+        "id": str(route["id"]),
+        "user_id": str(route["user_id"]) if route["user_id"] is not None else None,
+        "name": route["name"],
+        "city_id": int(route["city_id"]) if route["city_id"] is not None else None,
+        "start_lat": float(route["start_lat"]) if route["start_lat"] is not None else None,
+        "start_lng": float(route["start_lng"]) if route["start_lng"] is not None else None,
+        "status": route["status"],
+        "planned_at": iso(route["planned_at"]),
+        "started_at": iso(route["started_at"]),
+        "ended_at": iso(route["ended_at"]),
+        "completed_at": iso(route["completed_at"]),
+        "completed_date": iso(route["completed_date"]),
+        "total_stops_planned": int(route["total_stops_planned"] or 0),
+        "total_stops_done": int(route["total_stops_done"] or 0),
+        "total_distance_km": float(route["total_distance_km"] or 0),
+        "total_duration_min": float(route["total_duration_min"] or 0),
+        "notes": route["notes"],
+        "stops": stops,
+    }
+
+
+@app.get("/api/routes")
+def list_routes(
+    status: Optional[str] = None,
+    city_id: Optional[int] = None,
+    limit: int = 50,
+    offset: int = 0,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """List planned routes, optionally filtered by status or city."""
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    if status and status not in {"planned", "active", "completed", "cancelled"}:
+        raise HTTPException(status_code=400, detail="Invalid route status")
+    if limit < 1 or limit > 500:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 500")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be non-negative")
+
+    query = """
+        SELECT r.id, r.user_id, r.name, r.city_id, r.start_lat, r.start_lng,
+               r.status, r.planned_at, r.started_at, r.ended_at,
+               r.completed_at, r.completed_date,
+               r.total_stops_planned, r.total_stops_done,
+               r.total_distance_km, r.total_duration_min, r.notes,
+               COUNT(rs.id) AS stops_count
+        FROM routes r
+        LEFT JOIN route_stops rs ON rs.route_id = r.id
+        WHERE 1 = 1
+    """
+    params: Dict[str, Any] = {"limit": limit, "offset": offset}
+    if user_id is not None:
+        query += " AND (r.user_id = :user_id OR r.user_id IS NULL)"
+        params["user_id"] = user_id
+    if status:
+        query += " AND r.status = :status"
+        params["status"] = status
+    if city_id is not None:
+        query += " AND r.city_id = :city_id"
+        params["city_id"] = city_id
+    query += " GROUP BY r.id ORDER BY r.planned_at DESC NULLS LAST LIMIT :limit OFFSET :offset"
+
+    try:
+        with db_engine.connect() as conn:
+            rows = conn.execute(text(query), params).fetchall()
+            return [
+                {
+                    "id": str(row.id),
+                    "user_id": str(row.user_id) if row.user_id is not None else None,
+                    "name": row.name,
+                    "city_id": row.city_id,
+                    "start_lat": float(row.start_lat) if row.start_lat is not None else None,
+                    "start_lng": float(row.start_lng) if row.start_lng is not None else None,
+                    "status": row.status,
+                    "planned_at": row.planned_at.isoformat() if row.planned_at else None,
+                    "started_at": row.started_at.isoformat() if row.started_at else None,
+                    "ended_at": row.ended_at.isoformat() if row.ended_at else None,
+                    "completed_at": row.completed_at.isoformat() if row.completed_at else None,
+                    "completed_date": row.completed_date.isoformat() if row.completed_date else None,
+                    "total_stops_planned": int(row.total_stops_planned or 0),
+                    "total_stops_done": int(row.total_stops_done or 0),
+                    "total_distance_km": float(row.total_distance_km or 0),
+                    "total_duration_min": float(row.total_duration_min or 0),
+                    "notes": row.notes,
+                    "stops_count": int(row.stops_count or 0),
+                }
+                for row in rows
+            ]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list routes: {e}")
+
+
 @app.get("/api/routes/{route_id}")
-def get_route(route_id: str, user_id: str = Depends(get_effective_user_id)):
+def get_route(route_id: str, user_id: Optional[str] = Depends(get_optional_user_id)):
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
 
     try:
         with db_engine.connect() as conn:
-            result = conn.execute(
-                text("""
-                    SELECT id, name, city_id, created_at
-                    FROM routes
-                    WHERE id = :route_id AND user_id = :user_id
-                """),
-                {"route_id": route_id, "user_id": user_id},
-            )
-            row = result.fetchone()
-            if not row:
+            access_query = "SELECT id FROM routes WHERE id = :route_id"
+            access_params: Dict[str, Any] = {"route_id": route_id}
+            if user_id is not None:
+                access_query += " AND (user_id = :user_id OR user_id IS NULL)"
+                access_params["user_id"] = user_id
+            accessible = conn.execute(text(access_query), access_params).fetchone()
+            if not accessible:
                 raise HTTPException(status_code=404, detail="Route not found")
-            row_dict = dict(row._mapping)
-            stops_result = conn.execute(
-                text("""
-                    SELECT id, stop_order, address, lat, lon, cep, display_name
-                    FROM route_stops
-                    WHERE route_id = :route_id
-                    ORDER BY stop_order
-                """),
-                {"route_id": row_dict["id"]},
-            )
-            stops = [
-                {
-                    "id": str(stop_row[0]),
-                    "stop_order": stop_row[1],
-                    "address": stop_row[2],
-                    "lat": float(stop_row[3]),
-                    "lon": float(stop_row[4]),
-                    "cep": stop_row[5],
-                    "display_name": stop_row[6],
-                }
-                for stop_row in stops_result
-            ]
-            return {
-                "id": str(row_dict["id"]),
-                "name": row_dict["name"],
-                "city_id": row_dict["city_id"],
-                "created_at": row_dict["created_at"].isoformat() if row_dict["created_at"] else None,
-                "stops": stops,
-            }
+            return _get_route_detail(conn, route_id)
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch route: {e}")
+
+
+@app.patch("/api/routes/{route_id}/status")
+def update_route_status(
+    route_id: str,
+    body: RouteStatusUpdate,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """Apply the allowed planned -> active/cancelled transitions atomically."""
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+
+    try:
+        with db_engine.begin() as conn:
+            query = """
+                SELECT id, status
+                FROM routes
+                WHERE id = :route_id
+            """
+            params: Dict[str, Any] = {"route_id": route_id}
+            if user_id is not None:
+                query += " AND (user_id = :user_id OR user_id IS NULL)"
+                params["user_id"] = user_id
+            query += " FOR UPDATE"
+
+            route_row = conn.execute(text(query), params).fetchone()
+            if not route_row:
+                raise HTTPException(status_code=404, detail="Route not found")
+
+            current_status = route_row.status
+            allowed = (
+                body.status == "active" and current_status == "planned"
+            ) or (
+                body.status == "cancelled"
+                and current_status in {"planned", "active"}
+            )
+            if not allowed:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Route cannot transition from '{current_status}' to '{body.status}'",
+                )
+
+            conn.execute(
+                text("""
+                    UPDATE routes
+                    SET status = :status,
+                        started_at = CASE
+                            WHEN :status = 'active' THEN COALESCE(started_at, NOW())
+                            ELSE started_at
+                        END
+                    WHERE id = :route_id
+                """),
+                {"route_id": route_id, "status": body.status},
+            )
+            return _get_route_detail(conn, route_id)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update route status: {e}")
+
+
+@app.post("/api/routes/{route_id}/complete")
+def complete_route(
+    route_id: str,
+    body: RouteCompleteRequest,
+    user_id: Optional[str] = Depends(get_optional_user_id),
+):
+    """Complete a route, record visits, and recalculate business frequency."""
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    if body.completed_date > date.today():
+        raise HTTPException(
+            status_code=400,
+            detail="completed_date cannot be in the future",
+        )
+    business_ids = [stop.business_id for stop in body.stops]
+    if len(set(business_ids)) != len(business_ids):
+        raise HTTPException(status_code=400, detail="Each business can appear only once")
+
+    visit_date = datetime.combine(
+        body.completed_date,
+        datetime.min.time(),
+        tzinfo=timezone.utc,
+    )
+    visited_at = datetime.now(timezone.utc)
+
+    try:
+        with db_engine.begin() as conn:
+            route_query = """
+                SELECT id, user_id, status
+                FROM routes
+                WHERE id = :route_id
+            """
+            route_params: Dict[str, Any] = {"route_id": route_id}
+            if user_id is not None:
+                route_query += " AND (user_id = :user_id OR user_id IS NULL)"
+                route_params["user_id"] = user_id
+            route_query += " FOR UPDATE"
+
+            route_row = conn.execute(text(route_query), route_params).fetchone()
+            if not route_row or route_row.status not in {"planned", "active"}:
+                raise HTTPException(status_code=404, detail="Route not found or already completed")
+
+            route_stop_rows = conn.execute(
+                text("""
+                    SELECT business_id
+                    FROM route_stops
+                    WHERE route_id = :route_id
+                    FOR UPDATE
+                """),
+                {"route_id": route_id},
+            ).fetchall()
+            route_business_ids = {row.business_id for row in route_stop_rows}
+            invalid_business_ids = sorted(
+                set(business_ids) - route_business_ids
+            )
+            if invalid_business_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "The following business_ids are not stops on this route: "
+                        f"{invalid_business_ids}"
+                    ),
+                )
+
+            route_user_id = route_row.user_id or user_id or os.getenv(
+                "DEV_USER_ID",
+                "00000000-0000-0000-0000-000000000001",
+            )
+            visited_business_ids = set()
+
+            for stop in body.stops:
+                stop_row = conn.execute(
+                    text("""
+                        SELECT
+                            rs.id AS route_stop_id,
+                            rs.business_id,
+                            e.cnpj_completo,
+                            COALESCE(e.latitude, ST_Y(e.geom::geometry)) AS lat,
+                            COALESCE(e.longitude, ST_X(e.geom::geometry)) AS lon,
+                            e.logradouro,
+                            e.bairro
+                        FROM route_stops rs
+                        JOIN estabelecimentos e ON e.id = rs.business_id
+                        WHERE rs.route_id = :route_id
+                          AND rs.business_id = :business_id
+                        FOR UPDATE
+                    """),
+                    {"route_id": route_id, "business_id": stop.business_id},
+                ).fetchone()
+                if not stop_row:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Business {stop.business_id} is not a stop on this route",
+                    )
+
+                is_visited = stop.status == "visited"
+                is_skipped = stop.status in {"skipped", "closed"}
+                skip_reason = stop.skip_reason
+                if stop.status == "closed" and not skip_reason:
+                    skip_reason = "closed"
+
+                if is_visited:
+                    if not stop_row.cnpj_completo:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Business {stop.business_id} has no CNPJ",
+                        )
+                    if stop_row.lat is None or stop_row.lon is None:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Business {stop.business_id} has no coordinates",
+                        )
+
+                    conn.execute(
+                        text("""
+                            INSERT INTO visits (
+                                user_id, route_id, cnpj, lat, lon, logradouro,
+                                bairro, notes, source, visited_at
+                            )
+                            VALUES (
+                                :user_id, :route_id, :cnpj, :lat, :lon, :logradouro,
+                                :bairro, :notes, 'route', :visited_at
+                            )
+                        """),
+                        {
+                            "user_id": route_user_id,
+                            "route_id": route_id,
+                            "cnpj": stop_row.cnpj_completo,
+                            "lat": stop_row.lat,
+                            "lon": stop_row.lon,
+                            "logradouro": stop_row.logradouro or "",
+                            "bairro": stop_row.bairro,
+                            "notes": stop.notes,
+                            "visited_at": visit_date,
+                        },
+                    )
+                    visited_business_ids.add(stop.business_id)
+
+                conn.execute(
+                    text("""
+                        UPDATE route_stops
+                        SET visited = :visited,
+                            visited_at = :visited_at,
+                            skipped = :skipped,
+                            skip_reason = :skip_reason,
+                            notes = :notes
+                        WHERE id = :route_stop_id
+                    """),
+                    {
+                        "route_stop_id": stop_row.route_stop_id,
+                        "visited": is_visited,
+                        "visited_at": visited_at if is_visited else None,
+                        "skipped": is_skipped,
+                        "skip_reason": skip_reason,
+                        "notes": stop.notes,
+                    },
+                )
+
+            for business_id in visited_business_ids:
+                recalculate_visit_interval(conn, business_id)
+
+            total_stops_done = conn.execute(
+                text("""
+                    SELECT COUNT(*)
+                    FROM route_stops
+                    WHERE route_id = :route_id AND visited = TRUE
+                """),
+                {"route_id": route_id},
+            ).scalar() or 0
+
+            conn.execute(
+                text("""
+                    UPDATE routes
+                    SET status = 'completed',
+                        started_at = COALESCE(:started_at, started_at),
+                        ended_at = COALESCE(:ended_at, NOW()),
+                        completed_date = :completed_date,
+                        completed_at = NOW(),
+                        total_stops_done = :total_stops_done
+                    WHERE id = :route_id
+                """),
+                {
+                    "route_id": route_id,
+                    "started_at": body.started_at,
+                    "ended_at": body.ended_at,
+                    "completed_date": body.completed_date,
+                    "total_stops_done": int(total_stops_done),
+                },
+            )
+
+            return {
+                "message": "Route completed successfully",
+                "route": _get_route_detail(conn, route_id),
+            }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to complete route: {e}")
 
 
 @app.put("/api/routes/{route_id}")
@@ -2637,6 +3433,99 @@ def generate_route(body: RouteGenerateRequest):
     )
 
 
+def _business_route_metrics(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Add read-time urgency fields to a business row."""
+    last_visit_date = row.get("last_visit_date")
+    if isinstance(last_visit_date, datetime):
+        last_visit_date = last_visit_date.date()
+
+    visits_count = int(row.get("visits_count") or 0)
+    avg_interval = row.get("avg_visit_interval_days")
+    avg_interval = float(avg_interval) if avg_interval is not None else None
+    days_since_last_visit = (
+        (date.today() - last_visit_date).days if last_visit_date else None
+    )
+    due_in_days = (
+        int(round(avg_interval - days_since_last_visit))
+        if avg_interval is not None and days_since_last_visit is not None
+        else None
+    )
+
+    if visits_count == 0:
+        status_due = "never"
+    elif due_in_days is not None and due_in_days < 0:
+        status_due = "overdue"
+    elif due_in_days is not None and due_in_days <= 7:
+        status_due = "due_soon"
+    else:
+        status_due = "ok"
+
+    row["last_visit_date"] = last_visit_date.isoformat() if last_visit_date else None
+    row["visits_count"] = visits_count
+    row["avg_visit_interval_days"] = avg_interval
+    row["days_since_last_visit"] = days_since_last_visit
+    row["due_in_days"] = due_in_days
+    row["status_due"] = status_due
+    return row
+
+
+@app.get("/api/businesses")
+@app.get("/api/businesses/for-routes")
+def get_businesses_for_routes(
+    city: Optional[str] = None,
+    limit: int = 500,
+    offset: int = 0,
+):
+    """Return businesses with persisted visit metrics and route urgency."""
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    if limit < 1 or limit > 5000:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 5000")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be non-negative")
+
+    query = """
+        SELECT
+            e.id,
+            e.cnpj_completo AS cnpj,
+            e.nome_fantasia AS name,
+            e.nome_fantasia,
+            e.latitude AS lat,
+            e.longitude AS lng,
+            e.municipio AS city,
+            e.bairro,
+            e.logradouro,
+            e.last_visit_date,
+            COALESCE(e.visits_count, 0) AS visits_count,
+            e.avg_visit_interval_days
+        FROM estabelecimentos e
+        WHERE e.situacao_cadastral = 2
+          AND (e.latitude IS NOT NULL OR e.geom IS NOT NULL)
+    """
+    params: Dict[str, Any] = {"limit": limit, "offset": offset}
+    if city and city.strip():
+        query += " AND e.municipio ILIKE :city"
+        params["city"] = f"%{city.strip()}%"
+    query += " ORDER BY e.nome_fantasia NULLS LAST, e.id LIMIT :limit OFFSET :offset"
+
+    try:
+        with db_engine.connect() as conn:
+            rows = conn.execute(text(query), params)
+            businesses = []
+            for row in rows:
+                item = dict(row._mapping)
+                item["lat"] = float(item["lat"]) if item["lat"] is not None else None
+                item["lng"] = float(item["lng"]) if item["lng"] is not None else None
+                item["name"] = fix_encoding(item.get("name") or "")
+                item["city"] = fix_encoding(item.get("city") or "")
+                item["bairro"] = fix_encoding(item.get("bairro") or "")
+                item["logradouro"] = fix_encoding(item.get("logradouro") or "")
+                businesses.append(_business_route_metrics(item))
+            return businesses
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch businesses: {e}")
+
+
 @app.get("/api/businesses/search")
 def search_businesses(q: str, limit: int = 50):
     if len(q.strip()) < 3:
@@ -2742,36 +3631,21 @@ def get_stats_summary():
 
 @app.post("/api/routes/optimize")
 def optimize_route(body: RouteOptimizeRequest):
-    """Reordena stops por nearest neighbor para minimizar distancia."""
-    if not db_engine:
-        raise HTTPException(status_code=500, detail="Database connection unavailable")
-    stops = body.stops
-    if not stops:
-        return {"stops": [], "total_distance_m": 0}
+    """Order route points from the start using nearest neighbor."""
+    if len({point.id for point in body.points}) != len(body.points):
+        raise HTTPException(status_code=400, detail="Point ids must be unique")
 
-    ordered = [stops[0]]
-    remaining = list(stops[1:])
-
-    total_distance = 0
-    while remaining:
-        last = ordered[-1]
-        best_idx = 0
-        best_dist = float("inf")
-        for i, s in enumerate(remaining):
-            d = haversine_m(last["lat"], last["lon"], s["lat"], s["lon"])
-            if d < best_dist:
-                best_dist = d
-                best_idx = i
-        total_distance += best_dist
-        ordered.append(remaining.pop(best_idx))
-
-    if len(ordered) > 1:
-        total_distance += haversine_m(
-            ordered[-1]["lat"], ordered[-1]["lon"],
-            ordered[0]["lat"], ordered[0]["lon"],
-        )
-
-    return {"stops": ordered, "total_distance_m": round(total_distance, 0)}
+    ordered_ids, total_distance_m = nearest_neighbor_order(
+        body.start.lat,
+        body.start.lng,
+        body.points,
+    )
+    total_distance_km = total_distance_m / 1000.0
+    return {
+        "ordered_ids": ordered_ids,
+        "total_distance_km": round(total_distance_km, 3),
+        "total_duration_min": round(total_distance_km / 40.0 * 60.0, 1),
+    }
 
 
 @app.get("/api/businesses/clients")

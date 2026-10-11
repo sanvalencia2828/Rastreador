@@ -66,6 +66,29 @@ Acceder a:
 docker-compose up db
 ```
 
+#### 1.1. OSRM local para rutas y optimización
+
+Para generar la geometría de ruta y la matriz de tiempos, levanta un contenedor OSRM con el OSM.PBF de Brasil:
+
+```bash
+# Descargar el PBF de Brasil (ejemplo con GeoFabrik o OSM Brazil)
+# https://download.geofabrik.de/south-america/brazil.html
+
+# Luego preparar y lanzar OSRM:
+mkdir -p osrm-data
+# Ejemplo manual:
+# docker run -t --rm -v "$PWD/osrm-data:/data" ghcr.io/project-osrm/osrm-backend osrm-extract -p /opt/footlight.lua /data/brazil-latest.osm.pbf
+# docker run -t --rm -v "$PWD/osrm-data:/data" ghcr.io/project-osrm/osrm-backend osrm-partition /data/brazil-latest.osrm
+# docker run -t --rm -v "$PWD/osrm-data:/data" -p 5000:5000 ghcr.io/project-osrm/osrm-backend osrm-routed --algorithm mld /data/brazil-latest.osrm
+```
+
+Y luego deja el valor en el entorno:
+
+```env
+OSRM_URL=http://osrm:5000
+OPTIMIZER_THRESHOLD_ORTOOLS=30
+```
+
 #### 2. Backend API
 
 ```bash

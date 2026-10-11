@@ -72,3 +72,9 @@ espc.md
 # Opencode local agent instructions
 .opencode/
 
+
+# Local dev server logs
+frontend/npm-start*.log
+
+# Ad-hoc DB inspection script (contains a hardcoded connection string)
+inspect_db.py

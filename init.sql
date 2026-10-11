@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS estabelecimentos (
     latitude DECIMAL(10, 8),
     longitude DECIMAL(11, 8),
     geom geometry(Point, 4326),
+    last_visit_date DATE,
+    visits_count INTEGER NOT NULL DEFAULT 0,
+    avg_visit_interval_days DOUBLE PRECISION,
     geocoded BOOLEAN DEFAULT FALSE,
     business_type VARCHAR(20),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -56,6 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_estabelecimentos_cnae_fiscal ON estabelecimentos(
 CREATE INDEX IF NOT EXISTS idx_estabelecimentos_situacao_cadastral ON estabelecimentos(situacao_cadastral);
 CREATE INDEX IF NOT EXISTS idx_estabelecimentos_data_inicio_atividade ON estabelecimentos(data_inicio_atividade);
 CREATE INDEX IF NOT EXISTS idx_estabelecimentos_geolocation ON estabelecimentos(latitude, longitude);
+CREATE INDEX IF NOT EXISTS idx_estabelecimentos_last_visit_date ON estabelecimentos(last_visit_date);
 
 -- Create a table for storing enriched data about commercial clusters
 CREATE TABLE IF NOT EXISTS clusters (

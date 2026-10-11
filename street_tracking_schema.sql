@@ -40,14 +40,56 @@ DROP TABLE IF EXISTS user_visits;
 
 CREATE TABLE IF NOT EXISTS routes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL,
+    user_id UUID,
+    city_id INTEGER REFERENCES cities(id),
     name VARCHAR(255),
     geom GEOMETRY(LineString, 4326),
+    start_lat NUMERIC(10,7),
+    start_lng NUMERIC(10,7),
+    status VARCHAR(20) NOT NULL DEFAULT 'planned',
+    planned_at TIMESTAMPTZ DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    ended_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    completed_date DATE,
+    total_stops_planned INTEGER NOT NULL DEFAULT 0,
+    total_stops_done INTEGER NOT NULL DEFAULT 0,
+    total_distance_km DOUBLE PRECISION NOT NULL DEFAULT 0,
+    total_duration_min DOUBLE PRECISION NOT NULL DEFAULT 0,
+    notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE routes ALTER COLUMN user_id DROP NOT NULL;
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS city_id INTEGER REFERENCES cities(id);
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS start_lat NUMERIC(10,7);
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS start_lng NUMERIC(10,7);
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'planned';
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS planned_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ;
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS ended_at TIMESTAMPTZ;
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS completed_at TIMESTAMPTZ;
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS completed_date DATE;
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS total_stops_planned INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS total_stops_done INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS total_distance_km DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS total_duration_min DOUBLE PRECISION NOT NULL DEFAULT 0;
+ALTER TABLE routes ADD COLUMN IF NOT EXISTS notes TEXT;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'routes_status_check'
+    ) THEN
+        ALTER TABLE routes ADD CONSTRAINT routes_status_check
+            CHECK (status IN ('planned', 'active', 'completed', 'cancelled'));
+    END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_routes_geom ON routes USING GIST(geom);
 CREATE INDEX IF NOT EXISTS idx_routes_user_id ON routes(user_id);
+CREATE INDEX IF NOT EXISTS idx_routes_status ON routes(status);
+CREATE INDEX IF NOT EXISTS idx_routes_planned_at ON routes(planned_at DESC);
 
 -- ==============================================================================
 -- 3. VISITS (individual business-level visits with GPS coords + history)
@@ -65,14 +107,57 @@ CREATE TABLE IF NOT EXISTS visits (
     logradouro TEXT NOT NULL,
     bairro TEXT,
     notes TEXT,                             -- free-form field observations (preserved from user_visits)
+    source VARCHAR(50) DEFAULT 'mobile',
     visited_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE visits ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'mobile';
 
 CREATE INDEX IF NOT EXISTS idx_visits_user ON visits(user_id);
 CREATE INDEX IF NOT EXISTS idx_visits_cnpj ON visits(cnpj);
 CREATE INDEX IF NOT EXISTS idx_visits_route ON visits(route_id);
 CREATE INDEX IF NOT EXISTS idx_visits_logradouro ON visits(logradouro);
 CREATE INDEX IF NOT EXISTS idx_visits_time ON visits(visited_at DESC);
+
+-- Business stops for planned routes. Address/coordinates remain nullable only
+-- for legacy rows; new business stops always provide business_id and coords.
+CREATE TABLE IF NOT EXISTS route_stops (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    route_id UUID NOT NULL REFERENCES routes(id) ON DELETE CASCADE,
+    business_id INTEGER REFERENCES estabelecimentos(id),
+    stop_order INTEGER NOT NULL,
+    visited BOOLEAN NOT NULL DEFAULT FALSE,
+    visited_at TIMESTAMPTZ,
+    skipped BOOLEAN NOT NULL DEFAULT FALSE,
+    skip_reason TEXT,
+    notes TEXT,
+    address TEXT NOT NULL DEFAULT '',
+    lat NUMERIC(10,7) NOT NULL DEFAULT 0,
+    lon NUMERIC(10,7) NOT NULL DEFAULT 0,
+    cep VARCHAR(10),
+    display_name TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS business_id INTEGER REFERENCES estabelecimentos(id);
+ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS visited BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS visited_at TIMESTAMPTZ;
+ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS skipped BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS skip_reason TEXT;
+ALTER TABLE route_stops ADD COLUMN IF NOT EXISTS notes TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_route_stops_business ON route_stops(business_id);
+CREATE INDEX IF NOT EXISTS idx_route_stops_route_order ON route_stops(route_id, stop_order);
+
+-- Per-business visit metrics. The API recalculates these fields after each
+-- visit insert; the ALTER statements keep this schema safe for existing DBs.
+ALTER TABLE estabelecimentos
+    ADD COLUMN IF NOT EXISTS last_visit_date DATE,
+    ADD COLUMN IF NOT EXISTS visits_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS avg_visit_interval_days DOUBLE PRECISION;
+
+CREATE INDEX IF NOT EXISTS idx_estabelecimentos_last_visit_date
+    ON estabelecimentos(last_visit_date);
 
 -- ==============================================================================
 -- 3b. BUSINESS STATUS (global per-business status: new / visited / client)
@@ -241,6 +326,7 @@ ON CONFLICT DO NOTHING;
 -- ==============================================================================
 GRANT ALL PRIVILEGES ON TABLE street_segments TO postgres;
 GRANT ALL PRIVILEGES ON TABLE routes TO postgres;
+GRANT ALL PRIVILEGES ON TABLE route_stops TO postgres;
 GRANT ALL PRIVILEGES ON TABLE visits TO postgres;
 GRANT ALL PRIVILEGES ON TABLE business_status TO postgres;
 GRANT ALL PRIVILEGES ON TABLE street_coverage TO postgres;
