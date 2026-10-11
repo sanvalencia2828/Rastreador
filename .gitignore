@@ -39,6 +39,7 @@ postgres_data/
 
 # Data files (do not commit large CNPJ files or local processed data)
 data/
+.data/
 sample_estabelecimentos.csv
 londrina_businesses.json
 londrina_businesses_polars.json
