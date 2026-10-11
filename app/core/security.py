@@ -1,0 +1,107 @@
+"""Zero-dependency JWT helpers and auth dependencies."""
+
+import base64
+import hashlib
+import hmac
+import json
+import os
+import time
+from typing import Optional
+
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+from app.core import config  # noqa: F401  (loads .env before env reads below)
+
+
+security = HTTPBearer(auto_error=False)
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "super_secret_key_londrina_radar_2026")
+SECRET_KEY = JWT_SECRET_KEY
+
+
+# ------------------------------------------------------------------------------
+# 0-DEPENDENCY JWT & CRYPTO UTILITIES
+# ------------------------------------------------------------------------------
+def base64url_encode(payload: bytes) -> str:
+    return base64.urlsafe_b64encode(payload).rstrip(b"=").decode("utf-8")
+
+
+def base64url_decode(payload: str) -> bytes:
+    padding = "=" * (4 - (len(payload) % 4))
+    return base64.urlsafe_b64decode(payload + padding)
+
+
+def create_jwt_token(data: dict, expires_in: int = 86400) -> str:
+    header = {"alg": "HS256", "typ": "JWT"}
+    payload = data.copy()
+    payload["exp"] = int(time.time()) + expires_in
+    header_json = json.dumps(header, separators=(",", ":")).encode("utf-8")
+    payload_json = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    unsigned_token = (
+        base64url_encode(header_json) + "." + base64url_encode(payload_json)
+    )
+    signature = hmac.new(
+        SECRET_KEY.encode("utf-8"), unsigned_token.encode("utf-8"), hashlib.sha256
+    ).digest()
+    return unsigned_token + "." + base64url_encode(signature)
+
+
+def decode_jwt_token(token: str) -> dict:
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        header_segment, payload_segment, signature_segment = parts
+        unsigned_token = header_segment + "." + payload_segment
+        expected_signature = hmac.new(
+            SECRET_KEY.encode("utf-8"), unsigned_token.encode("utf-8"), hashlib.sha256
+        ).digest()
+        actual_signature = base64url_decode(signature_segment)
+        if not hmac.compare_digest(expected_signature, actual_signature):
+            return {}
+        payload = json.loads(base64url_decode(payload_segment).decode("utf-8"))
+        if payload.get("exp", 0) < time.time():
+            return {}
+        return payload
+    except Exception:
+        return {}
+
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+# ------------------------------------------------------------------------------
+# DEPENDENCY FOR AUTHENTICATION
+# ------------------------------------------------------------------------------
+def get_current_user_id(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> str:
+    if not credentials:
+        raise HTTPException(status_code=401, detail="Authentication token missing")
+    token = credentials.credentials
+    payload = decode_jwt_token(token)
+    if not payload or "user_id" not in payload:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return payload["user_id"]
+
+
+def get_optional_user_id(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> Optional[str]:
+    if not credentials:
+        return None
+    token = credentials.credentials
+    payload = decode_jwt_token(token)
+    return payload.get("user_id") if payload else None
+
+
+def get_effective_user_id(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> str:
+    if credentials:
+        token = credentials.credentials
+        payload = decode_jwt_token(token)
+        if payload and "user_id" in payload:
+            return payload["user_id"]
+    return os.getenv("DEV_USER_ID", "00000000-0000-0000-0000-000000000001")
