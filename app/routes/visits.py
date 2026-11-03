@@ -108,9 +108,8 @@ def get_street_segments(
 
 @router.get("/api/visits")
 def get_user_visits(
-    user_id: Optional[str] = None,
     bbox: Optional[str] = None,
-    current_user_id: str = Depends(get_current_user_id),
+    user_id: str = Depends(get_current_user_id),
 ):
     """
     Returns the authenticated user's business-level visits (history).
@@ -119,8 +118,6 @@ def get_user_visits(
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
 
-    target_user_id = user_id if user_id else current_user_id
-
     query_str = """
         SELECT v.id, v.cnpj, v.lat, v.lon, v.logradouro, v.bairro,
                v.notes, v.route_id, v.visited_at,
@@ -128,7 +125,7 @@ def get_user_visits(
         FROM visits v
         WHERE v.user_id = :user_id
     """
-    params: Dict[str, Any] = {"user_id": target_user_id}
+    params: Dict[str, Any] = {"user_id": user_id}
 
     if bbox:
         try:

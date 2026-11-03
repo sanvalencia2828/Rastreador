@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.core.security import create_jwt_token
 from app.main import app
-from app.routes import planned_routes
+from app.routes import planned_routes, visits
 
 USER_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 USER_B = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
@@ -82,6 +82,9 @@ class FakeEngine:
                     def fetchall(self):
                         return []
 
+                    def __iter__(self):
+                        return iter([])
+
                 return Result()
 
             def commit(self):
@@ -110,3 +113,11 @@ def test_route_queries_only_see_the_callers_own_rows(monkeypatch, method, path, 
         if "routes" in sql.lower():
             assert params.get("user_id") == USER_B
             assert "IS NULL" not in sql.upper()
+
+
+def test_visits_ignore_user_id_query_param(monkeypatch):
+    engine = FakeEngine()
+    monkeypatch.setattr(visits, "db_engine", engine)
+    resp = client.get(f"/api/visits?user_id={USER_A}", headers=bearer(USER_B))
+    assert resp.status_code == 200
+    assert [params["user_id"] for _, params in engine.calls] == [USER_B]
