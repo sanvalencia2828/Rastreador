@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 
 from app.core.database import db_engine
-from app.core.security import get_effective_user_id
+from app.core.security import get_current_user_id
 from app.schemas.city import CityCreate
 from app.schemas.planned_route import RouteCreate
 
@@ -87,7 +87,7 @@ def get_city_stats(city_id: int):
 # ==============================================================================
 
 @router.get("/api/cities/{city_id}/routes")
-def list_city_routes(city_id: int, user_id: str = Depends(get_effective_user_id)):
+def list_city_routes(city_id: int, user_id: str = Depends(get_current_user_id)):
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
 
@@ -141,7 +141,7 @@ def list_city_routes(city_id: int, user_id: str = Depends(get_effective_user_id)
 
 
 @router.post("/api/cities/{city_id}/routes")
-def create_city_route(city_id: int, route: RouteCreate, user_id: str = Depends(get_effective_user_id)):
+def create_city_route(city_id: int, route: RouteCreate, user_id: str = Depends(get_current_user_id)):
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
     if not route.name.strip():

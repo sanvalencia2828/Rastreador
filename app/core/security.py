@@ -74,10 +74,17 @@ def hash_password(password: str) -> str:
 # ------------------------------------------------------------------------------
 # DEPENDENCY FOR AUTHENTICATION
 # ------------------------------------------------------------------------------
+def is_dev_env() -> bool:
+    """Dev shortcuts are opt-in: APP_ENV must be exactly 'development'."""
+    return os.getenv("APP_ENV", "").strip().lower() == "development"
+
+
 def get_current_user_id(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> str:
     if not credentials:
+        if is_dev_env():
+            return os.getenv("DEV_USER_ID", "00000000-0000-0000-0000-000000000001")
         raise HTTPException(status_code=401, detail="Authentication token missing")
     token = credentials.credentials
     payload = decode_jwt_token(token)
@@ -94,14 +101,3 @@ def get_optional_user_id(
     token = credentials.credentials
     payload = decode_jwt_token(token)
     return payload.get("user_id") if payload else None
-
-
-def get_effective_user_id(
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-) -> str:
-    if credentials:
-        token = credentials.credentials
-        payload = decode_jwt_token(token)
-        if payload and "user_id" in payload:
-            return payload["user_id"]
-    return os.getenv("DEV_USER_ID", "00000000-0000-0000-0000-000000000001")

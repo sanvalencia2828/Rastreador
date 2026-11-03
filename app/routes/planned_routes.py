@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 
 from app.core.database import db_engine
-from app.core.security import get_effective_user_id, get_optional_user_id
+from app.core.security import get_current_user_id
 from app.schemas.planned_route import (
     GeneratedStop,
     PlannedRouteCreate,
@@ -33,7 +33,7 @@ router = APIRouter()
 @router.post("/api/routes")
 def create_route(
     route: PlannedRouteCreate,
-    user_id: Optional[str] = Depends(get_optional_user_id),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Persist an ordered business route with planned route stops."""
     if not db_engine:
@@ -157,7 +157,7 @@ def list_routes(
     city_id: Optional[int] = None,
     limit: int = 50,
     offset: int = 0,
-    user_id: Optional[str] = Depends(get_optional_user_id),
+    user_id: str = Depends(get_current_user_id),
 ):
     """List planned routes, optionally filtered by status or city."""
     if not db_engine:
@@ -181,9 +181,8 @@ def list_routes(
         WHERE 1 = 1
     """
     params: Dict[str, Any] = {"limit": limit, "offset": offset}
-    if user_id is not None:
-        query += " AND (r.user_id = :user_id OR r.user_id IS NULL)"
-        params["user_id"] = user_id
+    query += " AND r.user_id = :user_id"
+    params["user_id"] = user_id
     if status:
         query += " AND r.status = :status"
         params["status"] = status
@@ -223,18 +222,16 @@ def list_routes(
 
 
 @router.get("/api/routes/{route_id}")
-def get_route(route_id: str, user_id: Optional[str] = Depends(get_optional_user_id)):
+def get_route(route_id: str, user_id: str = Depends(get_current_user_id)):
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
 
     try:
         with db_engine.connect() as conn:
-            access_query = "SELECT id FROM routes WHERE id = :route_id"
-            access_params: Dict[str, Any] = {"route_id": route_id}
-            if user_id is not None:
-                access_query += " AND (user_id = :user_id OR user_id IS NULL)"
-                access_params["user_id"] = user_id
-            accessible = conn.execute(text(access_query), access_params).fetchone()
+            accessible = conn.execute(
+                text("SELECT id FROM routes WHERE id = :route_id AND user_id = :user_id"),
+                {"route_id": route_id, "user_id": user_id},
+            ).fetchone()
             if not accessible:
                 raise HTTPException(status_code=404, detail="Route not found")
             return _get_route_detail(conn, route_id)
@@ -248,7 +245,7 @@ def get_route(route_id: str, user_id: Optional[str] = Depends(get_optional_user_
 def update_route_status(
     route_id: str,
     body: RouteStatusUpdate,
-    user_id: Optional[str] = Depends(get_optional_user_id),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Apply the allowed planned -> active/cancelled transitions atomically."""
     if not db_engine:
@@ -261,11 +258,8 @@ def update_route_status(
                 FROM routes
                 WHERE id = :route_id
             """
-            params: Dict[str, Any] = {"route_id": route_id}
-            if user_id is not None:
-                query += " AND (user_id = :user_id OR user_id IS NULL)"
-                params["user_id"] = user_id
-            query += " FOR UPDATE"
+            query += " AND user_id = :user_id FOR UPDATE"
+            params: Dict[str, Any] = {"route_id": route_id, "user_id": user_id}
 
             route_row = conn.execute(text(query), params).fetchone()
             if not route_row:
@@ -307,7 +301,7 @@ def update_route_status(
 def complete_route(
     route_id: str,
     body: RouteCompleteRequest,
-    user_id: Optional[str] = Depends(get_optional_user_id),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Complete a route, record visits, and recalculate business frequency."""
     if not db_engine:
@@ -335,11 +329,8 @@ def complete_route(
                 FROM routes
                 WHERE id = :route_id
             """
-            route_params: Dict[str, Any] = {"route_id": route_id}
-            if user_id is not None:
-                route_query += " AND (user_id = :user_id OR user_id IS NULL)"
-                route_params["user_id"] = user_id
-            route_query += " FOR UPDATE"
+            route_query += " AND user_id = :user_id FOR UPDATE"
+            route_params: Dict[str, Any] = {"route_id": route_id, "user_id": user_id}
 
             route_row = conn.execute(text(route_query), route_params).fetchone()
             if not route_row or route_row.status not in {"planned", "active"}:
@@ -504,7 +495,7 @@ def complete_route(
 
 
 @router.put("/api/routes/{route_id}")
-def update_route(route_id: str, route: RouteCreate, user_id: str = Depends(get_effective_user_id)):
+def update_route(route_id: str, route: RouteCreate, user_id: str = Depends(get_current_user_id)):
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
     if not route.name.strip():
@@ -571,7 +562,7 @@ def update_route(route_id: str, route: RouteCreate, user_id: str = Depends(get_e
 
 
 @router.delete("/api/routes/{route_id}")
-def delete_route(route_id: str, user_id: str = Depends(get_effective_user_id)):
+def delete_route(route_id: str, user_id: str = Depends(get_current_user_id)):
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
 
