@@ -5,8 +5,9 @@ import os
 from typing import List, Dict, Any
 
 from fastapi import APIRouter
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
+from app.core.database import db_engine
 from app.core.cache import get_cached_response, set_cached_response
 from app.schemas.analytics import (
     Cluster,
@@ -130,22 +131,9 @@ def get_emergent_clusters():
         return cached
 
     # Try PostGIS clustering first if coordinates exist
-    conn_str = os.environ.get("DATABASE_URL")
-    if not conn_str:
-        db_user = os.environ.get("DB_USER")
-        db_password = os.environ.get("DB_PASSWORD")
-        db_host = os.environ.get("DB_HOST")
-        db_port = os.environ.get("DB_PORT", "5432")
-        db_name = os.environ.get("DB_NAME")
-        if all([db_user, db_password, db_host, db_name]):
-            conn_str = (
-                f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-            )
-
-    if conn_str:
+    if db_engine:
         try:
-            engine = create_engine(conn_str)
-            with engine.connect() as conn:
+            with db_engine.connect() as conn:
                 query = text("""
                     SELECT
                         cluster_id,
@@ -228,26 +216,12 @@ def get_commercial_streets_analytics():
     Each street includes total business count, distribution by category (rubro),
     and the predominant category. Uses PostgreSQL when available, JSON fallback otherwise.
     """
-    conn_str = os.environ.get("DATABASE_URL")
-
-    if not conn_str:
-        db_user = os.environ.get("DB_USER")
-        db_password = os.environ.get("DB_PASSWORD")
-        db_host = os.environ.get("DB_HOST")
-        db_port = os.environ.get("DB_PORT", "5432")
-        db_name = os.environ.get("DB_NAME")
-        if all([db_user, db_password, db_host, db_name]):
-            conn_str = (
-                f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-            )
-
     raw_rows: List[Dict[str, Any]] = []
 
-    if conn_str:
+    if db_engine:
         for table_name in ["estabelecimentos", "londrina_businesses"]:
             try:
-                engine = create_engine(conn_str)
-                with engine.connect() as conn:
+                with db_engine.connect() as conn:
                     query = text(f"""
                         SELECT logradouro, cnae_fiscal, porte_empresa
                         FROM {table_name}

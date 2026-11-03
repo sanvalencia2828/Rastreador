@@ -1,10 +1,9 @@
 """Business search, status and stats endpoints."""
 
-import os
 from typing import Dict, Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import create_engine, text
+from sqlalchemy import text
 
 from app.core.cache import get_cached_response, set_cached_response
 from app.core.database import db_engine
@@ -98,27 +97,14 @@ def get_businesses_near(lat: float, lon: float, radius: int = 500):
     if radius < 1:
         radius = 500
 
-    cache_key = f"near_{lat}_{lon}_{radius}"
+    cache_key = f"near_{lat:.3f}_{lon:.3f}_{radius}"  # ~110 m cells
     cached = get_cached_response(cache_key)
     if cached is not None:
         return cached
 
-    conn_str = os.environ.get("DATABASE_URL")
-    if not conn_str:
-        db_user = os.environ.get("DB_USER")
-        db_password = os.environ.get("DB_PASSWORD")
-        db_host = os.environ.get("DB_HOST")
-        db_port = os.environ.get("DB_PORT", "5432")
-        db_name = os.environ.get("DB_NAME")
-        if all([db_user, db_password, db_host, db_name]):
-            conn_str = (
-                f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-            )
-
-    if conn_str:
+    if db_engine:
         try:
-            engine = create_engine(conn_str)
-            with engine.connect() as conn:
+            with db_engine.connect() as conn:
                 query = text("""
                     SELECT
                         cnpj_completo,
