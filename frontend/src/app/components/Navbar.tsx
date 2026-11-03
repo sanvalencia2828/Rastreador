@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
+import { clearToken, getToken, onAuthChange } from "../lib/auth";
 
 const NAV_LINKS = [
   { href: "/", label: "Mapa" },
@@ -16,6 +18,19 @@ const NAV_LINKS = [
 
 export default function Navbar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const [loggedIn, setLoggedIn] = useState(false);
+
+  useEffect(() => {
+    const sync = () => setLoggedIn(getToken() !== null);
+    sync();
+    return onAuthChange(sync);
+  }, [pathname]);
+
+  const handleLogout = () => {
+    clearToken();
+    router.push("/");
+  };
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
@@ -74,6 +89,23 @@ export default function Navbar() {
           );
         })}
       </div>
+      {loggedIn ? (
+        <button
+          onClick={handleLogout}
+          className="text-xs font-medium flex-shrink-0"
+          style={{ color: "var(--muted)", padding: "6px 10px" }}
+        >
+          Sair
+        </button>
+      ) : (
+        <Link
+          href="/login"
+          className="text-xs font-medium flex-shrink-0"
+          style={{ color: isActive("/login") ? "var(--accent)" : "var(--muted)", textDecoration: "none", padding: "6px 10px" }}
+        >
+          Entrar
+        </Link>
+      )}
     </nav>
   );
 }
