@@ -2,7 +2,9 @@
 
 import json
 from datetime import datetime
+from decimal import Decimal
 from typing import List, Dict, Any, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
@@ -230,91 +232,159 @@ def create_visit(visit: VisitCreate, user_id: str = Depends(get_current_user_id)
         )
 
 
+# Inserta un lote completo en una sola sentencia. La deduplicación se hace en SQL:
+#   * dentro del lote (DISTINCT ON por la clave de la visita) y
+#   * contra lo ya guardado (NOT EXISTS sobre visits).
+# lat/lon se redondean a 7 decimales como NUMERIC(10,7) de la tabla, porque comparar el
+# float del cliente con el valor almacenado no coincidía y los re-sync se duplicaban.
+SYNC_VISITS_SQL = text("""
+    WITH batch AS (
+        SELECT *
+          FROM unnest(
+                   CAST(:ords AS integer[]),
+                   CAST(:route_ids AS uuid[]),
+                   CAST(:cnpjs AS varchar[]),
+                   CAST(:lats AS numeric[]),
+                   CAST(:lons AS numeric[]),
+                   CAST(:logradouros AS text[]),
+                   CAST(:bairros AS text[]),
+                   CAST(:notes AS text[]),
+                   CAST(:visited_ats AS timestamptz[])
+               ) AS b(ord, route_id, cnpj, lat, lon, logradouro, bairro, notes, visited_at)
+    ),
+    normalized AS (
+        SELECT ord, route_id, cnpj,
+               ROUND(lat, 7) AS lat, ROUND(lon, 7) AS lon,
+               logradouro, bairro, notes, visited_at
+          FROM batch
+    ),
+    deduped AS (
+        SELECT DISTINCT ON (logradouro, lat, lon, visited_at) *
+          FROM normalized
+         ORDER BY logradouro, lat, lon, visited_at, ord
+    )
+    INSERT INTO visits (user_id, route_id, cnpj, lat, lon, logradouro, bairro, notes, visited_at)
+    SELECT CAST(:user_id AS uuid), d.route_id, d.cnpj, d.lat, d.lon, d.logradouro, d.bairro, d.notes, d.visited_at
+      FROM deduped d
+     WHERE NOT EXISTS (
+               SELECT 1 FROM visits v
+                WHERE v.user_id = CAST(:user_id AS uuid)
+                  AND v.logradouro = d.logradouro
+                  AND v.lat = d.lat
+                  AND v.lon = d.lon
+                  AND v.visited_at = d.visited_at
+           )
+    RETURNING cnpj
+""")
+
+
+def _parse_sync_batch(visits: List[VisitSyncItem]) -> tuple[Dict[str, list], List[Dict[str, Any]]]:
+    """Valida cada ítem y arma los arrays columnares para SYNC_VISITS_SQL.
+
+    Devuelve (columnas, errores). Un ítem inválido no aborta el lote: se informa en
+    `errors` con su índice y el resto se sincroniza.
+    """
+    columns: Dict[str, list] = {
+        key: []
+        for key in ("ords", "route_ids", "cnpjs", "lats", "lons", "logradouros", "bairros", "notes", "visited_ats")
+    }
+    errors: List[Dict[str, Any]] = []
+    for index, item in enumerate(visits):
+        try:
+            visited_at = datetime.fromisoformat(item.visited_at.replace("Z", "+00:00"))
+        except ValueError:
+            errors.append({"index": index, "error": f"visited_at inválido: {item.visited_at!r}"})
+            continue
+        if not (-90 <= item.lat <= 90 and -180 <= item.lon <= 180):
+            errors.append({"index": index, "error": "lat/lon fuera de rango"})
+            continue
+        if not item.logradouro or not item.logradouro.strip():
+            errors.append({"index": index, "error": "logradouro vacío"})
+            continue
+        route_id = item.route_id or None
+        if route_id is not None:
+            try:
+                route_id = str(UUID(str(route_id)))
+            except ValueError:
+                errors.append({"index": index, "error": f"route_id no es un UUID: {item.route_id!r}"})
+                continue
+        columns["ords"].append(index)
+        columns["route_ids"].append(route_id)
+        columns["cnpjs"].append(item.cnpj or None)
+        columns["lats"].append(Decimal(repr(item.lat)))
+        columns["lons"].append(Decimal(repr(item.lon)))
+        columns["logradouros"].append(item.logradouro)
+        columns["bairros"].append(item.bairro)
+        columns["notes"].append(item.notes)
+        columns["visited_ats"].append(visited_at)
+    return columns, errors
+
+
 @router.post("/api/sync/visits")
 def sync_visits(
     visits: List[VisitSyncItem], user_id: str = Depends(get_current_user_id)
 ):
     """
-    Sync offline visits in batch. Each item becomes a new visit row (the new
-    visits table records history rather than upserts). Exact-duplicate detection
-    by (user_id, logradouro, lat, lon, visited_at) prevents repeat-sync issues.
-    Returns the number of visits actually inserted.
+    Sync offline visits in batch. Each item becomes a new visit row (the visits
+    table records history rather than upserts).
+
+    Idempotente: una visita con la misma (user_id, logradouro, lat, lon, visited_at)
+    que otra del lote o de la base no se vuelve a insertar. Todo el lote se escribe
+    con una sola sentencia, y las métricas se recalculan una vez por CNPJ afectado.
+
+    Respuesta: {"received", "synced", "skipped", "duplicates",
+                "errors": [{index, error}], "warnings": [{index, warning}], "conflicts": []}
+    `skipped` = duplicados + inválidos.
     """
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
 
+    columns, errors = _parse_sync_batch(visits)
+    valid_count = len(columns["ords"])
     inserted_count = 0
-    skipped_count = 0
-    inserted_cnpjs = set()
+
+    warnings: List[Dict[str, Any]] = []
 
     try:
-        with db_engine.connect() as conn:
-            for item in visits:
-                try:
-                    client_time = datetime.fromisoformat(
-                        item.visited_at.replace("Z", "+00:00")
-                    )
-                except ValueError:
-                    skipped_count += 1
-                    continue
-
-                # Skip if an identical visit already exists (idempotent re-sync)
-                dup_check = text("""
-                    SELECT 1 FROM visits
-                     WHERE user_id = :user_id
-                       AND logradouro = :logradouro
-                       AND lat = :lat
-                       AND lon = :lon
-                       AND visited_at = :visited_at
-                    LIMIT 1
-                """)
-                existing = conn.execute(
-                    dup_check,
-                    {
-                        "user_id": user_id,
-                        "logradouro": item.logradouro,
-                        "lat": item.lat,
-                        "lon": item.lon,
-                        "visited_at": client_time,
-                    },
-                ).fetchone()
-                if existing:
-                    skipped_count += 1
-                    continue
-
-                insert_query = text("""
-                    INSERT INTO visits
-                        (user_id, route_id, cnpj, lat, lon, logradouro, bairro, notes, visited_at)
-                    VALUES
-                        (:user_id, :route_id, :cnpj, :lat, :lon, :logradouro, :bairro, :notes, :visited_at)
-                """)
-                conn.execute(
-                    insert_query,
-                    {
-                        "user_id": user_id,
-                        "route_id": item.route_id,
-                        "cnpj": item.cnpj,
-                        "lat": item.lat,
-                        "lon": item.lon,
-                        "logradouro": item.logradouro,
-                        "bairro": item.bairro,
-                        "notes": item.notes,
-                        "visited_at": client_time,
-                    },
-                )
-                inserted_count += 1
-                if item.cnpj:
-                    inserted_cnpjs.add(item.cnpj)
-
-            for cnpj in inserted_cnpjs:
-                business_id = _business_id_for_cnpj(conn, cnpj)
-                if business_id is not None:
-                    recalculate_visit_interval(conn, business_id)
-
-            conn.commit()
-            return {"synced": inserted_count, "skipped": skipped_count, "conflicts": []}
+        with db_engine.begin() as conn:
+            if valid_count:
+                # Una sola consulta para las rutas referenciadas: si una ya no existe, la
+                # visita se guarda igual (es dato de campo) pero sin ruta, en vez de que la
+                # FK haga fallar todo el lote.
+                referenced = sorted({r for r in columns["route_ids"] if r})
+                if referenced:
+                    existing = {
+                        str(row[0])
+                        for row in conn.execute(
+                            text("SELECT id FROM routes WHERE id = ANY(CAST(:ids AS uuid[]))"),
+                            {"ids": referenced},
+                        )
+                    }
+                    for pos, route_id in enumerate(columns["route_ids"]):
+                        if route_id and route_id not in existing:
+                            columns["route_ids"][pos] = None
+                            warnings.append(
+                                {"index": columns["ords"][pos], "warning": f"route_id {route_id} no existe; se guardó sin ruta"}
+                            )
+                inserted = conn.execute(SYNC_VISITS_SQL, {**columns, "user_id": user_id}).fetchall()
+                inserted_count = len(inserted)
+                inserted_cnpjs = sorted({row[0] for row in inserted if row[0]})
+                for cnpj in inserted_cnpjs:
+                    business_id = _business_id_for_cnpj(conn, cnpj)
+                    if business_id is not None:
+                        recalculate_visit_interval(conn, business_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Sync process failed: {e}")
+
+    return {
+        "received": len(visits),
+        "synced": inserted_count,
+        "skipped": len(visits) - inserted_count,
+        "duplicates": valid_count - inserted_count,
+        "errors": errors,
+        "warnings": warnings,
+        "conflicts": [],
+    }
 
 
 # ==============================================================================
