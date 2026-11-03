@@ -44,6 +44,22 @@ export function safeNext(raw: string | null): string {
   return raw && raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/\\") ? raw : "/";
 }
 
+/** fetch + Authorization: Bearer. Ante 401 borra el token y manda a /login (con vuelta a la página actual). */
+export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
+  const headers = new Headers(init.headers);
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(input, { ...init, headers });
+  if (res.status === 401 && typeof window !== "undefined") {
+    clearToken();
+    if (window.location.pathname !== "/login") {
+      const next = window.location.pathname + window.location.search;
+      window.location.assign(`/login?expired=1&next=${encodeURIComponent(next)}`);
+    }
+  }
+  return res;
+}
+
 /** Mensaje claro para los errores de servidor que el usuario puede entender; null si no aplica. */
 export function friendlyError(status: number): string | null {
   if (status === 401) return "Sua sessão expirou. Entre novamente.";

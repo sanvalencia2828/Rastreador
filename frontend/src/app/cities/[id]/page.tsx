@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "../../lib/auth";
+
 import { useState, useRef, useCallback, useMemo, useEffect, use } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -63,7 +65,7 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
 
     const loadRoutes = async () => {
       try {
-        const res = await fetch(`/api/cities/${id}/routes`);
+        const res = await apiFetch(`/api/cities/${id}/routes`);
         if (!res.ok) return;
         const data = await res.json();
         if (!isMounted) return;
@@ -177,7 +179,7 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
     const route = savedRoutes.find(r => r.id === routeId);
 
     try {
-      const res = await fetch(`/api/routes/${routeId}`, { method: "DELETE" });
+      const res = await apiFetch(`/api/routes/${routeId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("delete failed");
 
       setSavedRoutes(prev => prev.filter(r => r.id !== routeId));

@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "../lib/auth";
+
 import { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
 
@@ -81,7 +83,7 @@ export default function VisitsPage() {
           url = `/api/visits?bbox=${bbox}`;
         }
       }
-      const res = await fetch(url);
+      const res = await apiFetch(url);
       if (!res.ok) throw new Error("fail");
       const data = await res.json();
       setVisits(data);

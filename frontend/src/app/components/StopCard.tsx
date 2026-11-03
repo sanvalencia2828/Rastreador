@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "../lib/auth";
+
 interface Business {
   cnpj: string;
   nome_fantasia: string;
@@ -33,18 +35,18 @@ export default function StopCard({ index, displayName, cep, businesses, loadingB
 
   async function handleVisit(b: Business) {
     if (!b.lat || !b.lon) return;
-    await fetch("/api/visits", {
+    const res = await apiFetch("/api/visits", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ cnpj: b.cnpj, lat: b.lat, lon: b.lon, logradouro: b.logradouro, bairro: b.bairro }),
     });
-    onMarkVisited(b.cnpj);
+    if (res.ok) onMarkVisited(b.cnpj);
   }
 
   async function handleSetClient(b: Business) {
     if (!b.lat || !b.lon) return;
     try {
-      const res = await fetch(`/api/businesses/${b.cnpj}/status`, {
+      const res = await apiFetch(`/api/businesses/${b.cnpj}/status`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: "client" }),

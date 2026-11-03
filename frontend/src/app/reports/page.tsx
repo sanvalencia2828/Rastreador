@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "../lib/auth";
+
 import { useState, useCallback } from "react";
 import Link from "next/link";
 
@@ -49,7 +51,7 @@ export default function ReportsPage() {
   const handleExportVisits = useCallback(async () => {
     setExporting("visits");
     try {
-      const res = await fetch("/api/visits");
+      const res = await apiFetch("/api/visits");
       if (!res.ok) throw new Error("fail");
       const data = await res.json();
       const rows: string[][] = [["data_hora", "nome_fantasia", "cnpj", "logradouro", "bairro", "municipio"]];

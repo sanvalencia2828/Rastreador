@@ -1,5 +1,7 @@
 "use client";
 
+import { apiFetch } from "../lib/auth";
+
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 
@@ -122,7 +124,7 @@ export default function GeneratePage() {
     setMessage(null);
 
     try {
-      const res = await fetch("/api/routes/generate", {
+      const res = await apiFetch("/api/routes/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -152,7 +154,7 @@ export default function GeneratePage() {
     setMessage(null);
 
     try {
-      const res = await fetch("/api/routes/optimize", {
+      const res = await apiFetch("/api/routes/optimize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ stops: result.stops }),
@@ -181,7 +183,7 @@ export default function GeneratePage() {
     const routeName = `Rota ${dd}/${mm}`;
 
     try {
-      const res = await fetch(`/api/cities/${selectedCity.id}/routes`, {
+      const res = await apiFetch(`/api/cities/${selectedCity.id}/routes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
