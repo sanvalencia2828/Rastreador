@@ -6,8 +6,9 @@ from typing import Any, Sequence
 from uuid import uuid4
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from app.core.security import get_current_user_id
 from app.optimizer import optimize_open_path
 from app.routes.points import get_tracking_point
 from app.services.geo import haversine_km
@@ -21,7 +22,7 @@ from app.schemas.route import (
     RouteStopResponse,
 )
 
-router = APIRouter(prefix="/routes", tags=["routes"])
+router = APIRouter(prefix="/routes", tags=["routes"], dependencies=[Depends(get_current_user_id)])
 
 ROUTE_STORE: dict[str, dict[str, Any]] = {}
 

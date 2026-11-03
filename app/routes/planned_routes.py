@@ -585,7 +585,11 @@ def delete_route(route_id: str, user_id: str = Depends(get_current_user_id)):
 # ==============================================================================
 # INTELLIGENT ROUTE GENERATION
 # ==============================================================================
-@router.post("/api/routes/generate", response_model=RouteGenerateResponse)
+@router.post(
+    "/api/routes/generate",
+    response_model=RouteGenerateResponse,
+    dependencies=[Depends(get_current_user_id)],
+)
 def generate_route(body: RouteGenerateRequest):
     """
     Generates an intelligent visiting route for a given city.
@@ -714,7 +718,7 @@ def generate_route(body: RouteGenerateRequest):
     )
 
 
-@router.post("/api/routes/optimize")
+@router.post("/api/routes/optimize", dependencies=[Depends(get_current_user_id)])
 def optimize_route(body: RouteOptimizeRequest):
     """Order route points from the start using nearest neighbor."""
     if len({point.id for point in body.points}) != len(body.points):

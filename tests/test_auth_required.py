@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from app.core.security import create_jwt_token
 from app.main import app
-from app.routes import planned_routes, visits
+from app.routes import businesses, planned_routes, visits
 
 USER_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 USER_B = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
@@ -32,6 +32,11 @@ PROTECTED = [
     ("PATCH", "/api/businesses/123/status", {"status": "visited"}),
     ("GET", "/api/daily-routes", None),
     ("GET", "/api/visits", None),
+    ("POST", "/api/routes/generate", {}),
+    ("POST", "/api/routes/optimize", {}),
+    ("GET", "/api/v1/routes", None),
+    ("POST", "/api/v1/routes", {}),
+    ("GET", "/api/v1/routes/abc", None),
     ("POST", "/api/sync/visits", []),
 ]
 
@@ -121,3 +126,17 @@ def test_visits_ignore_user_id_query_param(monkeypatch):
     resp = client.get(f"/api/visits?user_id={USER_A}", headers=bearer(USER_B))
     assert resp.status_code == 200
     assert [params["user_id"] for _, params in engine.calls] == [USER_B]
+
+
+@pytest.mark.parametrize(
+    "module,path",
+    [
+        (businesses, "/api/businesses/search?q=abc&limit=100000"),
+        (visits, "/api/street-coverage?limit=100000"),
+    ],
+)
+def test_limit_is_capped_at_500(monkeypatch, module, path):
+    engine = FakeEngine()
+    monkeypatch.setattr(module, "db_engine", engine)
+    assert client.get(path).status_code == 200
+    assert [params["limit"] for _, params in engine.calls] == [500]
