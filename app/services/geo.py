@@ -113,6 +113,8 @@ def assign_geographic_coords(
         center_lng, center_lat = [-51.4614, -23.5521]  # Apucarana
     elif "janda" in city_key or "jata" in city_key:
         center_lng, center_lat = [-51.6447, -23.6064]  # Jandaia do Sul
+    elif city_key.startswith("maring"):
+        center_lng, center_lat = [-51.9330, -23.4205]  # Maringá
 
     # If the business is in one of the other target cities, place it around its centroid
     if center_lng is not None and center_lat is not None:
@@ -201,6 +203,15 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> int:
     dlat, dlon = la2 - la1, lo2 - lo1
     a = sin(dlat / 2) ** 2 + cos(la1) * cos(la2) * sin(dlon / 2) ** 2
     return int(2 * r * asin(sqrt(a)))
+
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in kilometers (float, without rounding)."""
+    r_km = 6371.0088
+    la1, lo1, la2, lo2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlat, dlon = la2 - la1, lo2 - lo1
+    a = sin(dlat / 2) ** 2 + cos(la1) * cos(la2) * sin(dlon / 2) ** 2
+    return 2 * r_km * asin(min(1.0, sqrt(a)))
 
 
 def fix_encoding(text):
