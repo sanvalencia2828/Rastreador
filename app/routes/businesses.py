@@ -25,6 +25,8 @@ from app.services.route_planning import _business_route_metrics
 
 router = APIRouter()
 
+MAX_LIMIT = 500  # cap for ?limit= on the list/search endpoints
+
 
 @router.get("/api/businesses/tech", response_model=TechBusinessesResponse)
 def get_tech_businesses(limit: int = 50, offset: int = 0, search: str = ""):
@@ -309,6 +311,7 @@ def get_businesses_for_routes(
 
 @router.get("/api/businesses/search")
 def search_businesses(q: str, limit: int = 50):
+    limit = max(1, min(limit, MAX_LIMIT))
     if len(q.strip()) < 3:
         raise HTTPException(status_code=400, detail="Mínimo 3 caracteres")
     if not db_engine:
@@ -412,6 +415,7 @@ def get_stats_summary():
 
 @router.get("/api/businesses/clients")
 def get_clients(limit: int = 500):
+    limit = max(1, min(limit, MAX_LIMIT))
     """Lista todos los clientes (business_status = 'client')."""
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
@@ -450,6 +454,7 @@ def get_clients(limit: int = 500):
 
 @router.get("/api/businesses/city-category")
 def get_businesses_by_city_and_category(city: str, category: str = "pizza", limit: int = 50):
+    limit = max(1, min(limit, MAX_LIMIT))
     """
     Busca establecimientos por ciudad (municipio) y categoría (ej. pizza/pizzería).
     Filtra los establecimientos activos (situacao_cadastral = 2).

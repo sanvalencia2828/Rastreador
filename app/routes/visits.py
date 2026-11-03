@@ -418,7 +418,7 @@ def get_street_coverage(
     if only_unvisited:
         query_str += " AND last_visited IS NULL"
     query_str += " ORDER BY last_visited ASC NULLS FIRST, covered_businesses ASC LIMIT :limit"
-    params["limit"] = limit
+    params["limit"] = max(1, min(limit, 500))
 
     try:
         with db_engine.connect() as conn:
