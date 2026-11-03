@@ -83,8 +83,27 @@ def decode_jwt_token(token: str) -> dict:
         return {}
 
 
+_SCRYPT = {"n": 2**14, "r": 8, "p": 1, "dklen": 32}
+
+
 def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+    """scrypt with a random salt, stored as 'scrypt$<salt hex>$<hash hex>'."""
+    salt = os.urandom(16)
+    digest = hashlib.scrypt(password.encode("utf-8"), salt=salt, **_SCRYPT)
+    return f"scrypt${salt.hex()}${digest.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    if stored.startswith("scrypt$"):
+        _, salt_hex, hash_hex = stored.split("$")
+        digest = hashlib.scrypt(password.encode("utf-8"), salt=bytes.fromhex(salt_hex), **_SCRYPT)
+        return hmac.compare_digest(digest.hex(), hash_hex)
+    # legacy unsalted SHA-256; the caller re-hashes it on a successful login
+    return hmac.compare_digest(hashlib.sha256(password.encode("utf-8")).hexdigest(), stored)
+
+
+def needs_rehash(stored: str) -> bool:
+    return not stored.startswith("scrypt$")
 
 
 # ------------------------------------------------------------------------------
