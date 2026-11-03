@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import os
 from datetime import datetime, timezone
 from typing import Any, Sequence
@@ -11,6 +10,7 @@ from fastapi import APIRouter, HTTPException
 
 from app.optimizer import optimize_open_path
 from app.routes.points import get_tracking_point
+from app.services.geo import haversine_km
 from app.schemas.route import (
     RouteCreateRequest,
     RouteOptimizeRequest,
@@ -142,37 +142,61 @@ def reorder_route(route: dict[str, Any], ordered_stop_ids: Sequence[int | str]) 
     return route
 
 
-def _route_matrix(route: dict[str, Any]) -> list[list[float]]:
-    ordered = sorted(route["stops"], key=lambda stop: stop["seq"])
+# Velocidad media urbana usada cuando OSRM no está disponible (km/h)
+FALLBACK_SPEED_KMH = float(os.getenv("ROUTE_FALLBACK_SPEED_KMH", "28"))
+
+
+def _route_coords(route: dict[str, Any]) -> list[tuple[float, float]]:
+    """(lat, lon) de cada parada en el orden actual de `seq`."""
     coords: list[tuple[float, float]] = []
-    for stop in ordered:
+    for stop in sorted(route["stops"], key=lambda stop: stop["seq"]):
         point = _ensure_point_exists(stop["point_id"])
-        coords.append((float(point["lon"]), float(point["lat"])))
+        coords.append((float(point["lat"]), float(point["lon"])))
+    return coords
+
+
+def _route_matrices(route: dict[str, Any]) -> tuple[list[list[float | None]], list[list[float | None]], str]:
+    """Matrices de duración (s) y distancia (km) entre paradas, y su fuente.
+
+    Usa OSRM /table cuando responde; si no, distancia Haversine y una velocidad media
+    (FALLBACK_SPEED_KMH) para estimar la duración. OSRM devuelve null entre puntos
+    sin ruta: se conserva como None y el optimizador lo trata como costo infinito.
+    """
+    coords = _route_coords(route)
     if len(coords) <= 1:
-        return [[0.0]]
+        return [[0.0]], [[0.0]], "none"
 
     osrm_url = os.getenv("OSRM_URL", "http://osrm:5000")
-    joined = ";".join(f"{lon},{lat}" for lon, lat in coords)
+    joined = ";".join(f"{lon},{lat}" for lat, lon in coords)
     url = f"{osrm_url}/table/v1/driving/{joined}?annotations=duration,distance"
     try:
         response = requests.get(url, timeout=15)
         response.raise_for_status()
         data = response.json()
-        matrix = data.get("durations")
-        if isinstance(matrix, list) and matrix and len(matrix) == len(ordered):
-            return [[float(value) for value in row] for row in matrix]
+        durations = data.get("durations")
+        distances = data.get("distances")
+        if isinstance(durations, list) and len(durations) == len(coords):
+            dur = [[None if v is None else float(v) for v in row] for row in durations]
+            if isinstance(distances, list) and len(distances) == len(coords):
+                dist = [[None if v is None else float(v) / 1000.0 for v in row] for row in distances]
+            else:
+                dist = _haversine_matrix(coords)
+            return dur, dist, "osrm"
     except Exception:  # pragma: no cover - fallback for local/offline tests
         pass
 
-    fallback_matrix: list[list[float]] = []
-    for i, (lon_a, lat_a) in enumerate(coords):
-        row: list[float] = []
-        for _, (lon_b, lat_b) in enumerate(coords):
-            delta_lon = lon_a - lon_b
-            delta_lat = lat_a - lat_b
-            row.append(float(max(1.0, math.hypot(delta_lon, delta_lat) * 100.0)))
-        fallback_matrix.append(row)
-    return fallback_matrix
+    dist = _haversine_matrix(coords)
+    dur = [[d / FALLBACK_SPEED_KMH * 3600.0 for d in row] for row in dist]
+    return dur, dist, "haversine"
+
+
+def _haversine_matrix(coords: list[tuple[float, float]]) -> list[list[float]]:
+    return [[haversine_km(lat_a, lon_a, lat_b, lon_b) for lat_b, lon_b in coords] for lat_a, lon_a in coords]
+
+
+def _route_matrix(route: dict[str, Any]) -> list[list[float | None]]:
+    """Matriz de duraciones en segundos (compatibilidad con el código existente)."""
+    return _route_matrices(route)[0]
 
 
 @router.post("", response_model=RouteResponse)
@@ -249,6 +273,11 @@ def add_stop(route_id: str, request: RouteStopCreateRequest) -> RouteResponse:
         "eta_min": None,
         "distance_km": None,
     }
+    # correr una posición las paradas que van después; si no, el nuevo seq empata con
+    # la salida y la parada quedaba después del punto de salida
+    for stop in route["stops"]:
+        if stop["seq"] > target_seq:
+            stop["seq"] += 1
     route["stops"].append(new_stop)
     _reindex_stops(route)
     return _build_route_response(route)
@@ -266,8 +295,11 @@ def patch_stop(route_id: str, stop_id: str | int, request: RouteStopPatchRequest
     if request.seq is not None:
         if request.seq < 2 or request.seq >= len(route["stops"]):
             raise HTTPException(status_code=422, detail="seq must be between 2 and N-1 for intermediate stops")
-        stop["seq"] = request.seq
-        _reindex_stops(route)
+        others = [item for item in sorted(route["stops"], key=lambda item: item["seq"]) if item is not stop]
+        others.insert(request.seq - 1, stop)
+        for new_seq, item in enumerate(others, start=1):
+            item["seq"] = new_seq
+        route["stops"] = others
 
     if request.locked is not None:
         stop["locked"] = bool(request.locked)
@@ -323,26 +355,35 @@ def optimize_route(route_id: str, request: RouteOptimizeRequest) -> dict[str, An
         else:
             movable_indices.append(idx)
 
-    matrix = _route_matrix(route)
-    optimized_indices = optimize_open_path(matrix, anchor_indices, movable_indices)
+    durations, distances, source = _route_matrices(route)
+    optimized_indices = optimize_open_path(durations, anchor_indices, movable_indices)
     new_order = [ordered_stops[position] for position in optimized_indices]
+    # Asignar seq según el nuevo orden ANTES de normalizar: _reindex_stops ordena por
+    # el seq existente, así que sin esto la ruta volvía a su orden original.
+    for seq, stop in enumerate(new_order, start=1):
+        stop["seq"] = seq
     route["stops"] = new_order
     _reindex_stops(route)
 
+    # métricas por tramo: OSRM si respondió; si no, Haversine a FALLBACK_SPEED_KMH
     total_km = 0.0
     total_min = 0.0
-    for idx in range(len(route["stops"]) - 1):
-        current = route["stops"][idx]
-        nxt = route["stops"][idx + 1]
-        current_point = _ensure_point_exists(current["point_id"])
-        next_point = _ensure_point_exists(nxt["point_id"])
-        delta_lon = float(current_point["lon"]) - float(next_point["lon"])
-        delta_lat = float(current_point["lat"]) - float(next_point["lat"])
-        segment_km = max(0.1, math.hypot(delta_lon, delta_lat) * 700.0)
+    for idx in range(len(optimized_indices) - 1):
+        a, b = optimized_indices[idx], optimized_indices[idx + 1]
+        segment_km = distances[a][b]
+        segment_s = durations[a][b]
+        if segment_km is None or segment_s is None:  # OSRM sin ruta entre esos puntos
+            p1 = _ensure_point_exists(new_order[idx]["point_id"])
+            p2 = _ensure_point_exists(new_order[idx + 1]["point_id"])
+            segment_km = haversine_km(float(p1["lat"]), float(p1["lon"]), float(p2["lat"]), float(p2["lon"]))
+            segment_s = segment_km / FALLBACK_SPEED_KMH * 3600.0
+        segment_min = segment_s / 60.0
         total_km += segment_km
-        total_min += max(1.0, segment_km / 28.0)
-        current["distance_km"] = round(segment_km, 2)
-        current["eta_min"] = round(max(1.0, segment_km / 28.0), 2)
+        total_min += segment_min
+        new_order[idx]["distance_km"] = round(segment_km, 2)
+        new_order[idx]["eta_min"] = round(segment_min, 2)
+    new_order[-1]["distance_km"] = None
+    new_order[-1]["eta_min"] = None
 
     route["total_km"] = round(total_km, 2)
     route["total_min"] = round(total_min, 2)
@@ -354,6 +395,7 @@ def optimize_route(route_id: str, request: RouteOptimizeRequest) -> dict[str, An
         "route_id": route_id,
         "total_km": route["total_km"],
         "total_min": route["total_min"],
+        "distance_source": source,
         "stops": serialized,
     }
 
