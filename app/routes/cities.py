@@ -23,7 +23,7 @@ def get_cities():
         raise HTTPException(status_code=500, detail=f"Failed to fetch cities: {e}")
 
 
-@router.post("/api/cities")
+@router.post("/api/cities", dependencies=[Depends(get_current_user_id)])
 def create_city(city: CityCreate):
     """Crea una ciudad idempotentemente (ON CONFLICT DO NOTHING)."""
     if not db_engine:

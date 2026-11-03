@@ -3,11 +3,12 @@
 import os
 from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import create_engine, text
 
 from app.core.cache import get_cached_response, set_cached_response
 from app.core.database import db_engine
+from app.core.security import get_current_user_id
 from app.schemas.business import (
     BusinessStatusUpdate,
     TechBusiness,
@@ -209,7 +210,7 @@ def get_businesses_near(lat: float, lon: float, radius: int = 500):
     return response
 
 
-@router.patch("/api/businesses/{cnpj}/status")
+@router.patch("/api/businesses/{cnpj}/status", dependencies=[Depends(get_current_user_id)])
 def update_business_status(cnpj: str, body: BusinessStatusUpdate):
     if body.status not in ("visited", "client"):
         raise HTTPException(status_code=400, detail="Status must be 'visited' or 'client'")
