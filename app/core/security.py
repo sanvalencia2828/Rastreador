@@ -15,7 +15,23 @@ from app.core import config  # noqa: F401  (loads .env before env reads below)
 
 
 security = HTTPBearer(auto_error=False)
-JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "super_secret_key_londrina_radar_2026")
+
+
+def is_dev_env() -> bool:
+    """Dev shortcuts are opt-in: APP_ENV must be exactly 'development'."""
+    return os.getenv("APP_ENV", "").strip().lower() == "development"
+
+
+def _load_jwt_secret() -> str:
+    secret = os.getenv("JWT_SECRET_KEY", "").strip()
+    if secret and secret != "change-me-in-production":
+        return secret
+    if is_dev_env():
+        return "dev-only-insecure-secret"
+    raise RuntimeError("JWT_SECRET_KEY must be set to a real secret (or APP_ENV=development)")
+
+
+JWT_SECRET_KEY = _load_jwt_secret()
 SECRET_KEY = JWT_SECRET_KEY
 
 
@@ -74,11 +90,6 @@ def hash_password(password: str) -> str:
 # ------------------------------------------------------------------------------
 # DEPENDENCY FOR AUTHENTICATION
 # ------------------------------------------------------------------------------
-def is_dev_env() -> bool:
-    """Dev shortcuts are opt-in: APP_ENV must be exactly 'development'."""
-    return os.getenv("APP_ENV", "").strip().lower() == "development"
-
-
 def get_current_user_id(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> str:
