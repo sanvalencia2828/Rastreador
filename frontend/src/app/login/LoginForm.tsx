@@ -52,7 +52,7 @@ export default function LoginForm({ expired, next }: { expired: boolean; next: s
   } as const;
 
   return (
-    <main className="flex flex-col items-center px-4 py-10">
+    <main className="flex flex-col items-center" style={{ padding: "40px 16px" }}>
       <form
         onSubmit={handleSubmit}
         style={{ width: "100%", maxWidth: "360px", background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "24px" }}
