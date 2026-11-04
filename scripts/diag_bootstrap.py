@@ -24,16 +24,19 @@ def bootstrap(t: pd.DataFrame, B: int) -> dict:
     groups = pd.Series(np.arange(n)).groupby(t["cep5"].to_numpy()).apply(lambda s: s.to_numpy()).tolist()
 
     def stats(idx):
-        yy = y[idx]; m = ap(yy, p[idx]); he = ap(yy, h[idx])
+        yy = y[idx]
+        if yy.sum() == 0:  # sin positivos no hay PR-AUC: se descarta el remuestreo
+            return None
+        m = ap(yy, p[idx]); he = ap(yy, h[idx])
         return m - he, m / yy.mean(), m, he
 
     def ci(a): return [round(float(v), 4) for v in np.percentile(a, [2.5, 50, 97.5])]
     def block(a): return {"delta_pr_auc_IC95": ci(a[:, 0]), "ratio_IC95": ci(a[:, 1]),
                           "P(delta<=0)": round(float((a[:, 0] <= 0).mean()), 4), "P(ratio<1.5)": round(float((a[:, 1] < 1.5).mean()), 4)}
     names = ["delta_pr_auc", "pr_auc_sobre_prevalencia", "pr_auc_modelo", "pr_auc_heuristica"]
-    rows = np.array([stats(rng.integers(0, n, n)) for _ in range(B)])
-    cl = np.array([stats(np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])) for _ in range(B)])
-    return {"rows": n, "positives": int(y.sum()), "prevalence": round(float(y.mean()), 4), "B": B, "zonas_cep5": len(groups),
+    rows = np.array([r for r in (stats(rng.integers(0, n, n)) for _ in range(B)) if r is not None])
+    cl = np.array([r for r in (stats(np.concatenate([groups[i] for i in rng.integers(0, len(groups), len(groups))])) for _ in range(B)) if r is not None])
+    return {"rows": n, "positives": int(y.sum()), "prevalence": round(float(y.mean()), 4), "B": B, "descartados": [B - len(rows), B - len(cl)], "zonas_cep5": len(groups),
             "puntual": dict(zip(names, (round(float(v), 4) for v in stats(np.arange(n))))),
             "bootstrap_filas": block(rows), "bootstrap_por_zona_(complementario)": block(cl)}
 
