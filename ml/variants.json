@@ -1,9 +1,9 @@
 {
- "nota_v1": "V1 es una definición de etiqueta ajustada tras observar una ola administrativa (inaptidões, 2026-05/06) en el periodo de prueba; no es un resultado de holdout sin tocar.",
+ "nota_v1": "V1 es una definiciÃ³n de etiqueta ajustada tras observar una ola administrativa (inaptidÃµes, 2026-05/06) en el periodo de prueba; no es un resultado de holdout sin tocar.",
  "reglas": "Lista de variantes fijada antes de ver resultados: V0, V1 y la sensibilidad de V1. Se reportan todas, pasen o no el gate. Umbrales sin cambios.",
  "corridas": [
   {
-   "dataset": "municipio 7691 (Maringá) · volcado 2026-09 · PROVISIONAL (solo un municipio)",
+   "dataset": "municipio 7691 (MaringÃ¡) Â· volcado 2026-09 Â· PROVISIONAL (solo un municipio)",
    "variantes": [
     {
      "id": "V0",
@@ -80,7 +80,7 @@
     {
      "id": "V1",
      "run_id": "20261104T030021Z",
-     "descripcion": "etiqueta y tasas con código 08; 03/04 censurados (siguen en la población como negativos)",
+     "descripcion": "etiqueta y tasas con cÃ³digo 08; 03/04 censurados (siguen en la poblaciÃ³n como negativos)",
      "snapshot": "2026-09-13",
      "gate_passed": true,
      "gate_failures": [],
@@ -156,7 +156,8 @@
     },
     "censuradas_train": {
      "filas": 93659,
-     "censuradas": 3513
+     "censuradas_en_ventana": 126,
+     "censuradas_despues_de_la_ventana": 3387
     },
     "gate_set_censuradas": {
      "filas": 26989,
@@ -229,7 +230,8 @@
       "P(delta<=0)": 0.0005,
       "P(ratio<1.5)": 0.0
      }
-    }
+    },
+    "lectura": "Cotas, no estimaciÃ³n: censuradas dentro de la ventana son cierres reales etiquetados 0 (completo subestima; sin censuradas sobrestima)."
    }
   }
  ]

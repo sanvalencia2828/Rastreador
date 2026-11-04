@@ -248,3 +248,15 @@ def test_censored_codes_stay_in_population_as_negatives(cfg):
     assert run(["08"], ["03", "04"]) == ([True, True, True, False], [False, True, False, False])
     # sin censurar, el inapta desaparecería de la población (sesgo de supervivencia)
     assert run(["08"], []) == ([True, True, False, False], [False, True, False, False])
+
+
+def test_censored_codes_must_not_overlap_closed_codes(cfg):
+    base = pd.DataFrame({"situacao": ["02"], "data_situacao": pd.to_datetime(["2020-01-01"]), "data_inicio": pd.to_datetime(["2019-01-01"])})
+    with pytest.raises(ValueError):
+        cohort_masks(base, pd.Timestamp("2024-01-01"), pd.Timestamp("2025-01-01"), _labels_cfg(cfg, ["04", "08"], ["04"]))
+
+
+def test_censored_after_horizon_is_in_population_with_label_zero(cfg):
+    base = pd.DataFrame({"situacao": ["04"], "data_situacao": pd.to_datetime(["2026-05-01"]), "data_inicio": pd.to_datetime(["2019-01-01"])})
+    pop, lab = cohort_masks(base, pd.Timestamp("2024-01-01"), pd.Timestamp("2025-01-01"), _labels_cfg(cfg, ["08"], ["03", "04"]))
+    assert pop.tolist() == [True] and lab.tolist() == [False]

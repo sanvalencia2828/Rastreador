@@ -22,7 +22,7 @@ labels:
   horizon_months: 12                # "¿cierra en los próximos N meses?"
   active_code: "02"
   closed_codes: ["03", "04", "08"]  # suspensa, inapta, baixada
-  censored_codes: []                # cerrados por estos códigos siguen en la población (eran activos) pero no son evento ni entran en las tasas
+  censored_codes: []                # cerrados por estos códigos siguen en la población (eran activos) pero no son evento ni entran en las tasas. Sesgo conocido: un censurado que cerró dentro de la ventana cuenta como negativo (subestima el modelo); excluirlos lo sobrestima. Debe ser disjunto de closed_codes
 
 features:
   smoothing_m: 20                   # suavizado bayesiano de tasas históricas por grupo

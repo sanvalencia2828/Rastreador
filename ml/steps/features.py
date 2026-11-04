@@ -107,7 +107,10 @@ def cohort_masks(
     is_active = base["situacao"].eq(active)
     is_closed = base["situacao"].isin(closed)
     # códigos que no cuentan como evento pero sí como "estaba activo en el corte" (p. ej. 04 en la variante solo-08)
-    still_at_risk = base["situacao"].isin(closed | set(cfg["labels"].get("censored_codes", [])))
+    censored = set(cfg["labels"].get("censored_codes", []))
+    if closed & censored:
+        raise ValueError(f"closed_codes y censored_codes no pueden solaparse: {sorted(closed & censored)}")
+    still_at_risk = base["situacao"].isin(closed | censored)
     active_at_cutoff = is_active & (base["data_situacao"].isna() | (base["data_situacao"] <= cutoff))
     closed_after = still_at_risk & (base["data_situacao"] >= cutoff)
     # en la cohorte de scoring (corte = fecha del volcado) solo interesan los activos hoy
