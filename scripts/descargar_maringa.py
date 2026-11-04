@@ -130,7 +130,7 @@ def main() -> None:
             print(f"  {os.path.basename(path)}: {read:,} filas · {kept:,} de {sorted(municipios)}")
             if args.borrar_zips:
                 os.remove(path)
-    print(f"\nListo: {total_kept:,} establecimientos de {total_read:,} → {out_path}")
+    print(f"\nListo: {total_kept:,} establecimientos de {total_read:,} -> {out_path}")
     if total_kept == 0:
         print("Advertencia: 0 filas. ¿Código de municipio correcto? (Receita, no IBGE)", file=sys.stderr)
 
