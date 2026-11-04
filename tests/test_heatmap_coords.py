@@ -65,3 +65,14 @@ def test_cache_does_not_mix_the_two_modes(monkeypatch):
     heatmap(monkeypatch, [NO_COORDS])  # modo real, queda en caché
     monkeypatch.setenv("ALLOW_SYNTHETIC_COORDS", "1")
     assert len(client.get("/api/heatmap").json()["features"]) == 1
+
+
+def test_populate_coords_refuses_without_the_opt_in(monkeypatch):
+    import populate_coords
+
+    with pytest.raises(SystemExit):
+        populate_coords.main()  # sin ALLOW_SYNTHETIC_COORDS
+    monkeypatch.setenv("ALLOW_SYNTHETIC_COORDS", "1")
+    monkeypatch.setenv("APP_ENV", "production")
+    with pytest.raises(SystemExit):
+        populate_coords.main()  # la bandera no vale en producción

@@ -8,7 +8,6 @@ from fastapi import APIRouter
 from sqlalchemy import text
 
 from app.core.database import db_engine
-from app.core.security import is_dev_env
 from app.core.cache import get_cached_response, set_cached_response
 from app.schemas.analytics import (
     Cluster,
@@ -21,6 +20,7 @@ from app.services.geo import (
     BR369_CITIES,
     HUBS,
     assign_geographic_coords,
+    synthetic_coords_allowed,
     cnae_to_category,
     format_cnpj,
 )
@@ -35,11 +35,6 @@ router = APIRouter()
 def health_check():
     """Health check endpoint for Docker container checks"""
     return {"status": "ok", "message": "Rastreador CNPJ backend is running"}
-
-
-def synthetic_coords_allowed() -> bool:
-    """Invented (hash-based) coordinates only with ALLOW_SYNTHETIC_COORDS=1, never outside development."""
-    return os.getenv("ALLOW_SYNTHETIC_COORDS") == "1" and is_dev_env()
 
 
 @router.get("/api/heatmap")

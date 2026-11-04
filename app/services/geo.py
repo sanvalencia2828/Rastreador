@@ -1,8 +1,11 @@
 """Geographic constants, CNAE mappings and spatial helpers."""
 
 import hashlib
+import os
 from math import radians, sin, cos, asin, sqrt
 from typing import List, Dict, Any, Optional
+
+from app.core.security import is_dev_env
 
 
 # ==============================================================================
@@ -83,6 +86,11 @@ def format_cnpj(biz: Dict[str, Any]) -> str:
 # ==============================================================================
 # SPATIAL ALGORITHMS
 # ==============================================================================
+def synthetic_coords_allowed() -> bool:
+    """Invented (hash-based) coordinates only with ALLOW_SYNTHETIC_COORDS=1, never outside development."""
+    return os.getenv("ALLOW_SYNTHETIC_COORDS") == "1" and is_dev_env()
+
+
 def assign_geographic_coords(
     cnpj: str, business_type: str, municipio: Optional[str] = None
 ) -> List[float]:
