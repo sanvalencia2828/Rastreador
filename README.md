@@ -60,7 +60,7 @@ Acceder a:
 
 ### Opción 2: Desarrollo Local
 
-#### 1. Base de Datos (opcional — la API funciona sin DB usando JSON)
+#### 1. Base de Datos (las lecturas públicas usan JSON sin base de datos; el login y las rutas necesitan base de datos)
 
 ```bash
 docker-compose up db
@@ -133,7 +133,7 @@ En el panel de Vercel → *Settings → Environment Variables*, configurar:
 | Variable | Valor |
 |----------|-------|
 | `DATABASE_URL` | `postgresql://user:pass@host:5432/dbname` |
-| `JWT_SECRET_KEY` | Valor secreto para firmar tokens JWT | 
+| `JWT_SECRET_KEY` | Obligatorio y distinto de `change-me-in-production` si `APP_ENV≠development`; valor secreto para firmar tokens JWT | 
 | `CORS_ORIGINS` | Orígenes permitidos, por ejemplo `https://<tu-proyecto>.vercel.app` |
 | `NEXT_PUBLIC_API_URL` | `https://<tu-proyecto>.vercel.app` |
 | `BACKEND_URL` | URL del backend para el rewritting del frontend en Vercel |
@@ -234,7 +234,7 @@ Todas las variables de configuración están documentadas en [`.env.example`](.e
 | `API_PORT` | Puerto del backend FastAPI | `8000` |
 | `NEXT_PUBLIC_API_URL` | URL pública del backend | `http://localhost:8000` |
 | `BACKEND_URL` | URL del backend para rewrites del frontend | `http://localhost:8000` |
-| `JWT_SECRET_KEY` | Secreto para JWT | `change-me-in-production` |
+| `JWT_SECRET_KEY` | Obligatorio y distinto de `change-me-in-production` si `APP_ENV≠development` | `<secreto-largo-y-aleatorio>` |
 | `CORS_ORIGINS` | Orígenes permitidos por CORS | `http://localhost:3000,http://localhost:3001,http://localhost:8000` |
 | `PORT` | Puerto del frontend Next.js | `3000` |
 
