@@ -8,6 +8,7 @@ from fastapi import APIRouter
 from sqlalchemy import text
 
 from app.core.database import db_engine
+from app.core.security import is_dev_env
 from app.core.cache import get_cached_response, set_cached_response
 from app.schemas.analytics import (
     Cluster,
@@ -36,13 +37,20 @@ def health_check():
     return {"status": "ok", "message": "Rastreador CNPJ backend is running"}
 
 
+def synthetic_coords_allowed() -> bool:
+    """Invented (hash-based) coordinates only with ALLOW_SYNTHETIC_COORDS=1, never outside development."""
+    return os.getenv("ALLOW_SYNTHETIC_COORDS") == "1" and is_dev_env()
+
+
 @router.get("/api/heatmap")
 def get_heatmap_geojson():
     """
-    Returns a GeoJSON FeatureCollection of all businesses.
-    This endpoint is used by the frontend to render the beautiful MapLibre Heatmap layer.
+    Returns a GeoJSON FeatureCollection of businesses that have real coordinates.
+    Businesses without them are skipped and counted in `omitted_no_coords`; with
+    ALLOW_SYNTHETIC_COORDS=1 (development only) they get invented points marked synthetic=true.
     """
-    cache_key = "heatmap_geojson"
+    allow_synthetic = synthetic_coords_allowed()
+    cache_key = f"heatmap_geojson:{'synthetic' if allow_synthetic else 'real'}"
     cached = get_cached_response(cache_key)
     if cached is not None:
         print("Returning cached heatmap GeoJSON.")
@@ -68,18 +76,22 @@ def get_heatmap_geojson():
             print(f"Failed to auto-generate data: {e}")
 
     features = []
+    omitted = 0
     for biz in businesses:
         cnpj = format_cnpj(biz)
         biz_type = biz.get("business_type", "retail")
         municipio = biz.get("municipio")
 
-        # Use stored real coordinates if geocoded, otherwise fallback to deterministic
         lat = biz.get("latitude")
         lon = biz.get("longitude")
-        if lat is not None and lon is not None:
+        synthetic = lat is None or lon is None
+        if not synthetic:
             coords = [float(lon), float(lat)]
-        else:
+        elif allow_synthetic:
             coords = assign_geographic_coords(cnpj, biz_type, municipio)
+        else:
+            omitted += 1
+            continue
 
         porte_val = biz.get("porte_empresa")
         porte_desc = "Otros"
@@ -107,12 +119,23 @@ def get_heatmap_geojson():
                 "porte_empresa": str(porte_val or ""),
                 "porte_desc": porte_desc,
                 "municipio": municipio or "Londrina",
+                "synthetic": synthetic,
             },
         }
         features.append(feature)
 
-    print(f"Returning {len(features)} points as GeoJSON.")
-    result = {"type": "FeatureCollection", "features": features}
+    print(f"Returning {len(features)} points as GeoJSON ({omitted} omitted without real coordinates).")
+    result = {
+        "type": "FeatureCollection",
+        "features": features,
+        "omitted_no_coords": omitted,
+        "synthetic_allowed": allow_synthetic,
+    }
+    if not features and omitted:
+        result["note"] = (
+            f"{omitted} businesses were loaded but none has real coordinates, so the map is empty. "
+            "Geocode them (enriquecer_lojas.py / populate the latitude and longitude columns)."
+        )
     set_cached_response(cache_key, result, ttl=300)
     return result
 
