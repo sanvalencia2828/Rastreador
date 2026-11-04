@@ -1,0 +1,9 @@
+# ==============================================================================
+# Programación del pipeline (supercronic, zona horaria del contenedor = TZ)
+# ==============================================================================
+# Todos los lunes a las 03:17. La Receita publica el volcado CNPJ una vez al mes;
+# --if-new-data hace que las semanas sin volcado nuevo terminen en segundos sin
+# crear corrida. Cada corrida real queda en artifacts/runs/<run_id>/.
+#
+# Formato: minuto hora día-del-mes mes día-de-la-semana comando
+17 3 * * 1 python -m ml run --if-new-data

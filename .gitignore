@@ -79,3 +79,6 @@ frontend/npm-start*.log
 
 # Ad-hoc DB inspection script (contains a hardcoded connection string)
 inspect_db.py
+
+# Artefactos del pipeline de ML (modelos, métricas, predicciones por corrida)
+artifacts/

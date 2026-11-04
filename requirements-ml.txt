@@ -1,0 +1,7 @@
+# Dependencias del pipeline de ML (ml/). Versiones fijadas = las validadas en la primera corrida.
+numpy==2.5.3
+pandas==3.0.5
+scikit-learn==1.9.1
+joblib==1.6.0
+PyYAML==6.0.3
+pytest==8.3.4
