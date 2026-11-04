@@ -82,3 +82,6 @@ inspect_db.py
 
 # Artefactos del pipeline de ML (modelos, métricas, predicciones por corrida)
 artifacts/
+
+# Nested repo that was committed as a broken submodule (no .gitmodules); keep local only
+cnpj_downloader/
