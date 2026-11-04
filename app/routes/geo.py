@@ -110,7 +110,6 @@ def get_heatmap_geojson():
                 "logradouro": biz.get("logradouro", ""),
                 "numero": biz.get("numero", ""),
                 "cep": biz.get("cep", ""),
-                "telefone_1": biz.get("telefone_1", ""),
                 "porte_empresa": str(porte_val or ""),
                 "porte_desc": porte_desc,
                 "municipio": municipio or "Londrina",
