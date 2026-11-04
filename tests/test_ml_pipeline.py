@@ -12,7 +12,7 @@ import pytest
 
 from ml.core import load_config, read_json
 from ml.pipeline import execute
-from ml.steps.features import FEATURES, ID_COLS, LABEL, check_features
+from ml.steps.features import FEATURES, ID_COLS, LABEL, check_features, cohort_masks
 from ml.steps.ingest import load_contract
 from ml.steps.validate import check_frame
 
@@ -219,3 +219,32 @@ def test_scheduler_skips_when_no_new_data(cfg, tmp_path):
     write_raw(raw_file(tmp_path), synthetic_rows(seed=99))  # llega un volcado nuevo
     assert execute(cfg, skip_if_unchanged=True) == 0
     assert len(list((Path(cfg["run"]["artifacts_dir"]) / "runs").iterdir())) == 2
+
+
+def _labels_cfg(cfg, closed, censored):
+    c = copy.deepcopy(cfg)
+    c["labels"]["closed_codes"] = closed
+    c["labels"]["censored_codes"] = censored
+    return c
+
+
+def test_censored_codes_stay_in_population_as_negatives(cfg):
+    base = pd.DataFrame(
+        {
+            "situacao": ["02", "08", "04", "04"],  # activo, baixada en ventana, inapta en ventana, inapta antes del corte
+            "data_situacao": pd.to_datetime(["2020-01-01", "2024-06-01", "2024-07-01", "2023-06-01"]),
+            "data_inicio": pd.to_datetime(["2019-01-01"] * 4),
+        }
+    )
+    cut, end = pd.Timestamp("2024-01-01"), pd.Timestamp("2025-01-01")
+
+    def run(closed, censored):
+        pop, lab = cohort_masks(base, cut, end, _labels_cfg(cfg, closed, censored))
+        return pop.tolist(), lab.tolist()
+
+    # por defecto (sin censored_codes) el comportamiento es el de siempre: 04 cuenta como cierre
+    assert run(["03", "04", "08"], []) == ([True, True, True, False], [False, True, True, False])
+    # solo-08 con 04 censurado: el inapta sigue en la población con etiqueta 0
+    assert run(["08"], ["03", "04"]) == ([True, True, True, False], [False, True, False, False])
+    # sin censurar, el inapta desaparecería de la población (sesgo de supervivencia)
+    assert run(["08"], []) == ([True, True, False, False], [False, True, False, False])

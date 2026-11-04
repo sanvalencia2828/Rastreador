@@ -106,8 +106,10 @@ def cohort_masks(
     started = base["data_inicio"] < cutoff
     is_active = base["situacao"].eq(active)
     is_closed = base["situacao"].isin(closed)
+    # códigos que no cuentan como evento pero sí como "estaba activo en el corte" (p. ej. 04 en la variante solo-08)
+    still_at_risk = base["situacao"].isin(closed | set(cfg["labels"].get("censored_codes", [])))
     active_at_cutoff = is_active & (base["data_situacao"].isna() | (base["data_situacao"] <= cutoff))
-    closed_after = is_closed & (base["data_situacao"] >= cutoff)
+    closed_after = still_at_risk & (base["data_situacao"] >= cutoff)
     # en la cohorte de scoring (corte = fecha del volcado) solo interesan los activos hoy
     population = started & (active_at_cutoff if only_active else (active_at_cutoff | closed_after))
     label = is_closed & (base["data_situacao"] >= cutoff) & (base["data_situacao"] < horizon_end)
