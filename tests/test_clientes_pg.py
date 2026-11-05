@@ -1,6 +1,6 @@
 """clientes contra Postgres real: DDL, seed y GET /api/clientes con dos usuarios.
 
-Se omite sin TEST_PG_URL (el job de CI no tiene servicio Postgres). Ejemplo local:
+Se omite sin TEST_PG_URL; el job backend-test de CI lo define con un servicio postgres:15. Ejemplo local:
 
     docker run -d --rm --name scratch_pg -e POSTGRES_PASSWORD=x -e POSTGRES_DB=test_rastreador -p 55432:5432 postgis/postgis:15-3.4
     TEST_PG_URL=postgresql://postgres:x@localhost:55432/test_rastreador pytest tests/test_clientes_pg.py
