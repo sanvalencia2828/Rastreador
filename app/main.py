@@ -15,6 +15,7 @@ from app.routes import (
     planned_routes,
     visits,
 )
+from app.routes import street_time as street_time_routes
 from app.routes import streets as streets_routes
 from app.routes.routes import router as semimanual_routes_router
 
@@ -47,3 +48,4 @@ app.include_router(daily_routes.router)
 app.include_router(cities.router)
 app.include_router(clientes.router)
 app.include_router(streets_routes.router)
+app.include_router(street_time_routes.router)

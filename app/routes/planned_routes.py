@@ -25,6 +25,7 @@ from app.services.route_planning import (
     _route_distance_km,
     nearest_neighbor_order,
 )
+from app.services.street_time_log import refresh_street_times_safely
 from app.services.visit_metrics import recalculate_visit_interval
 
 router = APIRouter()
@@ -454,6 +455,7 @@ def complete_route(
 
             for business_id in visited_business_ids:
                 recalculate_visit_interval(conn, business_id)
+            refresh_street_times_safely(conn, route_user_id, route_id)
 
             total_stops_done = conn.execute(
                 text("""

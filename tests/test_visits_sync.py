@@ -74,6 +74,8 @@ def test_sync_uses_one_insert_and_recalculates_once_per_cnpj(monkeypatch):
     monkeypatch.setattr(V, "_business_id_for_cnpj", lambda c, cnpj: {"222": 7}.get(cnpj))
     recalculated = []
     monkeypatch.setattr(V, "recalculate_visit_interval", lambda c, business_id: recalculated.append(business_id))
+    refreshed = []
+    monkeypatch.setattr(V, "refresh_street_times_safely", lambda c, u, r: refreshed.append((u, r)))
 
     items = [
         _item(route_id=ROUTE),
@@ -88,6 +90,7 @@ def test_sync_uses_one_insert_and_recalculates_once_per_cnpj(monkeypatch):
     assert insert_params["user_id"] == USER
     assert insert_params["route_ids"] == [ROUTE, None, None]  # la ruta inexistente se guarda sin ruta
     assert recalculated == [7]
+    assert refreshed == [(USER, ROUTE)]  # street_time_log refreshed once per distinct existing route
     assert response["received"] == 4
     assert response["synced"] == 3
     assert response["skipped"] == 1

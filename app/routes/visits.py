@@ -12,6 +12,7 @@ from sqlalchemy import text
 from app.core.database import db_engine
 from app.core.security import get_current_user_id, get_optional_user_id
 from app.schemas.visit import VisitCreate, VisitSyncItem
+from app.services.street_time_log import refresh_street_times_safely
 from app.services.visit_metrics import _business_id_for_cnpj, recalculate_visit_interval
 
 router = APIRouter()
@@ -370,6 +371,8 @@ def sync_visits(
                     business_id = _business_id_for_cnpj(conn, cnpj)
                     if business_id is not None:
                         recalculate_visit_interval(conn, business_id)
+                for route_id in sorted({r for r in columns["route_ids"] if r}):
+                    refresh_street_times_safely(conn, user_id, route_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Sync process failed: {e}")
 
