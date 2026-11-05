@@ -40,7 +40,7 @@ def load_businesses() -> List[Dict[str, Any]]:
         # Try estabelecimentos first (the new canonical table)
         for table_name in ["estabelecimentos", "londrina_businesses"]:
             try:
-                engine = create_engine(conn_str)
+                engine = create_engine(conn_str, hide_parameters=True)
                 with engine.connect() as conn:
                     result = conn.execute(text(f"SELECT * FROM {table_name}"))
                     businesses = [dict(row._mapping) for row in result]

@@ -20,4 +20,5 @@ if not conn_str:
     if all([db_user, db_password, db_host, db_name]):
         conn_str = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 
-db_engine = create_engine(conn_str) if conn_str else None
+# hide_parameters: driver errors must not echo bound values (customer names, addresses)
+db_engine = create_engine(conn_str, hide_parameters=True) if conn_str else None

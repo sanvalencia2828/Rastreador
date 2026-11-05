@@ -58,8 +58,8 @@ def _ensure_clientes_schema() -> None:
     try:
         with db_engine.begin() as conn:
             conn.execute(text(CLIENTES_DDL))
-    except Exception as e:  # DDL errors carry no row data
-        print(f"Error initializing clientes table: {e}")
+    except Exception as e:  # class name only: driver messages can carry host/user
+        print(f"Error initializing clientes table ({type(e).__name__})")
 
 
 def _ensure_business_visit_metrics_schema() -> None:
@@ -79,7 +79,7 @@ def _ensure_business_visit_metrics_schema() -> None:
                     ON estabelecimentos(last_visit_date)
             """))
     except Exception as e:
-        print(f"Error initializing business visit metrics columns: {e}")
+        print(f"Error initializing business visit metrics columns ({type(e).__name__})")
 
 
 def ensure_schema() -> None:
@@ -100,7 +100,7 @@ def ensure_schema() -> None:
                 """))
                 print("Successfully initialized users table in DB.")
         except Exception as e:
-            print(f"Error initializing users table: {e}")
+            print(f"Error initializing users table ({type(e).__name__})")
 
     if db_engine:
         try:
@@ -118,7 +118,7 @@ def ensure_schema() -> None:
                 """))
                 print("Successfully initialized daily_routes table in DB.")
         except Exception as e:
-            print(f"Error initializing daily_routes table: {e}")
+            print(f"Error initializing daily_routes table ({type(e).__name__})")
 
     if db_engine:
         try:
@@ -206,7 +206,7 @@ def ensure_schema() -> None:
                 conn.commit()
                 print("Successfully initialized routes tables in DB.")
         except Exception as e:
-            print(f"Error initializing routes tables: {e}")
+            print(f"Error initializing routes tables ({type(e).__name__})")
 
 
     if db_engine:
@@ -214,6 +214,6 @@ def ensure_schema() -> None:
             with db_engine.begin() as conn:
                 conn.execute(text("ALTER TABLE visits ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'mobile';"))
         except Exception as e:
-            print(f"Error initializing visit source column: {e}")
+            print(f"Error initializing visit source column ({type(e).__name__})")
 
     _ensure_clientes_schema()  # needs users, created above
