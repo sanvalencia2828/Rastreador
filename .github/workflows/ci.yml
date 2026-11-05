@@ -10,6 +10,20 @@ jobs:
   backend-test:
     name: Backend Lint & Compilation
     runs-on: ubuntu-latest
+    # Throwaway Postgres for tests/test_clientes_pg.py (it drops tables: the database name must start with "test").
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_rastreador
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d test_rastreador"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -33,6 +47,7 @@ jobs:
       - name: Backend tests
         env:
           APP_ENV: development
+          TEST_PG_URL: postgresql://postgres:postgres@localhost:5432/test_rastreador
         run: pytest -q tests --ignore=tests/test_ml_pipeline.py
 
   ml-pipeline-test:
