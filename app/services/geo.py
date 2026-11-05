@@ -1,9 +1,11 @@
 """Geographic constants, CNAE mappings and spatial helpers."""
 
 import hashlib
+import ipaddress
 import os
 from math import radians, sin, cos, asin, sqrt
 from typing import List, Dict, Any, Optional
+from urllib.parse import urlparse
 
 from app.core.security import is_dev_env
 
@@ -230,3 +232,26 @@ def fix_encoding(text):
         return text.encode("latin-1").decode("utf-8")
     except (UnicodeEncodeError, UnicodeDecodeError):
         return text
+
+
+_PRIVATE_HOST_SUFFIXES = (".local", ".internal", ".lan", ".localhost")
+
+
+def osrm_base_url() -> Optional[str]:
+    """OSRM_URL only when set explicitly AND pointing at a private/self-hosted server.
+
+    Route requests carry customer coordinates, so a public OSRM server must never get them:
+    unset, empty, malformed or public hosts all return None (callers fall back to Haversine).
+    shortcut: no DNS resolution, a public name hidden behind a one-label alias passes, when it matters resolve and check the IP.
+    """
+    raw = (os.getenv("OSRM_URL") or "").strip().rstrip("/")
+    parsed = urlparse(raw)
+    host = parsed.hostname
+    if parsed.scheme not in ("http", "https") or not host:
+        return None
+    try:
+        ip = ipaddress.ip_address(host)
+        private = ip.is_private or ip.is_loopback
+    except ValueError:
+        private = "." not in host or host.endswith(_PRIVATE_HOST_SUFFIXES)
+    return raw if private else None

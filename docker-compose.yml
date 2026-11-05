@@ -40,6 +40,9 @@ services:
   #     DB_NAME: ${DB_NAME:-londrina_comercio}
   #     API_PORT: 8001
   #     API_HOST: 0.0.0.0
+  #     # Explicit on purpose: empty = Haversine. This compose has no osrm service; set it only to a
+  #     # self-hosted OSRM (e.g. http://osrm:5000 once you add one), never to a public server.
+  #     OSRM_URL: ${OSRM_URL:-}
   #   ports:
   #     - "${API_PORT:-8001}:8001"
   #   depends_on:

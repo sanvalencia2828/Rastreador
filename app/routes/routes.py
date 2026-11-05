@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.core.security import get_current_user_id
 from app.optimizer import optimize_open_path
 from app.routes.points import get_tracking_point
-from app.services.geo import haversine_km
+from app.services.geo import haversine_km, osrm_base_url
 from app.schemas.route import (
     RouteCreateRequest,
     RouteOptimizeRequest,
@@ -167,24 +167,25 @@ def _route_matrices(route: dict[str, Any]) -> tuple[list[list[float | None]], li
     if len(coords) <= 1:
         return [[0.0]], [[0.0]], "none"
 
-    osrm_url = os.getenv("OSRM_URL", "http://osrm:5000")
-    joined = ";".join(f"{lon},{lat}" for lat, lon in coords)
-    url = f"{osrm_url}/table/v1/driving/{joined}?annotations=duration,distance"
-    try:
-        response = requests.get(url, timeout=15)
-        response.raise_for_status()
-        data = response.json()
-        durations = data.get("durations")
-        distances = data.get("distances")
-        if isinstance(durations, list) and len(durations) == len(coords):
-            dur = [[None if v is None else float(v) for v in row] for row in durations]
-            if isinstance(distances, list) and len(distances) == len(coords):
-                dist = [[None if v is None else float(v) / 1000.0 for v in row] for row in distances]
-            else:
-                dist = _haversine_matrix(coords)
-            return dur, dist, "osrm"
-    except Exception:  # pragma: no cover - fallback for local/offline tests
-        pass
+    osrm_url = osrm_base_url()  # None unless explicitly set to a private host: coords never go to a public server
+    if osrm_url:
+        joined = ";".join(f"{lon},{lat}" for lat, lon in coords)
+        url = f"{osrm_url}/table/v1/driving/{joined}?annotations=duration,distance"
+        try:
+            response = requests.get(url, timeout=15)
+            response.raise_for_status()
+            data = response.json()
+            durations = data.get("durations")
+            distances = data.get("distances")
+            if isinstance(durations, list) and len(durations) == len(coords):
+                dur = [[None if v is None else float(v) for v in row] for row in durations]
+                if isinstance(distances, list) and len(distances) == len(coords):
+                    dist = [[None if v is None else float(v) / 1000.0 for v in row] for row in distances]
+                else:
+                    dist = _haversine_matrix(coords)
+                return dur, dist, "osrm"
+        except Exception:  # pragma: no cover - fallback for local/offline tests
+            pass
 
     dist = _haversine_matrix(coords)
     dur = [[d / FALLBACK_SPEED_KMH * 3600.0 for d in row] for row in dist]
