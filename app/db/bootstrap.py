@@ -5,6 +5,47 @@ from sqlalchemy import text
 from app.core.database import db_engine
 
 
+# Same DDL as migrations/004_clientes.sql (a test keeps them identical).
+CLIENTES_DDL = """
+CREATE TABLE IF NOT EXISTS clientes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    external_id VARCHAR(64) NOT NULL,
+    nombre_cliente TEXT,
+    nombre_negocio TEXT,
+    direccion TEXT,
+    bairro TEXT,
+    municipio TEXT,
+    cep VARCHAR(10),
+    lat NUMERIC(10,7),
+    lon NUMERIC(10,7),
+    geocode_status VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+    geocode_source VARCHAR(20),
+    nota TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT clientes_user_external_key UNIQUE (user_id, external_id),
+    CONSTRAINT clientes_geocode_status_check CHECK (geocode_status IN ('ok', 'pendiente')),
+    CONSTRAINT clientes_geocode_source_check CHECK (geocode_source IS NULL OR geocode_source IN ('usuario', 'nominatim')),
+    CONSTRAINT clientes_ok_requires_coords CHECK (geocode_status <> 'ok' OR lat IS NOT NULL),
+    CONSTRAINT clientes_lat_range CHECK (lat BETWEEN -90 AND 90),
+    CONSTRAINT clientes_lon_range CHECK (lon BETWEEN -180 AND 180)
+);
+CREATE INDEX IF NOT EXISTS idx_clientes_user_nombre ON clientes(user_id, nombre_negocio, id);
+"""
+
+
+def _ensure_clientes_schema() -> None:
+    """Private per-user customer list; idempotent."""
+    if not db_engine:
+        return
+    try:
+        with db_engine.begin() as conn:
+            conn.execute(text(CLIENTES_DDL))
+    except Exception as e:  # DDL errors carry no row data
+        print(f"Error initializing clientes table: {e}")
+
+
 def _ensure_business_visit_metrics_schema() -> None:
     """Apply the small idempotent schema change when no migration runner exists."""
     if not db_engine:
@@ -158,3 +199,5 @@ def ensure_schema() -> None:
                 conn.execute(text("ALTER TABLE visits ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'mobile';"))
         except Exception as e:
             print(f"Error initializing visit source column: {e}")
+
+    _ensure_clientes_schema()  # needs users, created above
