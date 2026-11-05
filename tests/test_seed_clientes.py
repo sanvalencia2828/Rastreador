@@ -1,7 +1,6 @@
-"""scripts/seed_clientes.py: validación del CSV, guardas y upsert real (Postgres desechable opcional)."""
+"""scripts/seed_clientes.py: validación del CSV y guardas (el upsert real está en test_clientes_pg.py)."""
 
 import importlib.util
-import os
 from pathlib import Path
 
 import pytest
@@ -77,30 +76,3 @@ def test_production_guard_and_dry_run_never_touch_the_db(tmp_path, monkeypatch, 
     assert seed.main(["--csv", str(p), "--user", "u"]) == 0
     out = capsys.readouterr()
     assert SECRET not in out.out + out.err and "Dry-run" in out.out
-
-
-PG = os.environ.get("TEST_SEED_PG_URL")
-
-
-@pytest.mark.skipif(not PG, reason="TEST_SEED_PG_URL no definido (Postgres desechable con tabla users)")
-def test_reseed_is_idempotent_and_does_not_downgrade_geocoded_rows(tmp_path):
-    from sqlalchemy import create_engine, text
-
-    from app.db.bootstrap import CLIENTES_DDL
-
-    engine = create_engine(PG)
-    with engine.begin() as c:
-        c.execute(text("DROP TABLE IF EXISTS clientes"))
-        c.execute(text("INSERT INTO users(username) VALUES ('seedtest') ON CONFLICT DO NOTHING"))
-        c.execute(text(CLIENTES_DDL))
-        uid = c.execute(text("SELECT id FROM users WHERE username='seedtest'")).scalar()
-    rows, _ = seed.parse_rows(
-        write(tmp_path, "1,a,n,d,b,m,c,-23.4,-51.9,coords_del_enlace,", f"2,a,n,d,b,m,c,,,{PEND},")
-    )
-    pend, _ = seed.parse_rows(write(tmp_path, f"1,a,n,d,b,m,c,,,{PEND},"))
-    for batch in (rows, rows, pend):
-        with engine.begin() as c:
-            c.execute(seed.UPSERT, [{**r, "user_id": uid} for r in batch])
-    with engine.begin() as c:
-        got = c.execute(text("SELECT external_id, geocode_status, lat FROM clientes ORDER BY 1")).fetchall()
-    assert [(g[0], g[1], float(g[2]) if g[2] else None) for g in got] == [("1", "ok", -23.4), ("2", "pendiente", None)]

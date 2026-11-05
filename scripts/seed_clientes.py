@@ -38,7 +38,8 @@ UPSERT = text("""
                               ELSE clientes.geocode_source END,
         geocode_status = CASE WHEN EXCLUDED.geocode_status = 'ok' THEN 'ok' ELSE clientes.geocode_status END,
         updated_at = NOW()
-""")  # a pending row in the CSV must not wipe coordinates already resolved
+    WHERE clientes.geocode_source IS DISTINCT FROM 'manual'
+""")  # a pending CSV row must not wipe resolved coords; rows edited by hand ('manual') are never touched
 
 
 class SeedError(Exception):
@@ -141,11 +142,16 @@ def main(argv=None) -> int:
             if found is None:
                 print("Usuario no encontrado (no se crea).", file=sys.stderr)
                 return 1
+            skipped = conn.execute(
+                text("SELECT count(*) FROM clientes WHERE user_id = :u AND geocode_source = 'manual' "
+                     "AND external_id = ANY(:ids)"),
+                {"u": found[0], "ids": [r["external_id"] for r in rows]},
+            ).scalar()
             conn.execute(UPSERT, [{**r, "user_id": found[0]} for r in rows])
     except Exception as e:  # SQLAlchemy messages embed parameters: class name only
         print(f"Fallo de base de datos ({type(e).__name__}); nada se escribio.", file=sys.stderr)
         return 1
-    print(f"Cargadas {len(rows)} filas.")
+    print(f"Cargadas {len(rows) - skipped} filas; {skipped} omitidas por estar editadas a mano (manual).")
     return 0
 
 
