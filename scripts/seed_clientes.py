@@ -141,6 +141,9 @@ def main(argv=None) -> int:
     if db_engine is None:
         print("No hay base de datos configurada (DATABASE_URL o DB_*).", file=sys.stderr)
         return 1
+    if not rows:
+        print("El CSV no tiene filas; nada que cargar.")
+        return 0
     try:
         ensure_schema()
         with db_engine.begin() as conn:
