@@ -263,6 +263,33 @@ def index_osm_ways(
     return out
 
 
+
+def osm_segments(
+    osm: Dict[str, Any], needed_keys: set, centro: Tuple[float, float] = CENTRO_MARINGA, radio_m: float = RADIO_CASCO_M
+) -> list:
+    """(osm_id, clave, nombre, [(lon, lat)...], longitud_m) de los tramos del casco de las claves pedidas.
+
+    Misma regla de clave y de radio que index_osm_ways, para que el catálogo y la geometría coincidan.
+    """
+    out = []
+    for el in osm.get("elements", []):
+        geometry = el.get("geometry") or []
+        tags = el.get("tags") or {}
+        name = tags.get("name")
+        if el.get("type") != "way" or not name or len(geometry) < 2:
+            continue
+        tipo, nome = normalize_street(name)
+        keys = {street_key(tipo, nome), *_ref_keys(tags.get("ref", ""))} & needed_keys
+        if not keys:
+            continue
+        first, last = geometry[0], geometry[-1]
+        if haversine_m(centro[0], centro[1], (first["lat"] + last["lat"]) / 2, (first["lon"] + last["lon"]) / 2) > radio_m:
+            continue
+        points = [(p["lon"], p["lat"]) for p in geometry]
+        for key in sorted(keys):
+            out.append((el.get("id"), key, name, points, _way_length_m(geometry)))
+    return out
+
 # ---------------------------------------------------------------------------------------------
 # Cruces OPCIONALES (no se usan en producción salvo que se pidan): cada uno devuelve
 # {clave_volcado: (clave_osm, match_type)} solo con candidato único, y se evalúa aparte.

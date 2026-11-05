@@ -34,6 +34,7 @@ PROTECTED = [
     ("GET", "/api/visits", None),
     ("GET", "/api/clientes", None),
     ("GET", "/api/street-coverage", None),
+    ("GET", "/api/clientes/streets-nearby", None),
     ("POST", "/api/routes/generate", {}),
     ("POST", "/api/routes/optimize", {}),
     ("GET", "/api/v1/routes", None),
