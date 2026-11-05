@@ -13,7 +13,7 @@ jobs:
     # Throwaway Postgres for tests/test_clientes_pg.py (it drops tables: the database name must start with "test").
     services:
       postgres:
-        image: postgres:15
+        image: postgis/postgis:15-3.4  # PostGIS: tests/test_street_coverage_trigger.py runs the real trigger
         env:
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: test_rastreador
