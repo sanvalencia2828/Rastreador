@@ -20,6 +20,9 @@ from typing import Any
 import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# RASTREADOR_DATA_DIR / RASTREADOR_ARTIFACTS_DIR sacan los volcados y las corridas del repo (p. ej. fuera de OneDrive)
+DATA_DIR = Path(os.environ.get("RASTREADOR_DATA_DIR") or REPO_ROOT / ".data")
+ARTIFACTS_DIR = Path(os.environ["RASTREADOR_ARTIFACTS_DIR"]) if os.environ.get("RASTREADOR_ARTIFACTS_DIR") else None
 DEFAULT_CONFIG = REPO_ROOT / "ml" / "config.yaml"
 
 log = logging.getLogger("ml")
@@ -81,7 +84,11 @@ def load_config(path: str | os.PathLike | None = None) -> dict:
 
 def resolve(path: str | os.PathLike) -> Path:
     p = Path(path)
-    return p if p.is_absolute() else REPO_ROOT / p
+    if p.is_absolute():
+        return p
+    if p.parts[:1] == (".data",):
+        return DATA_DIR.joinpath(*p.parts[1:])
+    return REPO_ROOT / p
 
 
 # ------------------------------------------------------------------------------
@@ -245,7 +252,7 @@ class Run:
 
 
 def artifacts_dir(cfg: dict) -> Path:
-    p = resolve(cfg["run"]["artifacts_dir"])
+    p = ARTIFACTS_DIR or resolve(cfg["run"]["artifacts_dir"])
     p.mkdir(parents=True, exist_ok=True)
     return p
 

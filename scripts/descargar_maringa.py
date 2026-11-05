@@ -20,7 +20,7 @@ llegó completa (fin del flujo deflate, CRC de cada miembro, firma del central d
 servidor lo anuncia, Content-Length); si no,
 se reinicia ESA parte (3 intentos). El CSV final se escribe en .tmp y se renombra al terminar.
 
-Salida: .data/maringa/<mes>_<municipios>.ESTABELE con el mismo formato crudo de la
+Salida: <RASTREADOR_DATA_DIR o .data>/maringa/<mes>_<municipios>.ESTABELE con el mismo formato crudo de la
 Receita, más .data/maringa/meta/<nombre>.json con metadatos agregados (sin filas).
 Va en su propia carpeta para no mezclarse con otros volcados:
     ML__DATA__INPUT_GLOB=".data/maringa/2026-09_*.ESTABELE" python -m ml run
@@ -293,7 +293,7 @@ def main() -> None:
     else:
         p.error("indica --mes AAAA-MM o --zips")
 
-    out_dir = os.path.join(REPO_ROOT, ".data", "maringa")
+    out_dir = os.path.join(os.environ.get("RASTREADOR_DATA_DIR") or os.path.join(REPO_ROOT, ".data"), "maringa")
     os.makedirs(os.path.join(out_dir, "meta"), exist_ok=True)
     stem = f"{label}_{'-'.join(sorted(municipios))}"
     out_path = os.path.join(out_dir, f"{stem}.ESTABELE")

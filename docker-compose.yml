@@ -97,8 +97,8 @@ services:
     environment:
       TZ: America/Sao_Paulo
     volumes:
-      - ./.data:/app/.data:ro          # volcados crudos de la Receita (solo lectura)
-      - ./artifacts:/app/artifacts     # una carpeta por corrida + latest.json
+      - ${RASTREADOR_DATA_DIR:-./.data}:/app/.data:ro          # volcados crudos de la Receita (solo lectura)
+      - ${RASTREADOR_ARTIFACTS_DIR:-./artifacts}:/app/artifacts     # una carpeta por corrida + latest.json
 
   # Ejecución programada (ver ml/crontab): docker compose --profile ml-scheduler up -d
   ml-scheduler:
@@ -115,8 +115,8 @@ services:
     environment:
       TZ: America/Sao_Paulo
     volumes:
-      - ./.data:/app/.data:ro
-      - ./artifacts:/app/artifacts
+      - ${RASTREADOR_DATA_DIR:-./.data}:/app/.data:ro
+      - ${RASTREADOR_ARTIFACTS_DIR:-./artifacts}:/app/artifacts
     restart: unless-stopped
 
 volumes:

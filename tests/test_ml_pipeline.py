@@ -260,3 +260,13 @@ def test_censored_after_horizon_is_in_population_with_label_zero(cfg):
     base = pd.DataFrame({"situacao": ["04"], "data_situacao": pd.to_datetime(["2026-05-01"]), "data_inicio": pd.to_datetime(["2019-01-01"])})
     pop, lab = cohort_masks(base, pd.Timestamp("2024-01-01"), pd.Timestamp("2025-01-01"), _labels_cfg(cfg, ["08"], ["03", "04"]))
     assert pop.tolist() == [True] and lab.tolist() == [False]
+
+
+def test_data_and_artifacts_dirs_can_be_moved_out_of_the_repo(monkeypatch, tmp_path):
+    from ml import core
+
+    monkeypatch.setattr(core, "DATA_DIR", tmp_path / "datos")
+    monkeypatch.setattr(core, "ARTIFACTS_DIR", tmp_path / "arts")
+    assert core.resolve(".data/maringa/x.ESTABELE") == tmp_path / "datos" / "maringa" / "x.ESTABELE"
+    assert core.resolve("ml/config.yaml") == core.REPO_ROOT / "ml" / "config.yaml"  # lo demás sigue relativo al repo
+    assert core.artifacts_dir({"run": {"artifacts_dir": "artifacts"}}) == tmp_path / "arts"
