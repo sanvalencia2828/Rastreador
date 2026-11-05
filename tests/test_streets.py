@@ -276,3 +276,33 @@ def test_optional_method_with_two_osm_candidates_is_rejected():
     pts = [(-23.4205, -51.9331), (-23.4205, -51.9321)]
     ways = S.index_osm_ways(_osm(({"name": "Rua Doutor Joao Silva"}, pts), ({"name": "Rua Joao Silva Doutor"}, pts)))
     assert S.flexible_aliases(_idx(("RUA", "SILVA DOUTOR JOAO", 2)), ways) == {}
+
+
+def test_tolerance_never_flips_a_final_vowel_or_changes_two_words():
+    pts = [(-23.4205, -51.9331), (-23.4205, -51.9321)]
+    ways = S.index_osm_ways(_osm(({"name": "Rua Maria Silva"}, pts), ({"name": "Rua Joaquim Barbosa Lima"}, pts)))
+    assert S.tolerance_aliases(_idx(("RUA", "MARIO SILVA", 2)), ways) == {}  # MARIA/MARIO: otra persona
+    assert S.tolerance_aliases(_idx(("RUA", "JOAQUIN BARBOZA LIMA", 2)), ways) == {}  # dos palabras difieren
+    assert "RUA|JOAQUIM BARBOSA LIMA" == S.tolerance_aliases(_idx(("RUA", "JOAQUIM BARBOZA LIMA", 2)), ways)["RUA|JOAQUIM BARBOZA LIMA"][0]
+
+
+def test_oneway_minus_one_flips_direction_for_dual_carriageway_pairing():
+    a = [(-23.4205, -51.9331), (-23.4205, -51.9301)]
+    # drawn the same way, but one is oneway=-1 (travels the opposite way): a real dual carriageway
+    osm = _osm(({"name": "Avenida Dupla", "oneway": "yes"}, a),
+               ({"name": "Avenida Dupla", "oneway": "-1"}, [(-23.42055, -51.9331), (-23.42055, -51.9301)]))
+    e = S.index_osm_ways(osm)["AVENIDA|DUPLA"]
+    assert e["pareado_m"] == pytest.approx(e["length_m"], rel=0.01)
+
+
+def test_two_dump_spellings_may_share_one_osm_street_and_rows_expose_osm_key():
+    pts = [(-23.4205, -51.9331), (-23.4205, -51.9321)]
+    ways = S.index_osm_ways(_osm(({"name": "Rua Doutor Joao"}, pts)))
+    dump = _idx(("RUA", "DOUTOR JOAO", 4), ("RUA", "JOAO DOUTOR", 3))
+    rows = S.match_streets(dump, ways, S.flexible_aliases(dump, ways))["calles"]
+    assert {r["osm_key"] for r in rows} == {"RUA|DOUTOR JOAO"} and {r["match_type"] for r in rows} == {"exacto", "flexible"}
+
+
+def test_report_radius_is_the_one_used():
+    rep = S.match_streets({}, {}, radio_casco_m=7000)
+    assert rep["resumen"]["supuestos"]["radio_casco_m"] == 7000

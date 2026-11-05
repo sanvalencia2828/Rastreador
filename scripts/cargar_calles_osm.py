@@ -113,13 +113,18 @@ def main(argv=None) -> int:
     for name in args.activar:
         for k, v in METHODS[name](index, ways).items():
             aliases.setdefault(k, v)
-    report = S.match_streets(index, ways, aliases, args.umbral_largo_m, args.umbral_largo_comercios, distritos=distritos)
+    report = S.match_streets(index, ways, aliases, args.umbral_largo_m, args.umbral_largo_comercios,
+                             distritos=distritos, radio_casco_m=args.radio_casco_m)
     with open(os.path.join(osm_dir, "calles_maringa.json"), "w", encoding="utf-8") as fh:
         json.dump(report, fh, ensure_ascii=False)
     with open(os.path.join(osm_dir, "calles_maringa_sin_cruzar.csv"), "w", encoding="utf-8", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(["tipo", "nombre", "comercios_activos"])
         w.writerows([r["tipo"], r["nome"], r["n_comercios_ativos"]] for r in report["sin_cruzar"])
+    with open(os.path.join(osm_dir, "bairros_distrito.csv"), "w", encoding="utf-8", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["bairro", "comercios_activos"])
+        w.writerows(sorted(distritos.items(), key=lambda kv: -kv[1]))
     print(json.dumps(report["resumen"], ensure_ascii=False, indent=2))
     return 0
 

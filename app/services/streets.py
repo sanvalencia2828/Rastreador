@@ -255,7 +255,7 @@ def index_osm_ways(
             e["lat"] += [p["lat"] for p in geometry]
             e["lon"] += [p["lon"] for p in geometry]
             if tags.get("oneway") in ("yes", "1", "true", "-1") and not key.startswith("REF|"):
-                e["oneways"].append((mid, _bearing(geometry), length))
+                e["oneways"].append((mid, _bearing(geometry) + (math.pi if tags["oneway"] == "-1" else 0.0), length))
     for e in out.values():
         lats, lons, oneways = e.pop("lat"), e.pop("lon"), e.pop("oneways")
         e["spread_m"] = haversine_m(min(lats), min(lons), max(lats), max(lons)) if lats else 0.0
@@ -315,6 +315,11 @@ def _within_one(a: str, b: str) -> bool:
     return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
 
 
+def _vowel_flip(a: str, b: str) -> bool:
+    """Same word except the final vowel (MARIA/MARIO, ROBERTO/ROBERTA): different people, never a typo."""
+    return len(a) == len(b) and a[:-1] == b[:-1] and a[-1] in "AOE" and b[-1] in "AOE"
+
+
 def tolerance_aliases(dump: Dict[str, Dict[str, Any]], osm_ways: Dict[str, Dict[str, Any]]) -> Dict[str, Tuple[str, str]]:
     """Mismo tipo y nº de palabras; cada palabra igual o a 1 letra (palabras de >=5 letras). Candidato único."""
     buckets: Dict[Any, list] = {}
@@ -327,7 +332,10 @@ def tolerance_aliases(dump: Dict[str, Dict[str, Any]], osm_ways: Dict[str, Dict[
             continue
         words = s["nome"].split()
         cands = [
-            ok for ok, ow in buckets.get((s["tipo"], len(words)), []) if all(_within_one(x, y) for x, y in zip(words, ow))
+            ok for ok, ow in buckets.get((s["tipo"], len(words)), [])
+            if all(_within_one(x, y) for x, y in zip(words, ow))
+            and sum(x != y for x, y in zip(words, ow)) == 1
+            and not any(x != y and _vowel_flip(x, y) for x, y in zip(words, ow))
         ]
         if len(cands) == 1:
             out[k] = (cands[0], "tolerancia")
@@ -354,6 +362,7 @@ def match_streets(
     larga_comercios: int = CALLE_LARGA_COMERCIOS,
     dispersion_max_m: float = DISPERSION_MAX_M,
     distritos: Optional[Counter] = None,
+    radio_casco_m: float = RADIO_CASCO_M,
 ) -> Dict[str, Any]:
     """Cruza por clave exacta (tipo, nombre) y, solo si se pasan `aliases`, por los cruces opcionales.
 
@@ -365,10 +374,11 @@ def match_streets(
     for key, s in dump.items():
         if s["n_ativos"] == 0:
             continue
+        osm_key = None
         if _is_exact(key, osm_ways):
-            way, match_type = osm_ways[key], "exacto"
+            way, match_type, osm_key = osm_ways[key], "exacto", key
         elif key in aliases:
-            way, match_type = osm_ways[aliases[key][0]], aliases[key][1]
+            way, match_type, osm_key = osm_ways[aliases[key][0]], aliases[key][1], aliases[key][0]
         else:
             way, match_type = None, None
         numeros = s["numeros"]
@@ -376,7 +386,7 @@ def match_streets(
             "tipo": s["tipo"], "nome": s["nome"], "n_comercios_ativos": s["n_ativos"],
             "numero_min": min(numeros) if numeros else None, "numero_max": max(numeros) if numeros else None,
             "sem_numero": s["sem_numero"], "bairros": sorted(s["bairros"]), "ceps": sorted(s["ceps"]),
-            "osm": way is not None, "match_type": match_type,
+            "osm": way is not None, "match_type": match_type, "street_key": key, "osm_key": osm_key,
         }
         if way is None:
             row.update(
@@ -414,7 +424,7 @@ def match_streets(
             "comercios_en_plan_automatico": sum(r["n_comercios_ativos"] for r in streets if r["en_plan_automatico"]),
             "supuestos": {
                 "calle_larga_m": larga_m, "calle_larga_comercios": larga_comercios,
-                "dispersion_max_m": dispersion_max_m, "radio_casco_m": RADIO_CASCO_M,
+                "dispersion_max_m": dispersion_max_m, "radio_casco_m": radio_casco_m,
             },
         },
         "distritos": dict(distritos or {}),
