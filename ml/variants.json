@@ -482,5 +482,17 @@
     }
    }
   }
+ ],
+ "incidentes": [
+  {
+   "fecha": "2026-11-04",
+   "descripcion": "Durante la descarga de la región se lanzaron por error dos procesos de scripts/descargar_maringa.py a la vez (el primero no se detuvo); ambos escribían el mismo .tmp y el mismo archivo final.",
+   "verificacion": "Se validó el archivo final completo (322 120 filas): 30 campos, CNPJ de 14 dígitos (8+4+2), municipio dentro de {7691, 8461, 7731, 7687}, UF=PR, fechas de situación e inicio válidas, código de situación permitido, 0 CNPJ duplicados; los 246 714 de 7691 coinciden con la descarga independiente anterior. Sin fallos, no se repitió la descarga.",
+   "no_verificado": "Qué proceso escribió el archivo final."
+  },
+  {
+   "fecha": "2026-11-04",
+   "descripcion": "La retención del pipeline (keep_runs) borró la corrida V0 de solo Maringá (20261104T023927Z) al promover V1 de la región. Sus métricas siguen en este registro."
+  }
  ]
 }
