@@ -23,6 +23,12 @@ from sqlalchemy import text  # noqa: E402
 HEADER = ["id", "cliente", "nombre_negocio", "direccion", "bairro", "municipio", "cep", "lat", "lon", "estado", "nota"]
 STATE_MAP = {"coords_del_enlace": ("ok", "usuario"), "pendiente_geocodificar": ("pendiente", None)}
 
+# Upsert rules (enforced here only, deliberately no DB trigger):
+#  * geocode_source = 'manual' rows are NEVER touched: the WHERE at the end skips the whole row (coords
+#    and text fields), whether the incoming data comes from this CSV or from any future geocoder
+#    (Nominatim included). Any new writer to `clientes` must keep that same WHERE.
+#  * rows with source 'nominatim' ARE overwritten by a CSV row that has coordinates ('ok').
+#  * a pending CSV row never wipes coordinates already resolved (the CASE expressions).
 UPSERT = text("""
     INSERT INTO clientes (user_id, external_id, nombre_cliente, nombre_negocio, direccion, bairro,
                           municipio, cep, lat, lon, geocode_status, geocode_source, nota)
@@ -39,7 +45,7 @@ UPSERT = text("""
         geocode_status = CASE WHEN EXCLUDED.geocode_status = 'ok' THEN 'ok' ELSE clientes.geocode_status END,
         updated_at = NOW()
     WHERE clientes.geocode_source IS DISTINCT FROM 'manual'
-""")  # a pending CSV row must not wipe resolved coords; rows edited by hand ('manual') are never touched
+""")
 
 
 class SeedError(Exception):
