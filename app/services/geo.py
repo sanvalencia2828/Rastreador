@@ -244,14 +244,20 @@ def osrm_base_url() -> Optional[str]:
     unset, empty, malformed or public hosts all return None (callers fall back to Haversine).
     shortcut: no DNS resolution, a public name hidden behind a one-label alias passes, when it matters resolve and check the IP.
     """
-    raw = (os.getenv("OSRM_URL") or "").strip().rstrip("/")
+    raw = (os.getenv("OSRM_URL") or "").strip()
     parsed = urlparse(raw)
     host = parsed.hostname
     if parsed.scheme not in ("http", "https") or not host:
         return None
     try:
         ip = ipaddress.ip_address(host)
+        ip = getattr(ip, "ipv4_mapped", None) or ip  # ::ffff:8.8.8.8 must be judged as 8.8.8.8
         private = ip.is_private or ip.is_loopback
     except ValueError:
-        private = "." not in host or host.endswith(_PRIVATE_HOST_SUFFIXES)
-    return raw if private else None
+        # first char a letter: "134744072" / "0x8080808" are numeric forms the resolver turns into public IPs
+        private = host[0].isalpha() and ("." not in host or host.endswith(_PRIVATE_HOST_SUFFIXES))
+    if not private:
+        return None
+    # rebuilt from parsed parts: drops userinfo/path tricks so requests and urlparse cannot disagree
+    shown = f"[{host}]" if ":" in host else host
+    return f"{parsed.scheme}://{shown}" + (f":{parsed.port}" if parsed.port else "")

@@ -172,7 +172,7 @@ def _route_matrices(route: dict[str, Any]) -> tuple[list[list[float | None]], li
         joined = ";".join(f"{lon},{lat}" for lat, lon in coords)
         url = f"{osrm_url}/table/v1/driving/{joined}?annotations=duration,distance"
         try:
-            response = requests.get(url, timeout=15)
+            response = requests.get(url, timeout=15, allow_redirects=False)  # a redirect would carry the coords elsewhere
             response.raise_for_status()
             data = response.json()
             durations = data.get("durations")
