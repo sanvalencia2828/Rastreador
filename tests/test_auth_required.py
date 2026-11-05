@@ -33,6 +33,7 @@ PROTECTED = [
     ("GET", "/api/daily-routes", None),
     ("GET", "/api/visits", None),
     ("GET", "/api/clientes", None),
+    ("GET", "/api/street-coverage", None),
     ("POST", "/api/routes/generate", {}),
     ("POST", "/api/routes/optimize", {}),
     ("GET", "/api/v1/routes", None),
@@ -139,5 +140,5 @@ def test_visits_ignore_user_id_query_param(monkeypatch):
 def test_limit_is_capped_at_500(monkeypatch, module, path):
     engine = FakeEngine()
     monkeypatch.setattr(module, "db_engine", engine)
-    assert client.get(path).status_code == 200
+    assert client.get(path, headers=bearer(USER_A)).status_code == 200  # street-coverage requires login
     assert [params["limit"] for _, params in engine.calls] == [500]

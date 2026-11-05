@@ -392,6 +392,7 @@ def get_street_coverage(
     municipio: Optional[str] = None,
     only_unvisited: bool = False,
     limit: int = 200,
+    user_id: str = Depends(get_current_user_id),
 ):
     """
     Returns aggregated street coverage rows ordered by least-recently-visited
