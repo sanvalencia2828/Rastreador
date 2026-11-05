@@ -114,19 +114,35 @@ def overpass_query(ibge: str = MARINGA_IBGE) -> str:
     )
 
 
+class _IncompleteOverpass(Exception):
+    """200 OK but unusable: runtime-error remark, empty body or not JSON. Worth retrying, never caching."""
+
+
+def _usable(data: Any) -> bool:
+    return isinstance(data, dict) and not data.get("remark") and bool(data.get("elements"))
+
+
 def fetch_osm_streets(
     cache_dir: str, ibge: str = MARINGA_IBGE, refresh: bool = False, attempts: int = 4, wait_s: float = 30
 ) -> Dict[str, Any]:
-    """Descarga (o lee de caché) las vías OSM del municipio. La petición solo lleva el código IBGE."""
+    """Descarga (o lee de caché) las vías OSM del municipio. La petición solo lleva el código IBGE.
+
+    Solo se cachea un resultado completo; una caché ilegible o vacía se ignora y se vuelve a descargar.
+    """
     if ibge != MARINGA_IBGE:
         raise ValueError(f"solo se cargan calles de Maringá (IBGE {MARINGA_IBGE}), no {ibge!r}")
     folder = Path(cache_dir)
     folder.mkdir(parents=True, exist_ok=True)
-    cached = sorted(folder.glob(f"{ibge}_*.json"))
-    if cached and not refresh:
-        return json.loads(cached[-1].read_text(encoding="utf-8"))
-    data = None
-    for attempt in range(1, attempts + 1):  # Overpass answers 429/502/504 when busy
+    if not refresh:
+        for cached in sorted(folder.glob(f"{ibge}_*.json"), reverse=True):
+            try:
+                data = json.loads(cached.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if _usable(data):
+                return data
+    attempts = max(1, attempts)
+    for attempt in range(1, attempts + 1):  # Overpass answers 429/5xx or a 200 with a "remark" when busy
         try:
             response = requests.post(
                 _OVERPASS_URL,
@@ -134,16 +150,24 @@ def fetch_osm_streets(
                 headers={"User-Agent": "rastreador-streets/0.1", "Accept": "application/json"},
                 timeout=300,
             )
-            if response.status_code in (429, 502, 503, 504):
-                raise requests.HTTPError(f"HTTP {response.status_code}")
-            response.raise_for_status()
-            data = response.json()
+            if response.status_code == 429 or response.status_code >= 500:
+                raise _IncompleteOverpass(f"HTTP {response.status_code}")
+            response.raise_for_status()  # other 4xx (bad query): not retried
+            try:
+                data = response.json()
+            except ValueError:
+                raise _IncompleteOverpass("not JSON")
+            if not _usable(data):
+                raise _IncompleteOverpass("empty or remark")
             break
-        except (requests.ConnectionError, requests.Timeout, requests.HTTPError):
+        except (requests.ConnectionError, requests.Timeout, _IncompleteOverpass):
             if attempt == attempts:
                 raise
             time.sleep(wait_s * attempt)
-    (folder / f"{ibge}_{date.today().isoformat()}.json").write_text(json.dumps(data), encoding="utf-8")
+    target = folder / f"{ibge}_{date.today().isoformat()}.json"
+    tmp = target.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data), encoding="utf-8")
+    os.replace(tmp, target)  # atomic: an interrupted write never leaves a truncated cache
     return data
 
 

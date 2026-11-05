@@ -46,6 +46,7 @@ def dump_file(tmp_path):
         ("  Rua   XV de  Novembro ", "", ("RUA", "XV DE NOVEMBRO")),
         ("Avenida Doutor Gastão Vidigal", "", ("AVENIDA", "DOUTOR GASTAO VIDIGAL")),  # no se expanden títulos
         ("Zona 7", "", (None, "ZONA 7")),
+        ("Av. X", "RUA", ("RUA", "AV X")),  # tipo column and name prefix disagree: kept apart, never merged
     ],
 )
 def test_normalize_street(name, tipo, expected):
@@ -115,17 +116,69 @@ def test_fetch_uses_cache_and_retries_busy_server(tmp_path, monkeypatch):
             pass
 
         def json(self):
-            return {"elements": []}
+            return {"elements": [{"type": "way"}]}
 
     codes = iter([502, 200])
     monkeypatch.setattr(S.requests, "post", lambda *a, **k: calls.append(k) or Resp(next(codes)))
     monkeypatch.setattr(S.time, "sleep", lambda s: None)
-    assert S.fetch_osm_streets(str(tmp_path)) == {"elements": []}
+    assert S.fetch_osm_streets(str(tmp_path)) == {"elements": [{"type": "way"}]}
     assert len(calls) == 2
     # the request carries only the IBGE-based query: nothing about customers
     assert "4115200" in calls[0]["data"]["data"]
     monkeypatch.setattr(S.requests, "post", lambda *a, **k: pytest.fail("la segunda vez sale de la caché"))
-    assert S.fetch_osm_streets(str(tmp_path)) == {"elements": []}
+    assert S.fetch_osm_streets(str(tmp_path)) == {"elements": [{"type": "way"}]}
+
+
+class _Resp:
+    def __init__(self, code=200, body=None, text_error=False):
+        self.status_code, self._body, self._text_error = code, body, text_error
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise S.requests.HTTPError(str(self.status_code))
+
+    def json(self):
+        if self._text_error:
+            raise ValueError("html")
+        return self._body
+
+
+GOOD = {"elements": [{"type": "way"}]}
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [_Resp(200, {"elements": [], "remark": "runtime error: Query timed out"}), _Resp(200, {"elements": []}), _Resp(200, text_error=True)],
+)
+def test_incomplete_200_is_retried_and_never_cached(tmp_path, monkeypatch, bad):
+    answers = iter([bad, _Resp(200, GOOD)])
+    monkeypatch.setattr(S.requests, "post", lambda *a, **k: next(answers))
+    monkeypatch.setattr(S.time, "sleep", lambda s: None)
+    assert S.fetch_osm_streets(str(tmp_path)) == GOOD
+    assert len(list(tmp_path.glob("*.json"))) == 1 and json.loads(next(tmp_path.glob("*.json")).read_text()) == GOOD
+
+
+def test_always_incomplete_raises_and_writes_no_cache(tmp_path, monkeypatch):
+    monkeypatch.setattr(S.requests, "post", lambda *a, **k: _Resp(200, {"elements": [], "remark": "x"}))
+    monkeypatch.setattr(S.time, "sleep", lambda s: None)
+    with pytest.raises(S._IncompleteOverpass):
+        S.fetch_osm_streets(str(tmp_path), attempts=2)
+    assert not list(tmp_path.glob("*"))
+
+
+def test_client_error_is_not_retried(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(S.requests, "post", lambda *a, **k: calls.append(1) or _Resp(400))
+    with pytest.raises(S.requests.HTTPError):
+        S.fetch_osm_streets(str(tmp_path))
+    assert len(calls) == 1
+
+
+def test_corrupt_or_empty_cache_is_ignored_and_attempts_zero_still_tries_once(tmp_path, monkeypatch):
+    (tmp_path / "4115200_2099-01-01.json").write_text('{"elements": [', encoding="utf-8")  # truncated
+    (tmp_path / "4115200_2098-01-01.json").write_text('{"elements": []}', encoding="utf-8")  # empty
+    monkeypatch.setattr(S.requests, "post", lambda *a, **k: _Resp(200, GOOD))
+    assert S.fetch_osm_streets(str(tmp_path), attempts=0) == GOOD
 
 
 def test_script_rejects_other_municipality(capsys):
