@@ -217,31 +217,34 @@ DECLARE
     latest_visit  TIMESTAMPTZ;
     total_visits  INTEGER;
 BEGIN
-    -- Default to Londrina (the only city covered by this dataset for now)
-    biz_municipio := 'LONDRINA';
+    -- No default city: the municipality must come from the establishment record.
+    biz_municipio := NULL;
     biz_bairro    := NEW.bairro;
 
-    -- If the visit carries a CNPJ, enrich from the establishment record
     IF NEW.cnpj IS NOT NULL THEN
-        SELECT municipio, bairro
+        -- Receita dumps carry only the municipality CODE (Maringa = 7691), not a name, so that
+        -- code decides; any other city keeps using estabelecimentos.municipio as before.
+        SELECT CASE WHEN codigo_municipio = 7691 THEN 'MARINGA' ELSE municipio END, bairro
           INTO biz_municipio, biz_bairro
           FROM estabelecimentos
          WHERE cnpj_completo = NEW.cnpj
          LIMIT 1;
-        -- Fall back to defaults if the business is not in the table
-        IF biz_municipio IS NULL THEN
-            biz_municipio := 'LONDRINA';
-        END IF;
         IF biz_bairro IS NULL THEN
             biz_bairro := NEW.bairro;
         END IF;
+    END IF;
+
+    -- Unresolvable municipality (street walk-by without CNPJ, or CNPJ not loaded): no coverage row.
+    IF biz_municipio IS NULL THEN
+        RETURN NEW;
     END IF;
 
     -- Total businesses registered on that street (from estabelecimentos)
     SELECT COUNT(*) INTO total_count
       FROM estabelecimentos
      WHERE logradouro = NEW.logradouro
-       AND municipio  = biz_municipio;
+       AND ((biz_municipio = 'MARINGA' AND codigo_municipio = 7691)
+         OR (biz_municipio <> 'MARINGA' AND municipio = biz_municipio));
 
     -- Distinct businesses (CNPJ) visited on that street
     SELECT COUNT(DISTINCT cnpj) INTO covered_count
