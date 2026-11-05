@@ -21,6 +21,8 @@ def test_ddl_has_the_approved_constraints():
     assert "CHECK (geocode_status <> 'ok' OR lat IS NOT NULL)" in ddl
     assert "geocode_source IN ('usuario'" in ddl
     assert "lat BETWEEN -90 AND 90" in ddl and "lon BETWEEN -180 AND 180" in ddl
+    assert "CHECK ((lat IS NULL) = (lon IS NULL))" in ddl
+    assert "IN ('usuario', 'nominatim', 'manual')" in ddl
     assert "UNIQUE (user_id, external_id)" in ddl and "REFERENCES users(id)" in ddl
 
 
