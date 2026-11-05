@@ -38,7 +38,10 @@ USERS_DDL = """CREATE TABLE IF NOT EXISTS users (id UUID PRIMARY KEY DEFAULT gen
 
 @pytest.fixture
 def pg():
-    assert make_url(PG).database.startswith("test"), "TEST_PG_URL debe apuntar a una base cuyo nombre empiece por 'test'"
+    # not an assert: python -O would strip it and the fixture DROPs tables
+    url = make_url(PG)
+    if not (url.database or "").startswith("test") or url.host not in (None, "localhost", "127.0.0.1"):
+        pytest.exit("TEST_PG_URL debe ser local y apuntar a una base cuyo nombre empiece por 'test'", returncode=2)
     engine = create_engine(PG)
     with engine.begin() as c:
         c.execute(text("DROP TABLE IF EXISTS clientes"))
