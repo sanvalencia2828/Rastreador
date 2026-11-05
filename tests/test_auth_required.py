@@ -32,6 +32,7 @@ PROTECTED = [
     ("PATCH", "/api/businesses/123/status", {"status": "visited"}),
     ("GET", "/api/daily-routes", None),
     ("GET", "/api/visits", None),
+    ("GET", "/api/clientes", None),
     ("POST", "/api/routes/generate", {}),
     ("POST", "/api/routes/optimize", {}),
     ("GET", "/api/v1/routes", None),

@@ -9,6 +9,7 @@ from app.routes import (
     auth,
     businesses,
     cities,
+    clientes,
     daily_routes,
     geo,
     planned_routes,
@@ -43,3 +44,4 @@ app.include_router(visits.router)
 app.include_router(planned_routes.router)
 app.include_router(daily_routes.router)
 app.include_router(cities.router)
+app.include_router(clientes.router)
