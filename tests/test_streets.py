@@ -187,3 +187,92 @@ def test_script_rejects_other_municipality(capsys):
     spec.loader.exec_module(mod)
     assert mod.main(["--municipio", "4113700"]) == 2
     assert "Maringá" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------- distritos, casco, calzada doble, cruces opcionales
+def _osm(*ways):
+    return {"elements": [
+        {"type": "way", "id": i, "tags": tags, "geometry": [{"lat": a, "lon": b} for a, b in pts]}
+        for i, (tags, pts) in enumerate(ways)
+    ]}
+
+
+def _idx(*rows):
+    out = {}
+    for tipo, nome, n in rows:
+        out[S.street_key(tipo, nome)] = {"tipo": tipo, "nome": nome, "n_total": n, "n_ativos": n, "n_distrito": 0,
+                                         "bairros": {}, "ceps": set(), "numeros": [], "sem_numero": 0}
+    return out
+
+
+def test_district_commerces_are_counted_apart(tmp_path):
+    rows = [_row(bairro="ZONA 1"), _row(bairro="DISTRITO DE FLORIANO", numero="999"),
+            _row(bairro="JARDIM X IGUATEMI", cep="87000999")]
+    path = tmp_path / "d.ESTABELE"
+    path.write_text("\n".join(rows), encoding="latin-1")
+    from collections import Counter
+    dist = Counter()
+    s = S.build_dump_index(str(path), distritos=dist)["RUA|SANTOS DUMONT"]
+    assert (s["n_ativos"], s["n_distrito"]) == (1, 2)
+    assert s["numeros"] == [100] and s["ceps"] == {"87013000"}  # nada del distrito entra en rango ni CEP
+    assert dist == {"DISTRITO DE FLORIANO": 1, "JARDIM X IGUATEMI": 1}
+
+
+def test_only_ways_near_the_town_center_count_and_far_streets_become_ambigua():
+    near = [(-23.4205, -51.9331), (-23.4205, -51.9301)]
+    far = [(-23.30, -52.10), (-23.30, -52.0995)]  # ~20 km away
+    osm = _osm(({"name": "Rua Sao Joao"}, near), ({"name": "Rua Sao Joao"}, far))
+    ways = S.index_osm_ways(osm)
+    e = ways["RUA|SAO JOAO"]
+    assert (e["n_ways"], e["n_fuera"]) == (1, 1) and e["length_m"] < 400
+    # with a huge radius both count: the spread (>8 km) makes it ambigua and keeps it out of the plan
+    wide = S.index_osm_ways(osm, radio_m=10**6)
+    rep = S.match_streets(_idx(("RUA", "SAO JOAO", 5)), wide)
+    row = rep["calles"][0]
+    assert row["estado"] == "ambigua" and row["en_plan_automatico"] is False and row["spread_m"] > 8000
+
+
+def test_only_ok_streets_enter_the_automatic_plan():
+    osm = _osm(({"name": "Rua Curta"}, [(-23.4205, -51.9331), (-23.4205, -51.9321)]),
+               ({"name": "Rua Comprida"}, [(-23.4205, -51.9331), (-23.4205, -51.9031)]))
+    rep = S.match_streets(_idx(("RUA", "CURTA", 5), ("RUA", "COMPRIDA", 5), ("RUA", "NO EXISTE", 5)), S.index_osm_ways(osm))
+    by = {r["nome"]: (r["estado"], r["en_plan_automatico"]) for r in rep["calles"]}
+    assert by == {"CURTA": ("ok", True), "COMPRIDA": ("calle_larga", False), "NO EXISTE": ("sin_geometria", False)}
+
+
+def test_dual_carriageway_is_detected_as_paired_length():
+    a = [(-23.4205, -51.9331), (-23.4205, -51.9301)]
+    b = [(-23.42055, -51.9301), (-23.42055, -51.9331)]  # opposite direction, ~5 m apart
+    osm = _osm(({"name": "Avenida Brasil", "oneway": "yes"}, a), ({"name": "Avenida Brasil", "oneway": "yes"}, b),
+               ({"name": "Avenida Sola", "oneway": "yes"}, a))
+    ways = S.index_osm_ways(osm)
+    assert ways["AVENIDA|BRASIL"]["pareado_m"] == pytest.approx(ways["AVENIDA|BRASIL"]["length_m"], rel=0.01)
+    assert ways["AVENIDA|SOLA"]["pareado_m"] == 0
+
+
+def test_default_match_is_exact_only_and_optional_methods_need_unique_candidate():
+    osm = _osm(({"name": "Avenida Doutor Gastão Vidigal"}, [(-23.4205, -51.9331), (-23.4205, -51.9321)]),
+               ({"name": "Rua Doutor Joao"}, [(-23.4205, -51.9331), (-23.4205, -51.9321)]),
+               ({"name": "Rua Joao"}, [(-23.4205, -51.9331), (-23.4205, -51.9321)]),
+               ({"name": "Avenida Prudente de Moraes"}, [(-23.4205, -51.9331), (-23.4205, -51.9321)]),
+               ({"name": "Rodovia PR-317", "ref": "PR-317"}, [(-23.4205, -51.9331), (-23.4205, -51.9321)]))
+    ways = S.index_osm_ways(osm)
+    dump = _idx(("AVENIDA", "GASTAO VIDIGAL DOUTOR", 3), ("RUA", "JOAO DOUTOR", 3), ("AVENIDA", "PRUDENTE DE MORAIS", 3),
+                ("RODOVIA", "PR 317 KM 3", 3), ("RUA", "SAO", 2))
+    assert {r["match_type"] for r in S.match_streets(dump, ways)["calles"]} == {None}  # exacto: nada cruza aquí
+    flex = S.flexible_aliases(dump, ways)
+    assert flex["AVENIDA|GASTAO VIDIGAL DOUTOR"] == ("AVENIDA|DOUTOR GASTAO VIDIGAL", "flexible")
+    assert flex["RUA|JOAO DOUTOR"] == ("RUA|DOUTOR JOAO", "flexible")  # el título se conserva: no cae en "RUA JOAO"
+    tol = S.tolerance_aliases(dump, ways)
+    assert tol["AVENIDA|PRUDENTE DE MORAIS"] == ("AVENIDA|PRUDENTE DE MORAES", "tolerancia")
+    assert "RUA|SAO" not in tol  # palabras cortas: solo exactas
+    assert S.ref_aliases(dump, ways)["RODOVIA|PR 317 KM 3"] == ("REF|PR317", "ref")
+    merged = {**flex, **tol, **S.ref_aliases(dump, ways)}
+    kinds = {r["nome"]: r["match_type"] for r in S.match_streets(dump, ways, merged)["calles"]}
+    assert kinds["GASTAO VIDIGAL DOUTOR"] == "flexible" and kinds["PR 317 KM 3"] == "ref"
+
+
+def test_optional_method_with_two_osm_candidates_is_rejected():
+    pts = [(-23.4205, -51.9331), (-23.4205, -51.9321)]
+    ways = S.index_osm_ways(_osm(({"name": "Rua Doutor Joao Silva"}, pts), ({"name": "Rua Joao Silva Doutor"}, pts)))
+    assert S.flexible_aliases(_idx(("RUA", "SILVA DOUTOR JOAO", 2)), ways) == {}
