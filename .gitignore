@@ -85,3 +85,7 @@ artifacts/
 
 # Nested repo that was committed as a broken submodule (no .gitmodules); keep local only
 cnpj_downloader/
+
+# Private customer lists (real data never goes in git; the fixture is the only exception)
+clientes*.csv
+!tests/fixtures/clientes_ejemplo.csv
