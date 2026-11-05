@@ -50,7 +50,7 @@ def load_businesses() -> List[Dict[str, Any]]:
                     if len(businesses) > 0:
                         return businesses
             except Exception as e:
-                print(f"PostgreSQL table '{table_name}' failed: {e}.")
+                print(f"PostgreSQL table '{table_name}' failed ({type(e).__name__}).")
 
     # Fallback to local JSON file
     json_paths = ["londrina_businesses.json", "londrina_businesses_polars.json"]
