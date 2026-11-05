@@ -42,7 +42,7 @@ def merge_catalog_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         groups.setdefault(r["osm_key"], []).append(r)
     out = []
     for osm_key, g in groups.items():
-        main = max(g, key=lambda r: r["n_comercios_activos"])
+        main = max(g, key=lambda r: (r["n_comercios_activos"], -r["id"]))  # id: deterministic tie-break
         nums_min = [r["numero_min"] for r in g if r["numero_min"] is not None]
         nums_max = [r["numero_max"] for r in g if r["numero_max"] is not None]
         estados = {r["estado"] for r in g}
@@ -70,14 +70,14 @@ def street_view(
     reason = no_estimate_reason(merged["estado"], n, merged.get("pareado_pct"))
     est = None if reason or merged.get("length_m") is None else round(
         estimate_minutes(merged["length_m"], n, speed_kmh, min_per_local), 1)
-    n_real, med = max((real or {}).get(k, (0, 0.0)) for k in merged["street_keys"])
+    n_real, med = (real or {}).get(merged["osm_key"], (0, 0.0))  # logs of every spelling are pooled per OSM street
     view = {
         "calle": f"{merged['tipo'] or ''} {merged['nombre']}".strip(),
         "comercios_activos": "<3" if few else n,
         "numero_min": None if few else merged["numero_min"],
         "numero_max": None if few else merged["numero_max"],
         "ceps": merged["ceps"],
-        "distancia_m": int(round(merged["dist_m"] / 10.0)) * 10,
+        "distancia_m": int(round(float(merged["dist_m"]) / 10.0)) * 10,
         "length_m": merged.get("length_m"),
         "estado": merged["estado"],
         "en_plan_automatico": merged["estado"] == "ok" and not few and reason is None,

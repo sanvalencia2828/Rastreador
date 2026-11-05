@@ -36,18 +36,20 @@ _NEARBY_SQL = text("""
     JOIN street_catalog c ON c.municipio = s.municipio AND c.osm_key = s.street_key
     WHERE ST_DWithin(s.geom::geography, p.g::geography, :radio)
     GROUP BY c.id
+    ORDER BY c.id
 """)
 
 _REAL_SQL = text("""
-    SELECT street_key, count(*) AS n, percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) AS med
-    FROM street_time_log
-    WHERE user_id = :user_id AND municipio = 'MARINGA' AND street_key = ANY(:keys)
-    GROUP BY street_key
+    SELECT c.osm_key, count(*) AS n, percentile_cont(0.5) WITHIN GROUP (ORDER BY l.seconds) AS med
+    FROM street_time_log l
+    JOIN street_catalog c ON c.municipio = l.municipio AND c.street_key = l.street_key
+    WHERE l.user_id = :user_id AND l.municipio = 'MARINGA' AND c.osm_key = ANY(:keys)
+    GROUP BY c.osm_key
 """)
 
 
 def real_times(conn, user_id: str, keys: List[str]) -> Dict[str, tuple]:
-    """{street_key: (n_registros, mediana_segundos)} del propio usuario."""
+    """{osm_key: (n_registros, mediana_segundos)} del propio usuario, juntando todas las grafías de la calle."""
     if not keys:
         return {}
     rows = conn.execute(_REAL_SQL, {"user_id": user_id, "keys": keys}).fetchall()
@@ -91,9 +93,10 @@ def streets_nearby(
                     found = [dict(r._mapping) for r in conn.execute(
                         _NEARBY_SQL, {"lat": float(c.lat), "lon": float(c.lon), "radio": radio_m, "deg": radio_m / 90000.0})]
                 per_client.append((c, status, T.merge_catalog_rows(found) if found else []))
-            keys = sorted({k for _, _, ms in per_client for m in ms for k in m["street_keys"]})
+            keys = sorted({m["osm_key"] for _, _, ms in per_client for m in ms})
             real = real_times(conn, user_id, keys)
-    except Exception:  # driver messages embed parameters (coordinates): fixed text only
+    except Exception as e:  # driver messages embed parameters (coordinates): class name only
+        print(f"streets-nearby failed ({type(e).__name__})")
         raise HTTPException(status_code=500, detail="Error al consultar calles") from None
     for c, status, merged in per_client:
         item: Dict[str, Any] = {"id": str(c.id), "external_id": c.external_id}
