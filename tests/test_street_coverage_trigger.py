@@ -99,3 +99,12 @@ def test_unresolvable_municipality_creates_no_row_and_not_londrina(pg, cnpj):
     assert _coverage(pg) == []
     with pg.connect() as c:
         assert c.execute(text("SELECT count(*) FROM visits")).scalar() == 1  # the visit itself is kept
+
+
+def test_same_street_name_in_two_cities_keeps_separate_counters(pg):
+    _visit(pg, "M1")
+    _visit(pg, "L1")
+    with pg.connect() as c:
+        rows = c.execute(text("SELECT municipio, total_businesses, covered_businesses, visit_count "
+                              "FROM street_coverage ORDER BY municipio")).fetchall()
+    assert rows == [("LONDRINA", 1, 1, 1), ("MARINGA", 2, 1, 1)]

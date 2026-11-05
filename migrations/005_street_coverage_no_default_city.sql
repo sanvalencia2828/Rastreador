@@ -43,22 +43,31 @@ BEGIN
        AND ((biz_municipio = 'MARINGA' AND codigo_municipio = 7691)
          OR (biz_municipio <> 'MARINGA' AND municipio = biz_municipio));
 
-    -- Distinct businesses (CNPJ) visited on that street
-    SELECT COUNT(DISTINCT cnpj) INTO covered_count
-      FROM visits
-     WHERE logradouro = NEW.logradouro
-       AND cnpj IS NOT NULL;
+    -- Visits are attributed to this city only through their CNPJ (visits has no municipality column);
+    -- walk-by visits without CNPJ cannot be placed in a city, so they are not counted here.
+    SELECT COUNT(DISTINCT v.cnpj) INTO covered_count
+      FROM visits v
+     WHERE v.logradouro = NEW.logradouro
+       AND EXISTS (SELECT 1 FROM estabelecimentos e WHERE e.cnpj_completo = v.cnpj
+                      AND ((biz_municipio = 'MARINGA' AND e.codigo_municipio = 7691)
+                        OR (biz_municipio <> 'MARINGA' AND e.municipio = biz_municipio)));
 
-    -- Centroid of all visit points on that street
-    SELECT ST_Centroid(ST_Collect(ST_SetSRID(ST_MakePoint(lon, lat), 4326)))
+    -- Centroid of the visit points on that street (same city)
+    SELECT ST_Centroid(ST_Collect(ST_SetSRID(ST_MakePoint(v.lon, v.lat), 4326)))
       INTO centroid
-      FROM visits
-     WHERE logradouro = NEW.logradouro;
+      FROM visits v
+     WHERE v.logradouro = NEW.logradouro
+       AND EXISTS (SELECT 1 FROM estabelecimentos e WHERE e.cnpj_completo = v.cnpj
+                      AND ((biz_municipio = 'MARINGA' AND e.codigo_municipio = 7691)
+                        OR (biz_municipio <> 'MARINGA' AND e.municipio = biz_municipio)));
 
-    -- Latest visit timestamp + total visit event count
-    SELECT MAX(visited_at), COUNT(*) INTO latest_visit, total_visits
-      FROM visits
-     WHERE logradouro = NEW.logradouro;
+    -- Latest visit timestamp + total visit event count (same city)
+    SELECT MAX(v.visited_at), COUNT(*) INTO latest_visit, total_visits
+      FROM visits v
+     WHERE v.logradouro = NEW.logradouro
+       AND EXISTS (SELECT 1 FROM estabelecimentos e WHERE e.cnpj_completo = v.cnpj
+                      AND ((biz_municipio = 'MARINGA' AND e.codigo_municipio = 7691)
+                        OR (biz_municipio <> 'MARINGA' AND e.municipio = biz_municipio)));
 
     -- Upsert the coverage row (recompute everything for consistency)
     INSERT INTO street_coverage
