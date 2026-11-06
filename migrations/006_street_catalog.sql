@@ -47,6 +47,18 @@ CREATE TABLE IF NOT EXISTS street_time_log (
     seconds INTEGER NOT NULL CHECK (seconds > 0),
     n_visitas INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    CONSTRAINT street_time_log_route_street UNIQUE (route_id, street_key)
+    CONSTRAINT street_time_log_user_route_street UNIQUE (user_id, route_id, street_key)
 );
+-- The first draft was UNIQUE (route_id, street_key): two users sharing a route id would collide.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'street_time_log'::regclass
+                 AND conname = 'street_time_log_route_street') THEN
+        ALTER TABLE street_time_log DROP CONSTRAINT street_time_log_route_street;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'street_time_log'::regclass
+                     AND conname = 'street_time_log_user_route_street') THEN
+        ALTER TABLE street_time_log ADD CONSTRAINT street_time_log_user_route_street UNIQUE (user_id, route_id, street_key);
+    END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS idx_street_time_log_user ON street_time_log(user_id, municipio, street_key);

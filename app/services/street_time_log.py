@@ -46,22 +46,51 @@ def derive_street_durations(
     return [(k, s, n) for k, (s, n) in totals.items()], stats
 
 
+def _resolve_to_catalog(conn, rows: List[Tuple[str, int, int]]) -> List[Tuple[str, int, int]]:
+    """Mantiene solo calles del catálogo. Una visita sin tipo ("GASTAO VIDIGAL DOUTOR": así guarda el volcado
+    el logradouro) se asigna por nombre solo si UNA sola calle del catálogo se llama así; si no, se descarta."""
+    if not rows:
+        return []
+    keys = [k for k, _, _ in rows]
+    exact = {r[0] for r in conn.execute(
+        text("SELECT street_key FROM street_catalog WHERE municipio = :m AND street_key = ANY(:k)"),
+        {"m": MUNICIPIO, "k": keys})}
+    names = sorted({k[1:] for k in keys if k.startswith("|") and k not in exact})
+    by_name = {}
+    if names:
+        for nombre, found in conn.execute(
+            text("SELECT nombre, array_agg(street_key) FROM street_catalog WHERE municipio = :m AND nombre = ANY(:n)"
+                 " GROUP BY nombre"),
+            {"m": MUNICIPIO, "n": names},
+        ):
+            if len(found) == 1:
+                by_name["|" + nombre] = found[0]
+    merged: "OrderedDict[str, List[int]]" = OrderedDict()
+    for key, seconds, n in rows:
+        target = key if key in exact else by_name.get(key)
+        if target:
+            acc = merged.setdefault(target, [0, 0])
+            acc[0] += seconds
+            acc[1] += n
+    return [(k, s, n) for k, (s, n) in merged.items()]
+
+
 def refresh_street_times(conn, user_id: str, route_id: str) -> Dict[str, int]:
-    """Recalcula (idempotente) las filas de street_time_log de una ruta del usuario. Solo calles del catálogo."""
+    """Recalcula (idempotente) las filas de street_time_log de una ruta del usuario. Solo calles del catálogo.
+
+    Una fila por (usuario, ruta, calle): `seconds` suma los tramos de esa calle en la ruta, así que el recuento de
+    registros (n_real) cuenta RUTAS, no pasadas.
+    """
     visits = conn.execute(
-        text("SELECT visited_at, logradouro FROM visits WHERE user_id = :u AND route_id = :r ORDER BY visited_at"),
+        text("SELECT visited_at, logradouro FROM visits WHERE user_id = :u AND route_id = :r AND visited_at IS NOT NULL"
+             " ORDER BY visited_at"),
         {"u": user_id, "r": route_id},
     ).fetchall()
     rows, stats = derive_street_durations([(v[0], v[1]) for v in visits])
-    known = {
-        r[0]
-        for r in conn.execute(
-            text("SELECT street_key FROM street_catalog WHERE municipio = :m AND street_key = ANY(:k)"),
-            {"m": MUNICIPIO, "k": [k for k, _, _ in rows]},
-        )
-    } if rows else set()
-    kept = [r for r in rows if r[0] in known]
-    stats["fuera_del_catalogo"] = len(rows) - len(kept)
+    n_before = len(rows)
+    rows = _resolve_to_catalog(conn, rows)
+    kept = rows
+    stats["fuera_del_catalogo"] = n_before - len(kept)
     conn.execute(text("DELETE FROM street_time_log WHERE user_id = :u AND route_id = :r"), {"u": user_id, "r": route_id})
     if kept:
         conn.execute(

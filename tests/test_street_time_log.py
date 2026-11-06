@@ -157,5 +157,40 @@ def test_street_time_only_shows_the_callers_own_logs(pg):
     assert len(TestClient(app).get("/api/street-time", headers=_token(UB)).json()["calles"]) == 2
 
 
+def test_visit_without_street_type_resolves_by_name_only_when_unique(pg):
+    with pg.begin() as c:  # the dump stores logradouro WITHOUT the type: "GASTAO VIDIGAL DOUTOR"
+        c.execute(text("INSERT INTO street_catalog (municipio, street_key, osm_key, tipo, nombre, n_comercios_activos,"
+                       " estado) VALUES ('MARINGA', 'AVENIDA|GASTAO VIDIGAL', 'AVENIDA|GASTAO VIDIGAL', 'AVENIDA',"
+                       " 'GASTAO VIDIGAL', 9, 'ok'), ('MARINGA', 'RUA|SAO JOAO', 'RUA|SAO JOAO', 'RUA', 'SAO JOAO', 9, 'ok'),"
+                       " ('MARINGA', 'AVENIDA|SAO JOAO', 'AVENIDA|SAO JOAO', 'AVENIDA', 'SAO JOAO', 9, 'ok')"))
+    _visits(pg, UA, R1, [("Gastão Vidigal", 0), ("São João", 20), ("Rua Curta", 40), ("Rua Curta", 50)])
+    with pg.begin() as c:
+        stats = refresh_street_times(c, UA, R1)
+    # 'Gastão Vidigal' resolves (one street with that name); 'São João' is ambiguous (Rua and Avenida): dropped
+    assert [(r[2], r[3]) for r in _logs(pg)] == [("AVENIDA|GASTAO VIDIGAL", 1200)]
+    assert stats["fuera_del_catalogo"] == 1  # only the ambiguous São João; the last street never had a duration
+
+
+def test_two_users_sharing_a_route_id_do_not_collide(pg):
+    for user in (UA, UB):
+        _visits(pg, user, R1, [("Rua Doutor João", 0), ("Rua Curta", 20), ("Rua Curta", 25)])
+        with pg.begin() as c:
+            refresh_street_times(c, user, R1)
+    assert sorted(r[0] for r in _logs(pg)) == sorted([UA, UB])
+
+
+def test_failed_refresh_does_not_break_the_surrounding_transaction(pg):
+    from app.services.street_time_log import refresh_street_times_safely
+    with pg.begin() as c:
+        c.execute(text("INSERT INTO visits (user_id, route_id, logradouro, visited_at) VALUES (:u, :r, 'Rua Curta', :t)"),
+                  {"u": UA, "r": R1, "t": at(0)})
+        c.execute(text("DROP TABLE street_time_log"))  # makes the refresh fail
+        refresh_street_times_safely(c, UA, R1)  # swallowed under a savepoint
+        c.execute(text("INSERT INTO visits (user_id, route_id, logradouro, visited_at) VALUES (:u, :r, 'Rua B', :t)"),
+                  {"u": UA, "r": R1, "t": at(5)})
+    with pg.connect() as c:
+        assert c.execute(text("SELECT count(*) FROM visits")).scalar() == 2  # the caller's work was committed
+
+
 def test_estimate_constants_are_the_documented_defaults():
     assert (T.WALK_SPEED_KMH, T.MIN_PER_LOCAL, T.N_MIN_REAL) == (4.0, 2.0, 3)
