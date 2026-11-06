@@ -132,6 +132,14 @@ def test_visits_ignore_user_id_query_param(monkeypatch):
     assert [params["user_id"] for _, params in engine.calls] == [USER_B]
 
 
+def test_street_coverage_only_queries_the_callers_rows(monkeypatch):
+    engine = FakeEngine()
+    monkeypatch.setattr(visits, "db_engine", engine)
+    assert client.get(f"/api/street-coverage?user_id={USER_A}", headers=bearer(USER_B)).status_code == 200
+    assert [params["user_id"] for _, params in engine.calls] == [USER_B]
+    assert "user_id = :user_id" in engine.calls[0][0]
+
+
 @pytest.mark.parametrize(
     "module,path",
     [

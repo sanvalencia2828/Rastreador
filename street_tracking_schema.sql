@@ -201,6 +201,22 @@ CREATE TABLE IF NOT EXISTS street_coverage (
     UNIQUE(logradouro, municipio)
 );
 
+-- street_coverage becomes per-user: rows are keyed by (user_id, logradouro, municipio).
+-- Legacy rows keep user_id NULL: nobody can be credited with them, so no user sees them (they are not deleted).
+ALTER TABLE street_coverage ADD COLUMN IF NOT EXISTS user_id UUID;
+DO $$
+DECLARE c TEXT;
+BEGIN
+    FOR c IN SELECT con.conname FROM pg_constraint con
+              WHERE con.conrelid = 'street_coverage'::regclass AND con.contype = 'u'
+                AND (SELECT array_agg(att.attname::text ORDER BY att.attname) FROM pg_attribute att
+                      WHERE att.attrelid = con.conrelid AND att.attnum = ANY(con.conkey)) = ARRAY['logradouro', 'municipio']
+    LOOP
+        EXECUTE format('ALTER TABLE street_coverage DROP CONSTRAINT %I', c);
+    END LOOP;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS street_coverage_user_street ON street_coverage (user_id, logradouro, municipio);
+
 CREATE INDEX IF NOT EXISTS idx_street_coverage_municipio ON street_coverage(municipio);
 CREATE INDEX IF NOT EXISTS idx_street_coverage_last_visited ON street_coverage(last_visited);
 CREATE INDEX IF NOT EXISTS idx_street_coverage_geom ON street_coverage USING GIST(geom);
@@ -263,6 +279,7 @@ BEGIN
     SELECT COUNT(DISTINCT v.cnpj) INTO covered_count
       FROM visits v
      WHERE v.logradouro = NEW.logradouro
+       AND v.user_id = NEW.user_id
        AND EXISTS (SELECT 1 FROM estabelecimentos e WHERE e.cnpj_completo = v.cnpj
                       AND ((biz_municipio = 'MARINGA' AND e.codigo_municipio = 7691)
                         OR (biz_municipio <> 'MARINGA' AND e.municipio = biz_municipio)));
@@ -272,6 +289,7 @@ BEGIN
       INTO centroid
       FROM visits v
      WHERE v.logradouro = NEW.logradouro
+       AND v.user_id = NEW.user_id
        AND EXISTS (SELECT 1 FROM estabelecimentos e WHERE e.cnpj_completo = v.cnpj
                       AND ((biz_municipio = 'MARINGA' AND e.codigo_municipio = 7691)
                         OR (biz_municipio <> 'MARINGA' AND e.municipio = biz_municipio)));
@@ -280,18 +298,19 @@ BEGIN
     SELECT MAX(v.visited_at), COUNT(*) INTO latest_visit, total_visits
       FROM visits v
      WHERE v.logradouro = NEW.logradouro
+       AND v.user_id = NEW.user_id
        AND EXISTS (SELECT 1 FROM estabelecimentos e WHERE e.cnpj_completo = v.cnpj
                       AND ((biz_municipio = 'MARINGA' AND e.codigo_municipio = 7691)
                         OR (biz_municipio <> 'MARINGA' AND e.municipio = biz_municipio)));
 
     -- Upsert the coverage row (recompute everything for consistency)
     INSERT INTO street_coverage
-        (logradouro, bairro, municipio, state, last_visited,
+        (user_id, logradouro, bairro, municipio, state, last_visited,
          visit_count, total_businesses, covered_businesses, geom, updated_at)
     VALUES
-        (NEW.logradouro, biz_bairro, biz_municipio, 'PR', latest_visit,
+        (NEW.user_id, NEW.logradouro, biz_bairro, biz_municipio, 'PR', latest_visit,
          total_visits, total_count, covered_count, centroid, NOW())
-    ON CONFLICT (logradouro, municipio) DO UPDATE SET
+    ON CONFLICT (user_id, logradouro, municipio) DO UPDATE SET
         bairro            = EXCLUDED.bairro,
         last_visited      = EXCLUDED.last_visited,
         visit_count       = EXCLUDED.visit_count,

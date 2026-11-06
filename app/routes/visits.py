@@ -398,8 +398,9 @@ def get_street_coverage(
     user_id: str = Depends(get_current_user_id),
 ):
     """
-    Returns aggregated street coverage rows ordered by least-recently-visited
-    first (so the worker can pick the next street to walk).
+    Returns the CALLER's aggregated street coverage rows ordered by least-recently-visited
+    first (so the worker can pick the next street to walk). Rows from before the per-user
+    migration (user_id NULL) belong to nobody and are not returned.
 
     - `municipio` filters by municipality (default: all).
     - `only_unvisited=true` returns only streets with `last_visited IS NULL`.
@@ -413,9 +414,9 @@ def get_street_coverage(
                visit_count, total_businesses, covered_businesses,
                ST_AsGeoJSON(geom) as geom_geojson, updated_at
         FROM street_coverage
-        WHERE 1=1
+        WHERE user_id = :user_id
     """
-    params: Dict[str, Any] = {}
+    params: Dict[str, Any] = {"user_id": user_id}
     if municipio:
         query_str += " AND municipio = :municipio"
         params["municipio"] = municipio
