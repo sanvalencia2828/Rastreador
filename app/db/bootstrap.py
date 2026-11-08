@@ -128,6 +128,43 @@ def _ensure_clientes_schema() -> None:
         print(f"Error initializing clientes table ({type(e).__name__})")
 
 
+def _ensure_route_stops_cliente_id() -> None:
+    """Paradas que son clientes del usuario (business_id sigue siendo para el volcado CNPJ); idempotente."""
+    if not db_engine:
+        return
+    try:
+        with db_engine.begin() as conn:
+            conn.execute(text("""
+                DO $$ BEGIN
+                    IF to_regclass('route_stops') IS NOT NULL THEN
+                        ALTER TABLE route_stops
+                            ADD COLUMN IF NOT EXISTS cliente_id UUID REFERENCES clientes(id) ON DELETE SET NULL;
+                        CREATE INDEX IF NOT EXISTS idx_route_stops_cliente ON route_stops(cliente_id);
+                    END IF;
+                END $$;
+            """))
+    except Exception as e:
+        print(f"Error adding route_stops.cliente_id ({type(e).__name__})")
+
+
+def _ensure_maringa_city() -> None:
+    """Maringa (PR) en cities. Centro: -23.4253, -51.9386 (23°25'31\"S 51°56'19\"O, ficha del municipio en Wikipedia)."""
+    if not db_engine:
+        return
+    try:
+        with db_engine.begin() as conn:
+            conn.execute(text("""
+                DO $$ BEGIN
+                    IF to_regclass('cities') IS NOT NULL THEN
+                        INSERT INTO cities (name, state, lat, lon) VALUES ('Maringá', 'PR', -23.4253, -51.9386)
+                        ON CONFLICT (name, state) DO NOTHING;
+                    END IF;
+                END $$;
+            """))
+    except Exception as e:
+        print(f"Error seeding Maringa city ({type(e).__name__})")
+
+
 def _ensure_streets_schema() -> None:
     """Street catalog + time log (needs PostGIS); idempotent."""
     if not db_engine:
@@ -294,4 +331,6 @@ def ensure_schema() -> None:
             print(f"Error initializing visit source column ({type(e).__name__})")
 
     _ensure_clientes_schema()  # needs users, created above
+    _ensure_route_stops_cliente_id()  # needs clientes and route_stops
+    _ensure_maringa_city()
     _ensure_streets_schema()  # needs PostGIS
