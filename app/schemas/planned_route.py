@@ -12,6 +12,7 @@ class RouteStopCreate(BaseModel):
     lon: float
     cep: Optional[str] = None
     display_name: Optional[str] = None
+    cliente_id: Optional[str] = None  # cliente del usuario (clientes.id); se valida que sea suyo
 
 
 class RouteStopResponse(BaseModel):
@@ -132,8 +133,16 @@ class GeneratedStop(BaseModel):
     logradouro: str
     lat: float
     lon: float
-    days_since_visit: int
-    priority: int
+    days_since_visit: Optional[int] = None  # None: clientes aun no tienen visitas enlazadas
+    priority: Optional[int] = None
+    cliente_id: Optional[str] = None
+
+
+class ClienteListed(BaseModel):
+    """Cliente del propio usuario que no entra en la ruta (fuera de Maringa o sin ubicar)."""
+    nombre: str
+    direccion: str
+    municipio: str
 
 
 class RouteGenerateResponse(BaseModel):
@@ -141,6 +150,11 @@ class RouteGenerateResponse(BaseModel):
     total_candidates: int
     selected: int
     stops: list[GeneratedStop]
+    distance_km: Optional[float] = None
+    distance_kind: Optional[str] = None  # "linea_recta": Haversine, no por calle
+    maps_links: list[str] = []
+    fuera_de_maringa: list[ClienteListed] = []
+    pendientes: list[ClienteListed] = []
 
 
 class RoutePoint(BaseModel):

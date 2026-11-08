@@ -10,6 +10,7 @@ from sqlalchemy import text
 from app.core.database import db_engine
 from app.core.security import get_current_user_id
 from app.schemas.planned_route import (
+    ClienteListed,
     GeneratedStop,
     PlannedRouteCreate,
     RouteCompleteRequest,
@@ -19,6 +20,7 @@ from app.schemas.planned_route import (
     RouteOptimizeRequest,
     RouteStatusUpdate,
 )
+from app.services.day_route import is_maringa, maps_links, order_day, path_km
 from app.services.geo import cnae_to_category, fix_encoding
 from app.services.route_planning import (
     _get_route_detail,
@@ -585,12 +587,59 @@ def delete_route(route_id: str, user_id: str = Depends(get_current_user_id)):
 # ==============================================================================
 # INTELLIGENT ROUTE GENERATION
 # ==============================================================================
+MARINGA_MAX_STOPS = 10  # tope de paradas por dia en Maringa (clientes)
+
+
+def _generate_from_clientes(user_id: str, city_name: str, max_lojas: int) -> RouteGenerateResponse:
+    """Ruta del dia con los clientes del propio usuario (geocode_status='ok'); sin datos en logs."""
+    try:
+        with db_engine.connect() as conn:
+            rows = conn.execute(
+                text("""
+                    SELECT id, nombre_cliente, nombre_negocio, direccion, bairro, municipio, lat, lon, geocode_status
+                    FROM clientes WHERE user_id = :u ORDER BY external_id
+                """),
+                {"u": user_id},
+            ).fetchall()
+    except Exception as e:  # el mensaje del driver puede traer parametros
+        raise HTTPException(status_code=500, detail=f"Failed to fetch clientes ({type(e).__name__})")
+
+    def listed(r):
+        return ClienteListed(
+            nombre=r.nombre_negocio or r.nombre_cliente or "", direccion=r.direccion or "", municipio=r.municipio or ""
+        )
+
+    located = [r for r in rows if r.geocode_status == "ok" and r.lat is not None and r.lon is not None]
+    inside = [r for r in located if is_maringa(r.municipio)]
+    outside = [listed(r) for r in located if not is_maringa(r.municipio)]
+    pending = [listed(r) for r in rows if r not in located]
+
+    cap = max(1, min(max_lojas, MARINGA_MAX_STOPS))
+    chosen = inside[:cap]
+    pts = [(float(r.lat), float(r.lon)) for r in chosen]
+    order = order_day(pts) if pts else []
+    pts = [pts[i] for i in order]
+    stops = [
+        GeneratedStop(
+            cnpj="", nome_fantasia=r.nombre_negocio or r.nombre_cliente or "", cnae_label="Cliente",
+            bairro=r.bairro or "", logradouro=r.direccion or "", lat=float(r.lat), lon=float(r.lon),
+            cliente_id=str(r.id),
+        )
+        for r in (chosen[i] for i in order)
+    ]
+    print(f"Generated clientes route for '{city_name}': {len(inside)} candidates, {len(stops)} selected")
+    return RouteGenerateResponse(
+        city=city_name, total_candidates=len(inside), selected=len(stops), stops=stops,
+        distance_km=round(path_km(pts), 2), distance_kind="linea_recta", maps_links=maps_links(pts),
+        fuera_de_maringa=outside, pendientes=pending,
+    )
+
 @router.post(
     "/api/routes/generate",
     response_model=RouteGenerateResponse,
     dependencies=[Depends(get_current_user_id)],
 )
-def generate_route(body: RouteGenerateRequest):
+def generate_route(body: RouteGenerateRequest, user_id: str = Depends(get_current_user_id)):
     """
     Generates an intelligent visiting route for a given city.
 
@@ -616,6 +665,9 @@ def generate_route(body: RouteGenerateRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to resolve city: {e}")
+
+    if is_maringa(city_name):
+        return _generate_from_clientes(user_id, city_name, body.max_lojas)
 
     # 2. Candidate businesses with days since last visit (fetch 2x for diversity)
     max_limit = body.max_lojas * 2

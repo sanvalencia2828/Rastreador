@@ -165,11 +165,24 @@ def create_city_route(city_id: int, route: RouteCreate, user_id: str = Depends(g
             if not created_row:
                 raise HTTPException(status_code=500, detail="Route creation failed")
             route_id = created_row[0]
+            # Un cliente_id solo vale si es del usuario; si no, se rechaza toda la ruta (rollback al cerrar).
+            cliente_ids = sorted({st.cliente_id.lower() for st in route.stops if st.cliente_id})
+            if cliente_ids:
+                try:
+                    owned = conn.execute(
+                        text("SELECT count(*) FROM clientes WHERE user_id = :u AND id = ANY(CAST(:ids AS uuid[]))"),
+                        {"u": user_id, "ids": cliente_ids},
+                    ).scalar()
+                except Exception:
+                    raise HTTPException(status_code=400, detail="Invalid cliente_id")
+                if owned != len(cliente_ids):
+                    raise HTTPException(status_code=403, detail="cliente_id does not belong to the user")
             for index, stop in enumerate(route.stops, start=1):
                 conn.execute(
                     text("""
-                        INSERT INTO route_stops (route_id, stop_order, address, lat, lon, cep, display_name)
-                        VALUES (:route_id, :stop_order, :address, :lat, :lon, :cep, :display_name)
+                        INSERT INTO route_stops (route_id, stop_order, address, lat, lon, cep, display_name, cliente_id)
+                        VALUES (:route_id, :stop_order, :address, :lat, :lon, :cep, :display_name,
+                                CAST(:cliente_id AS uuid))
                     """),
                     {
                         "route_id": route_id,
@@ -179,6 +192,7 @@ def create_city_route(city_id: int, route: RouteCreate, user_id: str = Depends(g
                         "lon": stop.lon,
                         "cep": stop.cep,
                         "display_name": stop.display_name,
+                        "cliente_id": stop.cliente_id or None,
                     },
                 )
             conn.commit()
