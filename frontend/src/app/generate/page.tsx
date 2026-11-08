@@ -51,6 +51,16 @@ interface GenerateResult {
   maps_links?: string[];
   fuera_de_maringa?: ListedCliente[];
   pendientes?: ListedCliente[];
+  day?: number | null;
+  day_label?: string | null;
+  day_counts?: number[];
+  sin_asignar?: number;
+}
+
+const DAYS = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"];
+
+function isMaringa(name?: string | null): boolean {
+  return (name ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toLowerCase() === "maringa";
 }
 
 type MessageType = { text: string; type: "success" | "error" };
@@ -66,6 +76,7 @@ export default function GeneratePage() {
   const [result, setResult] = useState<GenerateResult | null>(null);
   const [message, setMessage] = useState<MessageType | null>(null);
   const [fetchError, setFetchError] = useState<string | undefined>();
+  const [day, setDay] = useState(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -129,7 +140,7 @@ export default function GeneratePage() {
     setMessage(null);
   }, []);
 
-  const handleGenerate = useCallback(async () => {
+  const handleGenerate = useCallback(async (dayOverride?: number) => {
     if (!selectedCity) return;
     setIsGenerating(true);
     setResult(null);
@@ -143,6 +154,7 @@ export default function GeneratePage() {
           city_id: Number(selectedCity.id),
           max_lojas: maxLojas,
           min_days_without_visit: minDays,
+          ...(isMaringa(selectedCity.name) ? { day: dayOverride ?? day } : {}),
         }),
       });
       const data = await res.json();
@@ -158,7 +170,7 @@ export default function GeneratePage() {
     } finally {
       setIsGenerating(false);
     }
-  }, [selectedCity, maxLojas, minDays]);
+  }, [selectedCity, maxLojas, minDays, day]);
 
   const handleOptimize = useCallback(async () => {
     if (!result || result.stops.length < 2) return;
@@ -169,7 +181,10 @@ export default function GeneratePage() {
       const res = await apiFetch("/api/routes/optimize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ stops: result.stops }),
+        body: JSON.stringify({
+          start: { lat: selectedCity?.lat, lng: selectedCity?.lon },
+          points: result.stops.map((s, i) => ({ id: i, lat: s.lat, lng: s.lon })),
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -177,14 +192,14 @@ export default function GeneratePage() {
         setIsOptimizing(false);
         return;
       }
-      setResult(prev => prev ? { ...prev, stops: data.stops } : prev);
-      setTotalDistance(data.total_distance_m);
+      setResult(prev => prev ? { ...prev, stops: (data.ordered_ids as number[]).map(i => prev.stops[i]) } : prev);
+      setTotalDistance(data.total_distance_km * 1000);
     } catch {
       setMessage({ text: "Não foi possível conectar ao servidor.", type: "error" });
     } finally {
       setIsOptimizing(false);
     }
-  }, [result]);
+  }, [result, selectedCity]);
 
   const handleSave = useCallback(async () => {
     if (!result || !selectedCity) return;
@@ -192,7 +207,7 @@ export default function GeneratePage() {
     const now = new Date();
     const dd = String(now.getDate()).padStart(2, "0");
     const mm = String(now.getMonth() + 1).padStart(2, "0");
-    const routeName = `Rota ${dd}/${mm}`;
+    const routeName = result.day_label ? `Rota ${DAYS[result.day ?? 0]} ${dd}/${mm}` : `Rota ${dd}/${mm}`;
 
     try {
       const res = await apiFetch(`/api/cities/${selectedCity.id}/routes`, {
@@ -336,8 +351,33 @@ export default function GeneratePage() {
               />
             </div>
 
+            {isMaringa(selectedCity.name) && (
+              <div className="mt-6" role="group" aria-label="Día de la semana">
+                <p className="text-sm mb-2" style={{ color: "var(--fg-secondary)" }}>Día (clientes agrupados por cercanía)</p>
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                  {DAYS.map((label, i) => (
+                    <button
+                      key={label}
+                      type="button"
+                      aria-pressed={day === i}
+                      onClick={() => { setDay(i); handleGenerate(i); }}
+                      disabled={isGenerating}
+                      style={{
+                        padding: "8px 14px", fontSize: "13px", borderRadius: "var(--radius)", cursor: "pointer",
+                        border: "1px solid var(--border)",
+                        background: day === i ? "var(--accent)" : "transparent",
+                        color: day === i ? "#0f0f0f" : "var(--fg)",
+                      }}
+                    >
+                      {label}{result?.day_counts ? ` (${result.day_counts[i] ?? 0})` : ""}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <button
-              onClick={handleGenerate}
+              onClick={() => handleGenerate()}
               disabled={isGenerating}
               className="inline-flex items-center justify-center gap-2 transition-opacity"
               style={{
@@ -420,6 +460,7 @@ export default function GeneratePage() {
             </div>
 
             <div className="flex gap-3" style={{ marginTop: "16px" }}>
+              {!isMaringa(result.city) && (
               <button
                 onClick={handleOptimize}
                 disabled={isOptimizing || result.stops.length < 2}
@@ -444,6 +485,7 @@ export default function GeneratePage() {
                   </>
                 ) : "Otimizar Rota"}
               </button>
+              )}
               <button
                 onClick={handleSave}
                 className="inline-flex items-center justify-center gap-2 transition-opacity"
