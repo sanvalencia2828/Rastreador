@@ -14,10 +14,8 @@ import math
 import os
 import subprocess
 import sys
-import unicodedata
 from datetime import date
 from pathlib import Path
-from urllib.parse import quote
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -25,11 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from seed_clientes import SeedError, parse_rows  # noqa: E402
 
-from app.optimizer import optimize_open_path  # noqa: E402
+from app.services.day_route import MAX_WAYPOINTS, is_maringa, maps_links, order_day, path_km  # noqa: E402,F401
 from app.services.geo import haversine_km  # noqa: E402
-
-MAX_WAYPOINTS = 9  # Google Maps: 9 waypoints por enlace (+ origen y destino)
-
 
 def data_dir() -> Path:
     return Path(os.environ.get("RASTREADOR_DATA_DIR") or REPO / ".data").resolve()
@@ -45,11 +40,6 @@ def check_csv(path: Path) -> None:
     ).returncode == 0
     if tracked:
         raise SeedError("el CSV esta rastreado por git; se niega a correr")
-
-
-def is_maringa(municipio: str) -> bool:
-    plain = unicodedata.normalize("NFKD", municipio).encode("ascii", "ignore").decode()
-    return plain.strip().casefold() == "maringa"
 
 
 def split_rows(rows):
@@ -84,39 +74,6 @@ def cluster_days(rows, dias, max_paradas):
     return [[rows[i] for i in g] for g in groups if g], [rows[i] for i in overflow]
 
 
-def order_day(stops, depot):
-    """Orden de visita con el optimizador existente. Nodos ficticios de costo 0 dan inicio/fin libres."""
-    pts = [(r["lat"], r["lon"]) for r in stops]
-    n = len(pts)
-    if depot:
-        pts = pts + [depot]
-    m = [[haversine_km(*a, *b) for b in pts] for a in pts]
-    start = n if depot else None
-    # El optimizador necesita ancla de entrada y de salida: ficticias (costo 0) donde no hay depot.
-    size = len(m)
-    for row in m:
-        row.extend([0.0, 0.0])
-    m.extend([[0.0] * (size + 2), [0.0] * (size + 2)])
-    entry = start if start is not None else size
-    exit_ = size + 1
-    order = optimize_open_path(m, [entry, exit_], list(range(n)))
-    return [i for i in order if i < n]
-
-
-def maps_links(points):
-    """Enlaces de Google Maps: origen, hasta 9 waypoints y destino; se parte si hay mas."""
-    links, i = [], 0
-    while True:
-        chunk = points[i:i + MAX_WAYPOINTS + 2]
-        way = "|".join(f"{a},{b}" for a, b in chunk[1:-1])
-        url = (f"https://www.google.com/maps/dir/?api=1&origin={chunk[0][0]},{chunk[0][1]}"
-               f"&destination={chunk[-1][0]},{chunk[-1][1]}")
-        links.append(url + (f"&waypoints={quote(way, safe=',')}" if way else ""))
-        i += MAX_WAYPOINTS + 1
-        if i >= len(points) - 1:
-            return links
-
-
 def label(r):
     return r["nombre_negocio"] or r["nombre_cliente"] or r["external_id"]
 
@@ -125,10 +82,10 @@ def build_markdown(days, depot, overflow, outside, pending):
     out = ["# Rutas de la semana", "",
            "Distancias aproximadas en **linea recta** (Haversine), no por calle.", ""]
     for n, stops in enumerate(days, 1):
-        order = order_day(stops, depot)
+        order = order_day([(r["lat"], r["lon"]) for r in stops], depot)
         ordered = [stops[i] for i in order]
         pts = ([depot] if depot else []) + [(r["lat"], r["lon"]) for r in ordered]
-        km = sum(haversine_km(*pts[j], *pts[j + 1]) for j in range(len(pts) - 1))
+        km = path_km(pts)
         out += [f"## Dia {n} ({len(ordered)} paradas, ~{km:.1f} km en linea recta)", ""]
         out += [f"{j}. {label(r)} - {r['direccion']}, {r['bairro']}" for j, r in enumerate(ordered, 1)]
         out += [""]
