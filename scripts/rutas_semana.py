@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from seed_clientes import SeedError, parse_rows  # noqa: E402
 
 from app.services.day_route import MAX_WAYPOINTS, is_maringa, maps_links, order_day, path_km  # noqa: E402,F401
-from app.services.geo import haversine_km  # noqa: E402
+from app.services.day_route import cluster_days as _cluster_days  # noqa: E402
 
 def data_dir() -> Path:
     return Path(os.environ.get("RASTREADOR_DATA_DIR") or REPO / ".data").resolve()
@@ -51,27 +51,8 @@ def split_rows(rows):
 
 
 def cluster_days(rows, dias, max_paradas):
-    """KMeans (semilla fija) y tope de paradas por dia. Devuelve (dias, sin_asignar)."""
-    from sklearn.cluster import KMeans
-
-    if not rows:
-        return [], []
-    k = min(dias, len(rows))
-    pts = [(r["lat"], r["lon"]) for r in rows]
-    km = KMeans(n_clusters=k, random_state=0, n_init=10).fit(pts)
-    groups = [[i for i, lab in enumerate(km.labels_) if lab == c] for c in range(k)]
-    dist = lambda i, c: haversine_km(*pts[i], *km.cluster_centers_[c])  # noqa: E731
-    overflow = []
-    for c, g in enumerate(groups):
-        while len(g) > max_paradas:
-            far = max(g, key=lambda i: dist(i, c))
-            g.remove(far)
-            room = [o for o in range(k) if len(groups[o]) < max_paradas]
-            if room:
-                groups[min(room, key=lambda o: dist(far, o))].append(far)
-            else:
-                overflow.append(far)
-    return [[rows[i] for i in g] for g in groups if g], [rows[i] for i in overflow]
+    groups, overflow = _cluster_days([(r["lat"], r["lon"]) for r in rows], dias, max_paradas)
+    return [[rows[i] for i in g] for g in groups], [rows[i] for i in overflow]
 
 
 def label(r):

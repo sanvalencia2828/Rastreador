@@ -49,3 +49,34 @@ def maps_links(points):
         if i >= len(points) - 1:
             break
     return links
+
+
+DIAS_SEMANA = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"]
+
+
+def cluster_days(points, dias, max_paradas):
+    """Agrupa [(lat, lon)] por cercania en `dias` grupos (KMeans, semilla fija) con tope por dia.
+
+    Devuelve (grupos de indices, indices sin asignar). Los grupos salen ordenados de oeste a este,
+    asi el dia N es siempre el mismo para los mismos datos.
+    """
+    from sklearn.cluster import KMeans
+
+    if not points:
+        return [], []
+    k = min(dias, len(points))
+    km = KMeans(n_clusters=k, random_state=0, n_init=10).fit(points)
+    groups = [[i for i, lab in enumerate(km.labels_) if lab == c] for c in range(k)]
+    dist = lambda i, c: haversine_km(*points[i], *km.cluster_centers_[c])  # noqa: E731
+    overflow = []
+    for c, g in enumerate(groups):
+        while len(g) > max_paradas:
+            far = max(g, key=lambda i: dist(i, c))
+            g.remove(far)
+            room = [o for o in range(k) if len(groups[o]) < max_paradas]
+            if room:
+                groups[min(room, key=lambda o: dist(far, o))].append(far)
+            else:
+                overflow.append(far)
+    center = lambda g: (sum(points[i][1] for i in g) / len(g), sum(points[i][0] for i in g) / len(g))  # noqa: E731
+    return sorted((g for g in groups if g), key=center), overflow

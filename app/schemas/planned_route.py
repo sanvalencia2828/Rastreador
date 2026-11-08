@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import List, Dict, Any, Literal, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class RouteStopCreate(BaseModel):
@@ -123,6 +123,7 @@ class RouteGenerateRequest(BaseModel):
     city_id: int
     max_lojas: int = 80
     min_days_without_visit: int = 30
+    day: Optional[int] = Field(None, ge=0, le=4)  # solo Maringa: 0=lunes .. 4=viernes
 
 
 class GeneratedStop(BaseModel):
@@ -155,6 +156,10 @@ class RouteGenerateResponse(BaseModel):
     maps_links: list[str] = []
     fuera_de_maringa: list[ClienteListed] = []
     pendientes: list[ClienteListed] = []
+    day: Optional[int] = None
+    day_label: Optional[str] = None
+    day_counts: list[int] = []  # paradas por dia (lunes..viernes)
+    sin_asignar: int = 0  # no caben en ningun dia con el tope
 
 
 class RoutePoint(BaseModel):

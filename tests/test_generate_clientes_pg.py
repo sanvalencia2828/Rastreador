@@ -87,9 +87,9 @@ def test_maringa_city_migration_is_idempotent(pg):
         assert c.execute(text("SELECT count(*) FROM cities WHERE name = 'Maringá' AND state = 'PR'")).scalar() == 1
 
 
-def test_generate_uses_only_own_clientes_caps_at_10_and_lists_the_rest(pg):
+def test_generate_uses_only_own_clientes_and_lists_the_rest(pg):
     a, b = _user(pg, "a"), _user(pg, "b")
-    for i in range(12):  # 12 en Maringa, en linea: el tope es 10
+    for i in range(12):  # 12 en Maringa, en linea
         _cliente(pg, a, i, lat=-23.42 - i / 1000)
     _cliente(pg, a, 100, municipio="Mandaguari", lat=-23.54, lon=-51.70, name="Fuera-A")
     _cliente(pg, a, 101, municipio="Apucarana", lat=-23.55, lon=-51.46, name="Fuera-B")
@@ -98,12 +98,13 @@ def test_generate_uses_only_own_clientes_caps_at_10_and_lists_the_rest(pg):
     r = TestClient(app).post("/api/routes/generate", headers=_h(a), json={"city_id": _maringa_id(pg), "max_lojas": 80})
     assert r.status_code == 200, r.text
     d = r.json()
-    assert d["selected"] == 10 and d["total_candidates"] == 12 and len(d["stops"]) == 10
+    assert d["total_candidates"] == 12 and sum(d["day_counts"]) == 12  # 12 clientes repartidos en 5 dias
+    assert d["selected"] == len(d["stops"]) == d["day_counts"][0] and 0 < d["selected"] <= 10
     assert all(s["cliente_id"] and s["cnpj"] == "" for s in d["stops"])
     assert sorted(x["nombre"] for x in d["fuera_de_maringa"]) == ["Fuera-A", "Fuera-B"]
     assert [x["nombre"] for x in d["pendientes"]] == ["Pend-A"]
     assert d["distance_kind"] == "linea_recta" and d["distance_km"] > 0
-    assert len(d["maps_links"]) == 1 and all("google.com/maps/dir" in u for u in d["maps_links"])  # 10 puntos caben en un enlace
+    assert len(d["maps_links"]) == 1 and all("google.com/maps/dir" in u for u in d["maps_links"])  # pocos puntos caben en un enlace
     assert "SECRETO-DE-B" not in r.text
 
 
@@ -132,3 +133,25 @@ def test_saved_route_keeps_cliente_id_and_rejects_foreign_ones(pg):
     assert save(mine).status_code == 200
     with pg.begin() as c:
         assert str(c.execute(text("SELECT cliente_id FROM route_stops")).scalar()) == mine
+
+
+def test_day_selector_splits_clientes_into_five_groups_without_overlap(pg):
+    a = _user(pg, "a")
+    n = 0
+    for cx in range(5):  # 5 barrios separados, 5 clientes cada uno
+        for k in range(5):
+            _cliente(pg, a, n, lat=-23.30 - cx * 0.04 - k / 5000, lon=-51.95 - cx * 0.04)
+            n += 1
+    client, cid = TestClient(app), _maringa_id(pg)
+    seen, labels = [], []
+    for day in range(5):
+        r = client.post("/api/routes/generate", headers=_h(a), json={"city_id": cid, "day": day})
+        assert r.status_code == 200, r.text
+        d = r.json()
+        assert d["day"] == day and len(d["stops"]) <= 10 and d["day_counts"][day] == len(d["stops"])
+        seen += [s["cliente_id"] for s in d["stops"]]
+        labels.append(d["day_label"])
+    assert len(seen) == 25 and len(set(seen)) == 25  # cada cliente cae en exactamente un dia
+    assert labels == ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"]
+    assert d["sin_asignar"] == 0
+    assert client.post("/api/routes/generate", headers=_h(a), json={"city_id": cid, "day": 5}).status_code == 422

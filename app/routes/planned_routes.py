@@ -20,7 +20,7 @@ from app.schemas.planned_route import (
     RouteOptimizeRequest,
     RouteStatusUpdate,
 )
-from app.services.day_route import is_maringa, maps_links, order_day, path_km
+from app.services.day_route import DIAS_SEMANA, cluster_days, is_maringa, maps_links, order_day, path_km
 from app.services.geo import cnae_to_category, fix_encoding
 from app.services.route_planning import (
     _get_route_detail,
@@ -590,8 +590,8 @@ def delete_route(route_id: str, user_id: str = Depends(get_current_user_id)):
 MARINGA_MAX_STOPS = 10  # tope de paradas por dia en Maringa (clientes)
 
 
-def _generate_from_clientes(user_id: str, city_name: str, max_lojas: int) -> RouteGenerateResponse:
-    """Ruta del dia con los clientes del propio usuario (geocode_status='ok'); sin datos en logs."""
+def _generate_from_clientes(user_id: str, city_name: str, max_lojas: int, day: int) -> RouteGenerateResponse:
+    """Ruta de un dia (lunes..viernes, agrupado por cercania) con los clientes del propio usuario; sin datos en logs."""
     try:
         with db_engine.connect() as conn:
             rows = conn.execute(
@@ -615,8 +615,11 @@ def _generate_from_clientes(user_id: str, city_name: str, max_lojas: int) -> Rou
     pending = [listed(r) for r in rows if r not in located]
 
     cap = max(1, min(max_lojas, MARINGA_MAX_STOPS))
-    chosen = inside[:cap]
-    pts = [(float(r.lat), float(r.lon)) for r in chosen]
+    all_pts = [(float(r.lat), float(r.lon)) for r in inside]
+    groups, overflow = cluster_days(all_pts, len(DIAS_SEMANA), cap)
+    day_idx = groups[day] if day < len(groups) else []
+    chosen = [inside[i] for i in day_idx]
+    pts = [all_pts[i] for i in day_idx]
     order = order_day(pts) if pts else []
     pts = [pts[i] for i in order]
     stops = [
@@ -627,11 +630,12 @@ def _generate_from_clientes(user_id: str, city_name: str, max_lojas: int) -> Rou
         )
         for r in (chosen[i] for i in order)
     ]
-    print(f"Generated clientes route for '{city_name}': {len(inside)} candidates, {len(stops)} selected")
+    print(f"Generated clientes route for '{city_name}' day {day}: {len(inside)} candidates, {len(stops)} selected")
     return RouteGenerateResponse(
         city=city_name, total_candidates=len(inside), selected=len(stops), stops=stops,
         distance_km=round(path_km(pts), 2), distance_kind="linea_recta", maps_links=maps_links(pts),
-        fuera_de_maringa=outside, pendientes=pending,
+        fuera_de_maringa=outside, pendientes=pending, day=day, day_label=DIAS_SEMANA[day],
+        day_counts=[len(g) for g in groups] + [0] * (len(DIAS_SEMANA) - len(groups)), sin_asignar=len(overflow),
     )
 
 @router.post(
@@ -667,7 +671,7 @@ def generate_route(body: RouteGenerateRequest, user_id: str = Depends(get_curren
         raise HTTPException(status_code=500, detail=f"Failed to resolve city: {e}")
 
     if is_maringa(city_name):
-        return _generate_from_clientes(user_id, city_name, body.max_lojas)
+        return _generate_from_clientes(user_id, city_name, body.max_lojas, body.day or 0)
 
     # 2. Candidate businesses with days since last visit (fetch 2x for diversity)
     max_limit = body.max_lojas * 2
