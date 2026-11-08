@@ -60,3 +60,34 @@ def test_no_route_or_schema_mentions_a_contact_column():
         if CONTACT.search(line)
     ]
     assert offenders == []
+
+
+# Fixtures sinteticos del script clean_test_data.py (nombres y telefonos inventados): unica excepcion.
+SYNTHETIC_JSON = {"test_data.json", "test_data_cleaned.json"}
+
+
+def _keys(obj):
+    if isinstance(obj, dict):
+        for k, v in obj.items():
+            yield k
+            yield from _keys(v)
+    elif isinstance(obj, list):
+        for v in obj:
+            yield from _keys(v)
+
+
+def test_tracked_json_data_files_have_no_contact_keys():
+    """Ningun JSON rastreado por git (salvo los sinteticos) trae claves de telefono/correo/complemento."""
+    import subprocess
+
+    root = Path(__file__).resolve().parents[1]
+    out = subprocess.run(["git", "ls-files", "*.json"], cwd=root, capture_output=True, text=True)
+    if out.returncode != 0:
+        pytest.skip("no es un checkout de git")
+    offenders = []
+    for name in out.stdout.split("\n"):
+        if not name or name in SYNTHETIC_JSON:
+            continue
+        data = json.loads((root / name).read_text(encoding="utf-8"))
+        offenders += [f"{name}:{k}" for k in set(_keys(data)) if CONTACT.search(k)]
+    assert not offenders, offenders
