@@ -30,8 +30,15 @@ interface GeneratedStop {
   logradouro: string;
   lat: number;
   lon: number;
-  days_since_visit: number;
-  priority: string;
+  days_since_visit: number | null;
+  priority: string | number | null;
+  cliente_id?: string | null;
+}
+
+interface ListedCliente {
+  nombre: string;
+  direccion: string;
+  municipio: string;
 }
 
 interface GenerateResult {
@@ -39,6 +46,11 @@ interface GenerateResult {
   total_candidates: number;
   selected: number;
   stops: GeneratedStop[];
+  distance_km?: number | null;
+  distance_kind?: string | null;
+  maps_links?: string[];
+  fuera_de_maringa?: ListedCliente[];
+  pendientes?: ListedCliente[];
 }
 
 type MessageType = { text: string; type: "success" | "error" };
@@ -196,6 +208,7 @@ export default function GeneratePage() {
             lon: s.lon,
             display_name: `${s.logradouro}, ${s.bairro}`,
             cnpj: s.cnpj,
+            cliente_id: s.cliente_id ?? null,
           })),
         }),
       });
@@ -365,6 +378,18 @@ export default function GeneratePage() {
                 Distância total: <span style={{ color: "var(--accent)", fontWeight: 600 }}>{(totalDistance / 1000).toFixed(1)} km</span>
               </p>
             )}
+            {result.distance_km != null && (
+              <p className="text-xs mb-2" style={{ color: "var(--muted)" }}>
+                Distância aproximada: <span style={{ color: "var(--accent)", fontWeight: 600 }}>~{result.distance_km.toFixed(1)} km em linha reta</span> (não por rua)
+              </p>
+            )}
+            {result.maps_links?.map((url, i) => (
+              <p key={url} className="text-xs mb-2">
+                <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent)" }}>
+                  Abrir no Google Maps{result.maps_links!.length > 1 ? ` (parte ${i + 1})` : ""}
+                </a>
+              </p>
+            ))}
             {totalDistance === null && <div className="mb-4" />}
 
             <div style={{ maxHeight: "400px", overflowY: "auto", overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
@@ -377,7 +402,7 @@ export default function GeneratePage() {
 
                 {result.stops.map((stop, i) => (
                   <div
-                    key={stop.cnpj}
+                    key={stop.cliente_id ?? stop.cnpj}
                     style={{
                       display: "grid",
                       gridTemplateColumns: "40px 1fr 1fr 1fr 80px",
@@ -388,7 +413,7 @@ export default function GeneratePage() {
                     <div style={{ padding: "8px", fontSize: "12px", color: "var(--fg)" }}>{stop.nome_fantasia}</div>
                     <div style={{ padding: "8px", fontSize: "12px", color: "var(--fg-secondary)" }}>{stop.bairro}</div>
                     <div style={{ padding: "8px", fontSize: "12px", color: "var(--fg-secondary)" }}>{stop.logradouro}</div>
-                    <div style={{ padding: "8px", fontSize: "12px", color: daysColor(stop.days_since_visit), textAlign: "right", fontWeight: 600 }}>{stop.days_since_visit}</div>
+                    <div style={{ padding: "8px", fontSize: "12px", color: daysColor(stop.days_since_visit ?? 0), textAlign: "right", fontWeight: 600 }}>{stop.days_since_visit ?? "—"}</div>
                   </div>
                 ))}
               </div>
@@ -437,6 +462,20 @@ export default function GeneratePage() {
                 Salvar como Rota
               </button>
             </div>
+
+            {([["Fora de Maringá (viagem à parte)", result.fuera_de_maringa], ["Pendentes de localizar", result.pendientes]] as const).map(
+              ([title, items]) =>
+                items && items.length > 0 ? (
+                  <div key={title} className="mt-6">
+                    <h3 className="text-sm mb-2" style={{ color: "var(--fg-secondary)", fontWeight: 600 }}>{title} ({items.length})</h3>
+                    <ul className="text-xs" style={{ color: "var(--muted)" }}>
+                      {items.map((c, i) => (
+                        <li key={i}>{c.nombre} — {c.direccion}{c.municipio ? `, ${c.municipio}` : ""}</li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null
+            )}
           </section>
         </>
       )}
