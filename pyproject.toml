@@ -53,3 +53,6 @@ exclude = [
     "cnpj_downloader"
 ]
 reportMissingTypeStubs = "none"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
