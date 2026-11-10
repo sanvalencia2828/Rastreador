@@ -196,8 +196,20 @@ def _ensure_business_visit_metrics_schema() -> None:
         print(f"Error initializing business visit metrics columns ({type(e).__name__})")
 
 
+def _ensure_postgis() -> None:
+    """Enable PostGIS (Render allows CREATE EXTENSION for the database owner); warn loudly if it fails."""
+    if not db_engine:
+        return
+    try:
+        with db_engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
+    except Exception as e:
+        print(f"WARNING: could not enable PostGIS ({type(e).__name__}); routes/streets tables will fail until it is enabled")
+
+
 def ensure_schema() -> None:
     """Create or patch the tables the API expects; safe to run repeatedly."""
+    _ensure_postgis()
     _ensure_business_visit_metrics_schema()
 
     # Initialize User Table

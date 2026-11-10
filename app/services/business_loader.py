@@ -6,6 +6,8 @@ from typing import List, Dict, Any
 
 from sqlalchemy import create_engine, text
 
+from app.core.database import normalize_db_url
+
 
 # ==============================================================================
 # DATABASE OR LOCAL JSON LOADER
@@ -20,7 +22,7 @@ def load_businesses() -> List[Dict[str, Any]]:
     2. Table `londrina_businesses` (legacy)
     3. JSON files (fallback)
     """
-    conn_str = os.environ.get("DATABASE_URL")
+    conn_str = normalize_db_url(os.environ.get("DATABASE_URL"))
     db_host = "Database URL"
 
     if not conn_str:

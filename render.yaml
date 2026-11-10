@@ -4,6 +4,7 @@ services:
     env: python
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
@@ -11,21 +12,17 @@ services:
         value: production
       - key: JWT_SECRET_KEY
         generateValue: true
-      - key: DB_USER
-        value: postgres
-      - key: DB_PASSWORD
-        generateValue: true
       - key: DATABASE_URL
         fromDatabase:
           name: rastreador-db
           property: connectionString
-      - key: DB_HOST
-        value: rastreador-db
-      - key: DB_NAME
-        value: londrina_comercio
+      - key: DEMO_USER
+        sync: false
+      - key: DEMO_PASSWORD
+        sync: false
 
 databases:
   - name: rastreador-db
     databaseName: londrina_comercio
-    user: postgres
+    user: rastreador
     plan: free

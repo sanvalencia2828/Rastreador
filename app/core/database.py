@@ -10,7 +10,14 @@ from app.core import config  # noqa: F401  (loads .env before env reads below)
 # ------------------------------------------------------------------------------
 # DB SETUP & GLOBAL ENGINE
 # ------------------------------------------------------------------------------
-conn_str = os.environ.get("DATABASE_URL")
+def normalize_db_url(url):
+    """SQLAlchemy 2 rejects the legacy postgres:// scheme that some hosts still hand out."""
+    if url and url.startswith("postgres://"):
+        return "postgresql://" + url[len("postgres://"):]
+    return url
+
+
+conn_str = normalize_db_url(os.environ.get("DATABASE_URL"))
 if not conn_str:
     db_user = os.environ.get("DB_USER")
     db_password = os.environ.get("DB_PASSWORD")
