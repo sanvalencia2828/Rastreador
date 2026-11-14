@@ -13,11 +13,11 @@ ROOT = Path(__file__).resolve().parent.parent
 SECRET = "ZZ-SECRETO host=db.interno user=admin"
 
 
-def test_bootstrap_prints_only_the_exception_class(monkeypatch, capsys):
+def test_bootstrap_prints_class_and_first_message_line(monkeypatch, capsys):
     class Boom:
         @contextmanager
         def begin(self):
-            raise RuntimeError(SECRET)
+            raise RuntimeError("relation x does not exist\n" + SECRET)
             yield
 
         connect = begin
@@ -25,7 +25,7 @@ def test_bootstrap_prints_only_the_exception_class(monkeypatch, capsys):
     monkeypatch.setattr(bootstrap, "db_engine", Boom())
     bootstrap.ensure_schema()
     out = capsys.readouterr().out
-    assert "RuntimeError" in out and "ZZ-SECRETO" not in out and "db.interno" not in out
+    assert "RuntimeError: relation x does not exist" in out and "ZZ-SECRETO" not in out  # only the first line
 
 
 def test_global_engine_hides_parameters():

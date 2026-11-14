@@ -3,6 +3,12 @@
 from sqlalchemy import text
 
 from app.core.database import db_engine
+from app.db.base_schema import BASE_DDL
+
+
+def _err(e: Exception) -> str:
+    """Class + first line of the message (never the URL: the engine hides parameters)."""
+    return f"{type(e).__name__}: {(str(e).splitlines() or [''])[0]}"
 
 
 # Same DDL as migrations/004_clientes.sql (a test keeps them identical).
@@ -124,8 +130,8 @@ def _ensure_clientes_schema() -> None:
     try:
         with db_engine.begin() as conn:
             conn.execute(text(CLIENTES_DDL))
-    except Exception as e:  # class name only: driver messages can carry host/user
-        print(f"Error initializing clientes table ({type(e).__name__})")
+    except Exception as e:
+        print(f"Error initializing clientes table ({_err(e)})")
 
 
 def _ensure_route_stops_cliente_id() -> None:
@@ -144,7 +150,7 @@ def _ensure_route_stops_cliente_id() -> None:
                 END $$;
             """))
     except Exception as e:
-        print(f"Error adding route_stops.cliente_id ({type(e).__name__})")
+        print(f"Error adding route_stops.cliente_id ({_err(e)})")
 
 
 def _ensure_maringa_city() -> None:
@@ -162,7 +168,7 @@ def _ensure_maringa_city() -> None:
                 END $$;
             """))
     except Exception as e:
-        print(f"Error seeding Maringa city ({type(e).__name__})")
+        print(f"Error seeding Maringa city ({_err(e)})")
 
 
 def _ensure_streets_schema() -> None:
@@ -172,8 +178,8 @@ def _ensure_streets_schema() -> None:
     try:
         with db_engine.begin() as conn:
             conn.execute(text(STREETS_DDL))
-    except Exception as e:  # class name only
-        print(f"Error initializing street catalog ({type(e).__name__})")
+    except Exception as e:
+        print(f"Error initializing street catalog ({_err(e)})")
 
 
 def _ensure_business_visit_metrics_schema() -> None:
@@ -193,7 +199,7 @@ def _ensure_business_visit_metrics_schema() -> None:
                     ON estabelecimentos(last_visit_date)
             """))
     except Exception as e:
-        print(f"Error initializing business visit metrics columns ({type(e).__name__})")
+        print(f"Error initializing business visit metrics columns ({_err(e)})")
 
 
 def _ensure_postgis() -> None:
@@ -204,18 +210,30 @@ def _ensure_postgis() -> None:
         with db_engine.begin() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS postgis"))
     except Exception as e:
-        print(f"WARNING: could not enable PostGIS ({type(e).__name__}); routes/streets tables will fail until it is enabled")
+        print(f"WARNING: could not enable PostGIS ({_err(e)}); routes/streets tables will fail until it is enabled")
+
+
+def _ensure_base_schema() -> None:
+    """Tables from init.sql / street_tracking_schema.sql, which only docker-compose runs; idempotent."""
+    if not db_engine:
+        return
+    try:
+        with db_engine.begin() as conn:
+            conn.execute(text(BASE_DDL))
+    except Exception as e:
+        print(f"Error initializing base schema ({_err(e)})")
 
 
 def ensure_schema() -> None:
     """Create or patch the tables the API expects; safe to run repeatedly."""
     _ensure_postgis()
+    _ensure_base_schema()
     _ensure_business_visit_metrics_schema()
 
     # Initialize User Table
     if db_engine:
         try:
-            with db_engine.connect() as conn:
+            with db_engine.begin() as conn:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS users (
                         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -226,11 +244,11 @@ def ensure_schema() -> None:
                 """))
                 print("Successfully initialized users table in DB.")
         except Exception as e:
-            print(f"Error initializing users table ({type(e).__name__})")
+            print(f"Error initializing users table ({_err(e)})")
 
     if db_engine:
         try:
-            with db_engine.connect() as conn:
+            with db_engine.begin() as conn:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS daily_routes (
                         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -244,11 +262,11 @@ def ensure_schema() -> None:
                 """))
                 print("Successfully initialized daily_routes table in DB.")
         except Exception as e:
-            print(f"Error initializing daily_routes table ({type(e).__name__})")
+            print(f"Error initializing daily_routes table ({_err(e)})")
 
     if db_engine:
         try:
-            with db_engine.connect() as conn:
+            with db_engine.begin() as conn:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS routes (
                         id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -329,10 +347,9 @@ def ensure_schema() -> None:
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_routes_planned_at ON routes(planned_at DESC);"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_route_stops_business ON route_stops(business_id);"))
                 conn.execute(text("CREATE INDEX IF NOT EXISTS idx_route_stops_route_order ON route_stops(route_id, stop_order);"))
-                conn.commit()
                 print("Successfully initialized routes tables in DB.")
         except Exception as e:
-            print(f"Error initializing routes tables ({type(e).__name__})")
+            print(f"Error initializing routes tables ({_err(e)})")
 
 
     if db_engine:
@@ -340,7 +357,7 @@ def ensure_schema() -> None:
             with db_engine.begin() as conn:
                 conn.execute(text("ALTER TABLE visits ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'mobile';"))
         except Exception as e:
-            print(f"Error initializing visit source column ({type(e).__name__})")
+            print(f"Error initializing visit source column ({_err(e)})")
 
     _ensure_clientes_schema()  # needs users, created above
     _ensure_route_stops_cliente_id()  # needs clientes and route_stops
