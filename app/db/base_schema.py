@@ -90,8 +90,8 @@ INSERT INTO cities (name, state, lat, lon) VALUES
 ('Londrina', 'PR', -23.3103, -51.1628),
 ('Cambé', 'PR', -23.2778, -51.2675),
 ('Apucarana', 'PR', -23.5489, -51.4594),
-('Pirapó', 'PR', -23.4167, -51.6500),
-('Cambira', 'PR', -23.3500, -51.5667),
+('Marialva', 'PR', -23.4855, -51.7927),
+('Mandaguari', 'PR', -23.5478, -51.6708),
 ('Jandaia do Sul', 'PR', -23.2003, -51.5822),
 ('Maringá', 'PR', -23.4205, -51.9330)
 ON CONFLICT (name, state) DO NOTHING;

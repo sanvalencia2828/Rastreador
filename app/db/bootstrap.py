@@ -171,6 +171,43 @@ def _ensure_maringa_city() -> None:
         print(f"Error seeding Maringa city ({_err(e)})")
 
 
+def _ensure_city_list() -> None:
+    """Swap Pirapó/Cambira for Marialva/Mandaguari in existing DBs (the seed is ON CONFLICT DO NOTHING); idempotent.
+
+    An old city is deleted only if no foreign key row points at it; otherwise it stays and a warning is logged.
+    """
+    if not db_engine:
+        return
+    try:
+        with db_engine.begin() as conn:
+            if conn.execute(text("SELECT to_regclass('cities')")).scalar() is None:
+                return
+            conn.execute(text("""
+                INSERT INTO cities (name, state, lat, lon) VALUES
+                    ('Marialva', 'PR', -23.4855, -51.7927),
+                    ('Mandaguari', 'PR', -23.5478, -51.6708)
+                ON CONFLICT (name, state) DO NOTHING
+            """))
+            fks = conn.execute(text("""
+                SELECT con.conrelid::regclass::text, att.attname
+                  FROM pg_constraint con
+                  JOIN pg_attribute att ON att.attrelid = con.conrelid AND att.attnum = con.conkey[1]
+                 WHERE con.contype = 'f' AND con.confrelid = 'cities'::regclass
+            """)).all()
+            for name in ("Pirapó", "Cambira"):
+                cid = conn.execute(text("SELECT id FROM cities WHERE name = :n AND state = 'PR'"), {"n": name}).scalar()
+                if cid is None:
+                    continue
+                used_by = [t for t, col in fks
+                           if conn.execute(text(f'SELECT EXISTS (SELECT 1 FROM {t} WHERE "{col}" = :i)'), {"i": cid}).scalar()]
+                if used_by:
+                    print(f"WARNING: city {name} (id {cid}) kept: referenced by {', '.join(used_by)}")
+                else:
+                    conn.execute(text("DELETE FROM cities WHERE id = :i"), {"i": cid})
+    except Exception as e:
+        print(f"Error updating city list ({_err(e)})")
+
+
 def _ensure_streets_schema() -> None:
     """Street catalog + time log (needs PostGIS); idempotent."""
     if not db_engine:
@@ -362,4 +399,5 @@ def ensure_schema() -> None:
     _ensure_clientes_schema()  # needs users, created above
     _ensure_route_stops_cliente_id()  # needs clientes and route_stops
     _ensure_maringa_city()
+    _ensure_city_list()
     _ensure_streets_schema()  # needs PostGIS
