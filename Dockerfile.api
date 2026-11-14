@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code and data files
 COPY api.py .
+COPY app ./app
 COPY download_cnpj_pr.py .
 COPY cnpj_etl_polars.py .
 COPY enriquecer_lojas.py .

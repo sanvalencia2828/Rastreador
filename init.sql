@@ -42,6 +42,9 @@ CREATE TABLE IF NOT EXISTS estabelecimentos (
     latitude DECIMAL(10, 8),
     longitude DECIMAL(11, 8),
     geom geometry(Point, 4326),
+    last_visit_date DATE,
+    visits_count INTEGER NOT NULL DEFAULT 0,
+    avg_visit_interval_days DOUBLE PRECISION,
     geocoded BOOLEAN DEFAULT FALSE,
     business_type VARCHAR(20),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -56,6 +59,7 @@ CREATE INDEX IF NOT EXISTS idx_estabelecimentos_cnae_fiscal ON estabelecimentos(
 CREATE INDEX IF NOT EXISTS idx_estabelecimentos_situacao_cadastral ON estabelecimentos(situacao_cadastral);
 CREATE INDEX IF NOT EXISTS idx_estabelecimentos_data_inicio_atividade ON estabelecimentos(data_inicio_atividade);
 CREATE INDEX IF NOT EXISTS idx_estabelecimentos_geolocation ON estabelecimentos(latitude, longitude);
+CREATE INDEX IF NOT EXISTS idx_estabelecimentos_last_visit_date ON estabelecimentos(last_visit_date);
 
 -- Create a table for storing enriched data about commercial clusters
 CREATE TABLE IF NOT EXISTS clusters (
@@ -109,14 +113,15 @@ CREATE TABLE IF NOT EXISTS cities (
 
 CREATE INDEX IF NOT EXISTS idx_cities_state ON cities(state);
 
--- Seed the 6 covered cities (idempotent)
+-- Seed the 7 covered cities (idempotent)
 INSERT INTO cities (name, state, lat, lon) VALUES
 ('Londrina', 'PR', -23.3103, -51.1628),
 ('Cambé', 'PR', -23.2778, -51.2675),
 ('Apucarana', 'PR', -23.5489, -51.4594),
 ('Pirapó', 'PR', -23.4167, -51.6500),
 ('Cambira', 'PR', -23.3500, -51.5667),
-('Jandaia do Sul', 'PR', -23.2003, -51.5822)
+('Jandaia do Sul', 'PR', -23.2003, -51.5822),
+('Maringá', 'PR', -23.4205, -51.9330)
 ON CONFLICT (name, state) DO NOTHING;
 
 -- Create a function to update the updated_at timestamp

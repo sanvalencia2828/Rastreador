@@ -53,6 +53,7 @@ REGIONAL_IBGE_CODES = [
     4101408,  # Apucarana
     4103800,  # Cambira
     4112108,  # Jandaia do Sul
+    4115200,  # Maringá
 ]
 
 # CNAE codes for Tech + Repairs ONLY

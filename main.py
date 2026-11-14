@@ -5,6 +5,7 @@
 # CLI commands, which search for main.py by default. It forwards all requests to
 # the core api.py implementation.
 
+from api import app  # noqa: F401
 
 if __name__ == "__main__":
     import uvicorn

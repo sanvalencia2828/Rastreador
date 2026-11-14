@@ -40,6 +40,9 @@ services:
   #     DB_NAME: ${DB_NAME:-londrina_comercio}
   #     API_PORT: 8001
   #     API_HOST: 0.0.0.0
+  #     # Explicit on purpose: empty = Haversine. This compose has no osrm service; set it only to a
+  #     # self-hosted OSRM (e.g. http://osrm:5000 once you add one), never to a public server.
+  #     OSRM_URL: ${OSRM_URL:-}
   #   ports:
   #     - "${API_PORT:-8001}:8001"
   #   depends_on:
@@ -78,6 +81,46 @@ services:
   #     api:
   #       condition: service_healthy
   #   restart: unless-stopped
+
+  # ==============================================================================
+  # Pipeline de ML: riesgo de cierre de comercios (ml/)
+  # ==============================================================================
+  # Corrida manual:   docker compose run --rm ml
+  # Un solo paso:     docker compose run --rm ml run --steps validate
+  # Estado:           docker compose run --rm ml status
+  # Tests:            docker compose run --rm --entrypoint python ml -m pytest -q tests/test_ml_pipeline.py
+  ml:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    image: rastreador-ml:latest
+    profiles: ["ml"]
+    environment:
+      TZ: America/Sao_Paulo
+    volumes:
+      - ${RASTREADOR_DATA_DIR:-./.data}:/app/.data:ro          # volcados crudos de la Receita (solo lectura)
+      - ${RASTREADOR_ARTIFACTS_DIR:-./artifacts}:/app/artifacts     # una carpeta por corrida + latest.json
+
+  # Ejecución programada (ver ml/crontab): docker compose --profile ml-scheduler up -d
+  ml-scheduler:
+    image: rastreador-ml:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    profiles: ["ml-scheduler"]
+    # ruta absoluta: como PID 1 supercronic se re-ejecuta con argv[0] y no busca en PATH
+    entrypoint: ["/usr/local/bin/supercronic", "-passthrough-logs", "/app/ml/crontab"]
+    command: []
+    environment:
+      TZ: America/Sao_Paulo
+    volumes:
+      - ${RASTREADOR_DATA_DIR:-./.data}:/app/.data:ro
+      - ${RASTREADOR_ARTIFACTS_DIR:-./artifacts}:/app/artifacts
+    restart: unless-stopped
 
 volumes:
   postgres_data:

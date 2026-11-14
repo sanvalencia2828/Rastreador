@@ -1,0 +1,5 @@
+id,cliente,nombre_negocio,direccion,bairro,municipio,cep,lat,lon,estado,nota
+1,Cliente de ejemplo 1,Catedral Basilica Menor,Praca Napoleao Moreira da Silva,Zona 1,Maringa,87000-000,-23.4205,-51.9331,coords_del_enlace,lugar publico; coords aproximadas
+2,Cliente de ejemplo 2,Parque do Inga,Av. Laguna,Zona 4,Maringa,87000-000,-23.4147,-51.9318,coords_del_enlace,lugar publico; coords aproximadas
+3,Cliente de ejemplo 3,Teatro Calil Haddad,Av. Dr. Alexandre Rasgulaeff,Zona 2,Maringa,87000-000,-23.4118,-51.9390,coords_del_enlace,lugar publico; coords aproximadas
+4,Cliente de ejemplo 4,Estadio Willie Davids,Av. Colombo,Zona 7,Maringa,87000-000,,,pendiente_geocodificar,lugar publico; falta geocodificar

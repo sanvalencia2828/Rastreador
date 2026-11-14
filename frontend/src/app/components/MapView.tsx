@@ -41,7 +41,7 @@ const clientIcon = L.divIcon({
 
 interface MapStop { id: string; lat: number; lon: number; }
 interface MapBusiness { lat: number; lon: number; nome_fantasia: string; distance_m: number; status?: string; }
-interface MapViewProps { stops: MapStop[]; businesses: MapBusiness[]; }
+interface MapViewProps { stops: MapStop[]; businesses: MapBusiness[]; center?: { lat: number; lon: number }; }
 
 function getIcon(status?: string) {
   if (status === "client") return clientIcon;
@@ -49,7 +49,7 @@ function getIcon(status?: string) {
   return businessIcon;
 }
 
-export default function MapView({ stops, businesses }: MapViewProps) {
+export default function MapView({ stops, businesses, center }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<L.Map | null>(null);
   const stopsLayerRef = useRef<L.LayerGroup>(L.layerGroup());
@@ -57,7 +57,8 @@ export default function MapView({ stops, businesses }: MapViewProps) {
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return;
-    const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+    const initialCenter: [number, number] = center ? [center.lat, center.lon] : DEFAULT_CENTER;
+    const map = L.map(containerRef.current, { zoomControl: true, attributionControl: true }).setView(initialCenter, DEFAULT_ZOOM);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>', maxZoom: 18 }).addTo(map);
     stopsLayerRef.current.addTo(map);
     businessesLayerRef.current.addTo(map);

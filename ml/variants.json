@@ -1,0 +1,498 @@
+{
+ "nota_v1": "V1 es una definición de etiqueta ajustada tras observar una ola administrativa (inaptidões, 2026-05/06) en el periodo de prueba; no es un resultado de holdout sin tocar.",
+ "reglas": "Lista de variantes fijada antes de ver resultados: V0, V1 y la sensibilidad de V1. Se reportan todas, pasen o no el gate. Umbrales sin cambios.",
+ "corridas": [
+  {
+   "dataset": "municipio 7691 (Maringá) · volcado 2026-09 · PROVISIONAL (solo un municipio)",
+   "variantes": [
+    {
+     "id": "V0",
+     "run_id": "20261104T023927Z",
+     "descripcion": "closed_codes 03,04,08",
+     "snapshot": "2026-09-13",
+     "gate_passed": false,
+     "gate_failures": [
+      "PR-AUC/prevalencia 1.459 < 1.5"
+     ],
+     "gate_set": {
+      "rows": 26989,
+      "positives": 2909,
+      "prevalence": 0.1078,
+      "pr_auc": 0.1573,
+      "heuristic_pr_auc": 0.1491,
+      "roc_auc": 0.6138,
+      "pr_auc_lift": 1.459,
+      "brier": 0.09631,
+      "log_loss": 0.34824,
+      "top_10pct": {
+       "k": 2699,
+       "precision": 0.1652,
+       "recall": 0.1533,
+       "lift": 1.533
+      }
+     },
+     "out_of_time": {
+      "rows": 103450,
+      "positives": 12173,
+      "prevalence": 0.1177,
+      "pr_auc": 0.1674,
+      "roc_auc": 0.6115
+     },
+     "bootstrap_pareado": {
+      "B": 2000,
+      "zonas_cep5": 12,
+      "puntual": {
+       "delta_pr_auc": 0.0081,
+       "pr_auc_sobre_prevalencia": 1.459,
+       "pr_auc_modelo": 0.1573,
+       "pr_auc_heuristica": 0.1491
+      },
+      "bootstrap_filas": {
+       "delta_pr_auc_IC95": [
+        0.0017,
+        0.0082,
+        0.0143
+       ],
+       "ratio_IC95": [
+        1.3901,
+        1.46,
+        1.5357
+       ],
+       "P(delta<=0)": 0.009,
+       "P(ratio<1.5)": 0.851
+      },
+      "bootstrap_por_zona_(complementario)": {
+       "delta_pr_auc_IC95": [
+        0.0042,
+        0.0084,
+        0.0121
+       ],
+       "ratio_IC95": [
+        1.4139,
+        1.4543,
+        1.5066
+       ],
+       "P(delta<=0)": 0.0,
+       "P(ratio<1.5)": 0.9575
+      }
+     }
+    },
+    {
+     "id": "V1",
+     "run_id": "20261104T030021Z",
+     "descripcion": "etiqueta y tasas con código 08; 03/04 censurados (siguen en la población como negativos)",
+     "snapshot": "2026-09-13",
+     "gate_passed": true,
+     "gate_failures": [],
+     "gate_set": {
+      "rows": 26989,
+      "positives": 2049,
+      "prevalence": 0.0759,
+      "pr_auc": 0.1468,
+      "heuristic_pr_auc": 0.1247,
+      "roc_auc": 0.6829,
+      "pr_auc_lift": 1.934,
+      "brier": 0.06835,
+      "log_loss": 0.25402,
+      "top_10pct": {
+       "k": 2699,
+       "precision": 0.173,
+       "recall": 0.2279,
+       "lift": 2.279
+      }
+     },
+     "out_of_time": {
+      "rows": 103450,
+      "positives": 8763,
+      "prevalence": 0.0847,
+      "pr_auc": 0.1576,
+      "roc_auc": 0.6822
+     },
+     "bootstrap_pareado": {
+      "B": 2000,
+      "zonas_cep5": 12,
+      "puntual": {
+       "delta_pr_auc": 0.0221,
+       "pr_auc_sobre_prevalencia": 1.9339,
+       "pr_auc_modelo": 0.1468,
+       "pr_auc_heuristica": 0.1247
+      },
+      "bootstrap_filas": {
+       "delta_pr_auc_IC95": [
+        0.0141,
+        0.0224,
+        0.0304
+       ],
+       "ratio_IC95": [
+        1.8138,
+        1.94,
+        2.0743
+       ],
+       "P(delta<=0)": 0.0,
+       "P(ratio<1.5)": 0.0
+      },
+      "bootstrap_por_zona_(complementario)": {
+       "delta_pr_auc_IC95": [
+        0.0118,
+        0.0224,
+        0.0288
+       ],
+       "ratio_IC95": [
+        1.7894,
+        1.9288,
+        2.024
+       ],
+       "P(delta<=0)": 0.0,
+       "P(ratio<1.5)": 0.0
+      }
+     }
+    }
+   ],
+   "sensibilidad_v1_sin_censuradas": {
+    "censuradas_test": {
+     "filas": 103450,
+     "censuradas": 3410,
+     "censuradas_con_etiqueta_1": 0
+    },
+    "censuradas_train": {
+     "filas": 93659,
+     "censuradas_en_ventana": 126,
+     "censuradas_despues_de_la_ventana": 3387
+    },
+    "gate_set_censuradas": {
+     "filas": 26989,
+     "censuradas": 860,
+     "por_codigo": {
+      "04": 837,
+      "03": 23
+     }
+    },
+    "gate_set_completo": {
+     "rows": 26989,
+     "positives": 2049,
+     "prevalence": 0.0759,
+     "puntual": {
+      "delta_pr_auc": 0.0221,
+      "pr_auc_sobre_prevalencia": 1.9339,
+      "pr_auc_modelo": 0.1468,
+      "pr_auc_heuristica": 0.1247
+     },
+     "bootstrap_filas": {
+      "delta_pr_auc_IC95": [
+       0.0141,
+       0.0224,
+       0.0304
+      ],
+      "ratio_IC95": [
+       1.8138,
+       1.94,
+       2.0743
+      ],
+      "P(delta<=0)": 0.0,
+      "P(ratio<1.5)": 0.0
+     }
+    },
+    "gate_set_sin_censuradas": {
+     "rows": 26129,
+     "positives": 2049,
+     "prevalence": 0.0784,
+     "puntual": {
+      "delta_pr_auc": 0.0206,
+      "pr_auc_sobre_prevalencia": 1.8991,
+      "pr_auc_modelo": 0.1489,
+      "pr_auc_heuristica": 0.1283
+     },
+     "bootstrap_filas": {
+      "delta_pr_auc_IC95": [
+       0.0126,
+       0.021,
+       0.0293
+      ],
+      "ratio_IC95": [
+       1.7909,
+       1.907,
+       2.0394
+      ],
+      "P(delta<=0)": 0.0,
+      "P(ratio<1.5)": 0.0
+     },
+     "bootstrap_por_zona_(complementario)": {
+      "delta_pr_auc_IC95": [
+       0.0092,
+       0.0208,
+       0.0274
+      ],
+      "ratio_IC95": [
+       1.7638,
+       1.8979,
+       1.9891
+      ],
+      "P(delta<=0)": 0.0005,
+      "P(ratio<1.5)": 0.0
+     }
+    },
+    "lectura": "Cotas, no estimación: censuradas dentro de la ventana son cierres reales etiquetados 0 (completo subestima; sin censuradas sobrestima)."
+   }
+  },
+  {
+   "dataset": "región de Maringá: municipios 7691, 8461, 7731, 7687 · volcado 2026-09 (descarga en streaming, 10 partes, mismo volcado)",
+   "descarga": {
+    "filas_leidas": 73366147,
+    "filas_guardadas": 322120,
+    "last_modified_partes": [
+     "Mon, 14 Sep 2026 15:02:59 GMT",
+     "Mon, 14 Sep 2026 15:06:39 GMT"
+    ]
+   },
+   "variantes": [
+    {
+     "id": "V0",
+     "run_id": "20261105T001656Z",
+     "descripcion": "closed_codes 03,04,08",
+     "snapshot": "2026-09-13",
+     "gate_passed": false,
+     "gate_failures": [
+      "PR-AUC/prevalencia 1.462 < 1.5"
+     ],
+     "gate_set": {
+      "rows": 30881,
+      "positives": 3504,
+      "prevalence": 0.1135,
+      "pr_auc": 0.1659,
+      "heuristic_pr_auc": 0.1535,
+      "roc_auc": 0.6062,
+      "pr_auc_lift": 1.462,
+      "brier": 0.10108,
+      "log_loss": 0.36471,
+      "top_10pct": {
+       "k": 3088,
+       "precision": 0.183,
+       "recall": 0.1612,
+       "lift": 1.612
+      }
+     },
+     "out_of_time": {
+      "rows": 134296,
+      "positives": 16246,
+      "prevalence": 0.121,
+      "pr_auc": 0.1733,
+      "roc_auc": 0.605
+     },
+     "bootstrap_pareado": {
+      "B": 2000,
+      "descartados": [
+       0,
+       0
+      ],
+      "zonas_cep5": 17,
+      "puntual": {
+       "delta_pr_auc": 0.0123,
+       "pr_auc_sobre_prevalencia": 1.4618,
+       "pr_auc_modelo": 0.1659,
+       "pr_auc_heuristica": 0.1535
+      },
+      "bootstrap_filas": {
+       "delta_pr_auc_IC95": [
+        0.007,
+        0.0124,
+        0.0181
+       ],
+       "ratio_IC95": [
+        1.3978,
+        1.4643,
+        1.5342
+       ],
+       "P(delta<=0)": 0.0,
+       "P(ratio<1.5)": 0.838
+      },
+      "bootstrap_por_zona_(complementario)": {
+       "delta_pr_auc_IC95": [
+        0.0075,
+        0.0122,
+        0.0206
+       ],
+       "ratio_IC95": [
+        1.4014,
+        1.4526,
+        1.527
+       ],
+       "P(delta<=0)": 0.0,
+       "P(ratio<1.5)": 0.9195
+      }
+     }
+    },
+    {
+     "id": "V1",
+     "run_id": "20261105T001750Z",
+     "descripcion": "etiqueta y tasas con código 08; 03/04 censurados (siguen en la población como negativos)",
+     "snapshot": "2026-09-13",
+     "gate_passed": true,
+     "gate_failures": [],
+     "gate_set": {
+      "rows": 30881,
+      "positives": 2527,
+      "prevalence": 0.0818,
+      "pr_auc": 0.1588,
+      "heuristic_pr_auc": 0.1302,
+      "roc_auc": 0.6739,
+      "pr_auc_lift": 1.94,
+      "brier": 0.0729,
+      "log_loss": 0.26992,
+      "top_10pct": {
+       "k": 3088,
+       "precision": 0.1885,
+       "recall": 0.2303,
+       "lift": 2.303
+      }
+     },
+     "out_of_time": {
+      "rows": 134296,
+      "positives": 11866,
+      "prevalence": 0.0884,
+      "pr_auc": 0.1668,
+      "roc_auc": 0.6732
+     },
+     "bootstrap_pareado": {
+      "B": 2000,
+      "descartados": [
+       0,
+       0
+      ],
+      "zonas_cep5": 17,
+      "puntual": {
+       "delta_pr_auc": 0.0286,
+       "pr_auc_sobre_prevalencia": 1.9404,
+       "pr_auc_modelo": 0.1588,
+       "pr_auc_heuristica": 0.1302
+      },
+      "bootstrap_filas": {
+       "delta_pr_auc_IC95": [
+        0.0216,
+        0.0287,
+        0.0365
+       ],
+       "ratio_IC95": [
+        1.8272,
+        1.9439,
+        2.0799
+       ],
+       "P(delta<=0)": 0.0,
+       "P(ratio<1.5)": 0.0
+      },
+      "bootstrap_por_zona_(complementario)": {
+       "delta_pr_auc_IC95": [
+        0.0225,
+        0.0286,
+        0.0374
+       ],
+       "ratio_IC95": [
+        1.7575,
+        1.9264,
+        2.0957
+       ],
+       "P(delta<=0)": 0.0,
+       "P(ratio<1.5)": 0.0
+      }
+     }
+    }
+   ],
+   "sensibilidad_v1_sin_censuradas": {
+    "censuradas_test": {
+     "filas": 134296,
+     "censuradas": 4380,
+     "censuradas_con_etiqueta_1": 0
+    },
+    "censuradas_train": {
+     "filas": 121105,
+     "censuradas_en_ventana": 139,
+     "censuradas_despues_de_la_ventana": 4354
+    },
+    "gate_set_censuradas": {
+     "filas": 30881,
+     "censuradas": 977,
+     "por_codigo": {
+      "04": 953,
+      "03": 24
+     }
+    },
+    "lectura": "Cotas, no estimación: censuradas dentro de la ventana son cierres reales etiquetados 0.",
+    "gate_set_completo": {
+     "rows": 30881,
+     "positives": 2527,
+     "prevalence": 0.0818,
+     "puntual": {
+      "delta_pr_auc": 0.0286,
+      "pr_auc_sobre_prevalencia": 1.9404,
+      "pr_auc_modelo": 0.1588,
+      "pr_auc_heuristica": 0.1302
+     },
+     "bootstrap_filas": {
+      "delta_pr_auc_IC95": [
+       0.0216,
+       0.0287,
+       0.0365
+      ],
+      "ratio_IC95": [
+       1.8272,
+       1.9439,
+       2.0799
+      ],
+      "P(delta<=0)": 0.0,
+      "P(ratio<1.5)": 0.0
+     }
+    },
+    "gate_set_sin_censuradas": {
+     "rows": 29904,
+     "positives": 2527,
+     "prevalence": 0.0845,
+     "puntual": {
+      "delta_pr_auc": 0.0273,
+      "pr_auc_sobre_prevalencia": 1.905,
+      "pr_auc_modelo": 0.161,
+      "pr_auc_heuristica": 0.1337
+     },
+     "bootstrap_filas": {
+      "delta_pr_auc_IC95": [
+       0.0204,
+       0.0275,
+       0.0347
+      ],
+      "ratio_IC95": [
+       1.8008,
+       1.9113,
+       2.0345
+      ],
+      "P(delta<=0)": 0.0,
+      "P(ratio<1.5)": 0.0
+     },
+     "bootstrap_por_zona_(complementario)": {
+      "delta_pr_auc_IC95": [
+       0.021,
+       0.0268,
+       0.036
+      ],
+      "ratio_IC95": [
+       1.7403,
+       1.8936,
+       2.0432
+      ],
+      "P(delta<=0)": 0.0,
+      "P(ratio<1.5)": 0.0
+     }
+    }
+   }
+  }
+ ],
+ "incidentes": [
+  {
+   "fecha": "2026-11-04",
+   "descripcion": "Durante la descarga de la región se lanzaron por error dos procesos de scripts/descargar_maringa.py a la vez (el primero no se detuvo); ambos escribían el mismo .tmp y el mismo archivo final.",
+   "verificacion": "Se validó el archivo final completo (322 120 filas): 30 campos, CNPJ de 14 dígitos (8+4+2), municipio dentro de {7691, 8461, 7731, 7687}, UF=PR, fechas de situación e inicio válidas, código de situación permitido, 0 CNPJ duplicados; los 246 714 de 7691 coinciden con la descarga independiente anterior. Sin fallos, no se repitió la descarga.",
+   "no_verificado": "Qué proceso escribió el archivo final."
+  },
+  {
+   "fecha": "2026-11-04",
+   "descripcion": "La retención del pipeline (keep_runs) borró la corrida V0 de solo Maringá (20261104T023927Z) al promover V1 de la región. Sus métricas siguen en este registro."
+  }
+ ]
+}
