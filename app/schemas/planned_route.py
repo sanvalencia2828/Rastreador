@@ -162,6 +162,31 @@ class RouteGenerateResponse(BaseModel):
     sin_asignar: int = 0  # no caben en ningun dia con el tope
 
 
+class WeekRouteRequest(BaseModel):
+    days: int = Field(5, ge=1, le=14)
+    max_stops: int = Field(10, ge=1, le=50)  # = MARINGA_MAX_STOPS por defecto
+    start_lat: Optional[float] = Field(None, ge=-90, le=90)  # origen opcional, no se guarda
+    start_lon: Optional[float] = Field(None, ge=-180, le=180)
+
+
+class WeekDay(BaseModel):
+    day: int
+    day_label: str
+    selected: int
+    stops: list[GeneratedStop]
+    distance_km: float
+    distance_kind: str = "linea_recta"
+    maps_links: list[str] = []
+
+
+class WeekRouteResponse(BaseModel):
+    total_clientes: int
+    days: list[WeekDay]
+    fuera_de_maringa: list[ClienteListed] = []
+    pendientes: list[ClienteListed] = []
+    sin_asignar: list[ClienteListed] = []  # no caben en ningun dia con el tope
+
+
 class RoutePoint(BaseModel):
     id: int
     lat: float

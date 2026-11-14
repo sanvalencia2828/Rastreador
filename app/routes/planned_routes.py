@@ -19,6 +19,9 @@ from app.schemas.planned_route import (
     RouteGenerateResponse,
     RouteOptimizeRequest,
     RouteStatusUpdate,
+    WeekDay,
+    WeekRouteRequest,
+    WeekRouteResponse,
 )
 from app.services.day_route import DIAS_SEMANA, cluster_days, is_maringa, maps_links, order_day, path_km
 from app.services.geo import cnae_to_category, fix_encoding
@@ -590,11 +593,10 @@ def delete_route(route_id: str, user_id: str = Depends(get_current_user_id)):
 MARINGA_MAX_STOPS = 10  # tope de paradas por dia en Maringa (clientes)
 
 
-def _generate_from_clientes(user_id: str, city_name: str, max_lojas: int, day: int) -> RouteGenerateResponse:
-    """Ruta de un dia (lunes..viernes, agrupado por cercania) con los clientes del propio usuario; sin datos en logs."""
+def _load_clientes(user_id: str):
     try:
         with db_engine.connect() as conn:
-            rows = conn.execute(
+            return conn.execute(
                 text("""
                     SELECT id, nombre_cliente, nombre_negocio, direccion, bairro, municipio, lat, lon, geocode_status
                     FROM clientes WHERE user_id = :u ORDER BY external_id
@@ -604,39 +606,76 @@ def _generate_from_clientes(user_id: str, city_name: str, max_lojas: int, day: i
     except Exception as e:  # el mensaje del driver puede traer parametros
         raise HTTPException(status_code=500, detail=f"Failed to fetch clientes ({type(e).__name__})")
 
-    def listed(r):
-        return ClienteListed(
-            nombre=r.nombre_negocio or r.nombre_cliente or "", direccion=r.direccion or "", municipio=r.municipio or ""
-        )
 
+def _listed(r) -> ClienteListed:
+    return ClienteListed(nombre=r.nombre_negocio or r.nombre_cliente or "", direccion=r.direccion or "", municipio=r.municipio or "")
+
+
+def _plan_clientes(rows, dias: int, cap: int) -> dict:
+    """Separa y agrupa los clientes UNA vez (KMeans); lo usan el endpoint de un dia y el de la semana."""
     located = [r for r in rows if r.geocode_status == "ok" and r.lat is not None and r.lon is not None]
     inside = [r for r in located if is_maringa(r.municipio)]
-    outside = [listed(r) for r in located if not is_maringa(r.municipio)]
-    pending = [listed(r) for r in rows if r not in located]
+    pts = [(float(r.lat), float(r.lon)) for r in inside]
+    groups, overflow = cluster_days(pts, dias, cap)
+    return {
+        "inside": inside, "pts": pts, "groups": groups, "overflow": overflow,
+        "outside": [r for r in located if not is_maringa(r.municipio)],
+        "pending": [r for r in rows if r not in located],
+    }
 
-    cap = max(1, min(max_lojas, MARINGA_MAX_STOPS))
-    all_pts = [(float(r.lat), float(r.lon)) for r in inside]
-    groups, overflow = cluster_days(all_pts, len(DIAS_SEMANA), cap)
-    day_idx = groups[day] if day < len(groups) else []
-    chosen = [inside[i] for i in day_idx]
-    pts = [all_pts[i] for i in day_idx]
-    order = order_day(pts) if pts else []
-    pts = [pts[i] for i in order]
-    stops = [
-        GeneratedStop(
+
+def _day_plan(plan: dict, group: list[int], depot=None):
+    """(paradas ordenadas, puntos del recorrido incluyendo el origen si hay) de un grupo de indices."""
+    pts = [plan["pts"][i] for i in group]
+    order = order_day(pts, depot) if pts else []
+    stops = []
+    for i in order:
+        r = plan["inside"][group[i]]
+        stops.append(GeneratedStop(
             cnpj="", nome_fantasia=r.nombre_negocio or r.nombre_cliente or "", cnae_label="Cliente",
-            bairro=r.bairro or "", logradouro=r.direccion or "", lat=float(r.lat), lon=float(r.lon),
-            cliente_id=str(r.id),
-        )
-        for r in (chosen[i] for i in order)
-    ]
-    print(f"Generated clientes route for '{city_name}' day {day}: {len(inside)} candidates, {len(stops)} selected")
+            bairro=r.bairro or "", logradouro=r.direccion or "", lat=float(r.lat), lon=float(r.lon), cliente_id=str(r.id),
+        ))
+    return stops, ([depot] if depot else []) + [pts[i] for i in order]
+
+
+def _generate_from_clientes(user_id: str, city_name: str, max_lojas: int, day: int) -> RouteGenerateResponse:
+    """Ruta de un dia (lunes..viernes, agrupado por cercania) con los clientes del propio usuario; sin datos en logs."""
+    rows = _load_clientes(user_id)
+    plan = _plan_clientes(rows, len(DIAS_SEMANA), max(1, min(max_lojas, MARINGA_MAX_STOPS)))
+    groups = plan["groups"]
+    stops, pts = _day_plan(plan, groups[day] if day < len(groups) else [])
+    print(f"Generated clientes route for '{city_name}' day {day}: {len(plan['inside'])} candidates, {len(stops)} selected")
     return RouteGenerateResponse(
-        city=city_name, total_candidates=len(inside), selected=len(stops), stops=stops,
+        city=city_name, total_candidates=len(plan["inside"]), selected=len(stops), stops=stops,
         distance_km=round(path_km(pts), 2), distance_kind="linea_recta", maps_links=maps_links(pts),
-        fuera_de_maringa=outside, pendientes=pending, day=day, day_label=DIAS_SEMANA[day],
-        day_counts=[len(g) for g in groups] + [0] * (len(DIAS_SEMANA) - len(groups)), sin_asignar=len(overflow),
+        fuera_de_maringa=[_listed(r) for r in plan["outside"]], pendientes=[_listed(r) for r in plan["pending"]],
+        day=day, day_label=DIAS_SEMANA[day],
+        day_counts=[len(g) for g in groups] + [0] * (len(DIAS_SEMANA) - len(groups)), sin_asignar=len(plan["overflow"]),
     )
+
+
+@router.post("/api/routes/generate-week", response_model=WeekRouteResponse)
+def generate_week(body: WeekRouteRequest, user_id: str = Depends(get_current_user_id)):
+    """Semana completa de clientes de Maringa (un solo clustering); el origen opcional no se guarda."""
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    rows = _load_clientes(user_id)
+    plan = _plan_clientes(rows, body.days, body.max_stops)
+    depot = (body.start_lat, body.start_lon) if body.start_lat is not None and body.start_lon is not None else None
+    days = []
+    for n, group in enumerate(plan["groups"]):
+        stops, pts = _day_plan(plan, group, depot)
+        days.append(WeekDay(
+            day=n, day_label=DIAS_SEMANA[n] if n < len(DIAS_SEMANA) else f"Dia {n + 1}", selected=len(stops), stops=stops,
+            distance_km=round(path_km(pts), 2), distance_kind="linea_recta", maps_links=maps_links(pts),
+        ))
+    print(f"Generated week: {len(rows)} clientes, {len(days)} days, {len(plan['overflow'])} unassigned")
+    return WeekRouteResponse(
+        total_clientes=len(rows), days=days,
+        fuera_de_maringa=[_listed(r) for r in plan["outside"]], pendientes=[_listed(r) for r in plan["pending"]],
+        sin_asignar=[_listed(plan["inside"][i]) for i in plan["overflow"]],
+    )
+
 
 @router.post(
     "/api/routes/generate",

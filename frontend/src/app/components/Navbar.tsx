@@ -9,6 +9,7 @@ const NAV_LINKS = [
   { href: "/", label: "Mapa" },
   { href: "/cities", label: "Cidades" },
   { href: "/generate", label: "Gerar Rota" },
+  { href: "/week", label: "Semana" },
   { href: "/routes", label: "🗺️ Rutas" },
   { href: "/visits", label: "Visitas" },
   { href: "/dashboard", label: "Dashboard" },

@@ -20,6 +20,7 @@ ROUTE_BODY = {"name": "r", "city_id": 1, "stops": [{"address": "a", "lat": -23.3
 # (método, ruta, cuerpo) de cada endpoint que escribe o lee datos de un usuario
 PROTECTED = [
     ("GET", "/api/routes", None),
+    ("POST", "/api/routes/generate-week", {}),
     ("POST", "/api/routes", {"name": "r", "business_ids": [1], "start_lat": -23.3, "start_lng": -51.1}),
     ("GET", f"/api/routes/{ROUTE}", None),
     ("PATCH", f"/api/routes/{ROUTE}/status", {"status": "active"}),
