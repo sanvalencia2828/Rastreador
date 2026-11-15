@@ -11,7 +11,6 @@ from app.routes import (
     cities,
     clientes,
     daily_routes,
-    debug_tmp,
     geo,
     planned_routes,
     visits,
@@ -50,4 +49,3 @@ app.include_router(cities.router)
 app.include_router(clientes.router)
 app.include_router(streets_routes.router)
 app.include_router(street_time_routes.router)
-app.include_router(debug_tmp.router)
