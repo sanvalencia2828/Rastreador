@@ -95,3 +95,58 @@ def test_db_failures_use_fixed_messages(monkeypatch):
     monkeypatch.setattr(clientes, "db_engine", Boom())
     r = client.get("/api/clientes", headers=bearer(USER_A))
     assert r.status_code == 500 and "SECRETO" not in r.text
+
+
+class InsertEngine:
+    def __init__(self):
+        self.params = None
+
+    @contextmanager
+    def begin(self):
+        engine = self
+
+        class Conn:
+            def execute(self, statement, params):
+                engine.params = dict(params)
+
+                class Result:
+                    def fetchone(_):
+                        row = {**_row(USER_A, 9), "lat": None, "lon": None, "geocode_status": params["geocode_status"],
+                               "geocode_source": params["geocode_source"], "nombre_negocio": params["nombre_negocio"]}
+                        return type("R", (), {"_mapping": row})()
+
+                return Result()
+
+        yield Conn()
+
+
+def test_create_requires_token():
+    assert client.post("/api/clientes", json={"nombre_negocio": "x"}).status_code == 401
+
+
+def test_create_with_gps_is_located_and_owned_by_token_user(monkeypatch):
+    engine = InsertEngine()
+    monkeypatch.setattr(clientes, "db_engine", engine)
+    r = client.post("/api/clientes", json={"nombre_negocio": "  Padaria  ", "lat": -23.42, "lon": -51.93, "user_id": USER_B},
+                    headers=bearer(USER_A))
+    assert r.status_code == 201 and r.json()["nombre_negocio"] == "Padaria"
+    p = engine.params
+    assert p["user_id"] == USER_A and p["geocode_status"] == "ok" and p["geocode_source"] == "manual"
+    assert p["lat"] == -23.42 and len(p["external_id"]) == 36
+
+
+def test_create_without_coords_is_pending(monkeypatch):
+    engine = InsertEngine()
+    monkeypatch.setattr(clientes, "db_engine", engine)
+    r = client.post("/api/clientes", json={"nombre_negocio": "Loja", "direccion": "Av. Brasil 1"}, headers=bearer(USER_A))
+    assert r.status_code == 201
+    assert engine.params["geocode_status"] == "pendiente" and engine.params["geocode_source"] is None
+
+
+@pytest.mark.parametrize("body", [
+    {}, {"nombre_negocio": "   "}, {"nombre_negocio": "x", "lat": -23.4},
+    {"nombre_negocio": "x", "lat": 91, "lon": 0}, {"nombre_negocio": "x", "lat": 0, "lon": 181},
+])
+def test_create_validates(body, monkeypatch):
+    monkeypatch.setattr(clientes, "db_engine", InsertEngine())
+    assert client.post("/api/clientes", json=body, headers=bearer(USER_A)).status_code == 422

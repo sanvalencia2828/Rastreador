@@ -10,6 +10,7 @@ const NAV_LINKS = [
   { href: "/cities", label: "Cidades" },
   { href: "/generate", label: "Gerar Rota" },
   { href: "/week", label: "Semana" },
+  { href: "/clientes/nuevo", label: "+ Cliente" },
   { href: "/routes", label: "🗺️ Rutas" },
   { href: "/visits", label: "Visitas" },
   { href: "/dashboard", label: "Dashboard" },
@@ -40,7 +41,7 @@ export default function Navbar() {
 
   return (
     <nav
-      className="flex items-center gap-1 overflow-x-auto"
+      className="flex items-center gap-1"
       style={{
         position: "fixed",
         top: 0,
@@ -49,11 +50,11 @@ export default function Navbar() {
         height: "48px",
         background: "var(--bg)",
         borderBottom: "1px solid var(--border)",
-        padding: "0 20px",
+        padding: "0 12px",
         zIndex: 1000,
         display: "flex",
         alignItems: "center",
-        gap: "16px",
+        gap: "12px",
       }}
     >
       <Link
@@ -63,7 +64,8 @@ export default function Navbar() {
       >
         Rastreador
       </Link>
-      <div className="flex items-center" style={{ gap: "4px", flex: 1, minWidth: 0 }}>
+      {/* Only the link list scrolls sideways, so the brand and Entrar/Sair stay visible at 375px. */}
+      <div className="flex items-center overflow-x-auto" style={{ gap: "4px", flex: 1, minWidth: 0, scrollbarWidth: "none" }}>
         {NAV_LINKS.map((link) => {
           const active = isActive(link.href);
           return (
