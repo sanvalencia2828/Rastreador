@@ -1,0 +1,72 @@
+# ==============================================================================
+# ml/config.yaml — Pipeline de riesgo de cierre de comercios
+# ==============================================================================
+# Cualquier clave se puede sobrescribir con variables de entorno ML__SECCION__CLAVE
+# (por ejemplo ML__DATA__UF=SP o ML__RUN__KEEP_RUNS=6).
+
+run:
+  artifacts_dir: artifacts          # relativo a la raíz del repo
+  keep_runs: 12                     # corridas exitosas que se conservan (más las fallidas recientes)
+  keep_intermediate: false          # true = conserva data/raw.pkl (≈150 MB por corrida)
+  lock_stale_hours: 6               # un lock más viejo que esto se considera abandonado
+
+data:
+  input_glob: ".data/*ESTABELE*"    # uno o varios volcados Estabelecimentos de la Receita
+  uf: PR
+  encoding: latin-1
+  chunksize: 500000
+  snapshot_date: null               # YYYY-MM-DD; null = máxima data_situacao_cadastral del volcado
+  contract: ml/contracts/estabelecimentos_raw.yaml
+
+labels:
+  horizon_months: 12                # "¿cierra en los próximos N meses?"
+  active_code: "02"
+  closed_codes: ["03", "04", "08"]  # suspensa, inapta, baixada
+  censored_codes: []                # cerrados por estos códigos siguen en la población (eran activos) pero no son evento ni entran en las tasas. Sesgo conocido: un censurado que cerró dentro de la ventana cuenta como negativo (subestima el modelo); excluirlos lo sobrestima. Debe ser disjunto de closed_codes
+
+features:
+  smoothing_m: 20                   # suavizado bayesiano de tasas históricas por grupo
+  free_email_domains:
+    - gmail.com
+    - hotmail.com
+    - outlook.com
+    - outlook.com.br
+    - yahoo.com.br
+    - yahoo.com
+    - live.com
+    - icloud.com
+    - uol.com.br
+    - bol.com.br
+    - terra.com.br
+    - globo.com
+    - hotmail.com.br
+  accountant_email_domains:
+    - contabilizei.com.br
+
+split:
+  holdout_cep5_fraction: 0.2        # zonas (CEP de 5 dígitos) que el modelo de backtest nunca ve
+  seed: 42
+
+model:
+  learning_rate: 0.08
+  max_iter: 400
+  max_leaf_nodes: 31
+  min_samples_leaf: 40
+  l2_regularization: 1.0
+  early_stopping: true
+  validation_fraction: 0.1
+  random_state: 42
+  ordinal_max_categories: 80
+  ordinal_min_frequency: 30
+
+evaluation:
+  top_k_fraction: 0.10
+  # Gate de calidad: si no se cumple, la corrida queda "rejected" y latest no se actualiza
+  min_roc_auc: 0.60
+  min_pr_auc_lift: 1.5              # PR-AUC >= prevalencia × lift
+  must_beat_heuristic: true         # PR-AUC > PR-AUC de la tasa histórica de cierre por CNAE
+
+validation:
+  min_rows: 10000
+  min_label_prevalence: 0.01
+  max_label_prevalence: 0.60

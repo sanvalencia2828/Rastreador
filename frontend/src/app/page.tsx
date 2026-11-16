@@ -67,6 +67,13 @@ export default function Home() {
     })));
   }, []);
 
+  const handleMarkClient = useCallback((cnpj: string) => {
+    setStops(prev => prev.map(stop => ({
+      ...stop,
+      businesses: stop.businesses.map(b => b.cnpj === cnpj ? { ...b, status: "client" as const } : b),
+    })));
+  }, []);
+
   const allBusinesses = useMemo(() => stops.flatMap(s => s.businesses), [stops]);
 
   const filteredBusinesses = useMemo(() => {
@@ -84,16 +91,16 @@ export default function Home() {
   const mapBusinesses = useMemo(() => filteredBusinesses.map(b => ({ lat: b.lat, lon: b.lon, nome_fantasia: b.nome_fantasia, distance_m: b.distance_m, status: b.status })), [filteredBusinesses]);
 
   return (
-    <main className="flex flex-col min-h-dvh" style={{ padding: "24px 20px", maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
-      <header className="mb-6">
-        <h1 className="text-xl font-semibold tracking-tight" style={{ color: "var(--fg)" }}>Rastreador de Lojas</h1>
+    <main className="flex flex-col min-h-dvh px-4 py-4 lg:px-5 lg:py-6" style={{ maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
+      <header className="mb-5 lg:mb-6">
+        <h1 className="text-lg lg:text-xl font-semibold tracking-tight" style={{ color: "var(--fg)" }}>Rastreador de Lojas</h1>
         <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Agregá direcciones para escanear lojas en un radio de 500m.</p>
       </header>
-      <div className="mb-5">
+      <div className="mb-4 lg:mb-5">
         <SearchBar onSearch={handleSearch} isLoading={status === "loading"} />
       </div>
-      <div className="flex flex-col lg:flex-row gap-5 flex-1">
-        <div className="lg:w-2/3" style={{ minHeight: "400px", height: "100%" }}>
+      <div className="flex flex-col lg:flex-row gap-4 lg:gap-5 flex-1">
+        <div className="lg:w-2/3 h-[50dvh] lg:h-full min-h-[300px] lg:min-h-[400px]">
           <MapView stops={stops.map(s => ({ id: s.id, lat: s.lat, lon: s.lon }))} businesses={mapBusinesses} />
         </div>
         <aside className="lg:w-1/3 flex flex-col gap-4">
@@ -116,7 +123,7 @@ export default function Home() {
           {stops.length === 0 && <StatusMessage type={status} message={status === "error" ? errorMessage : undefined} />}
           <div className="flex flex-col gap-3" style={{ maxHeight: "calc(100dvh - 340px)", overflowY: "auto" }}>
             {stops.map((stop, i) => (
-              <StopCard key={stop.id} index={i} displayName={stop.displayName} cep={stop.cep} businesses={stop.businesses} loadingBusinesses={stop.loadingBusinesses} onRemove={() => handleRemoveStop(stop.id)} onMarkVisited={handleMarkVisited} />
+              <StopCard key={stop.id} index={i} displayName={stop.displayName} cep={stop.cep} businesses={stop.businesses} loadingBusinesses={stop.loadingBusinesses} onRemove={() => handleRemoveStop(stop.id)} onMarkVisited={handleMarkVisited} onMarkClient={handleMarkClient} />
             ))}
           </div>
           <div className="hidden lg:block flex-1" />

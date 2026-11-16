@@ -16,6 +16,7 @@ dist
 build
 
 # Exclude large data files, databases, and temporary archives
+.data
 K3241.*
 *.zip
 *.csv
@@ -30,3 +31,6 @@ temp_download.zip
 londrina_businesses.json
 londrina_businesses_cleaned.json
 db
+
+# Artefactos del pipeline de ML
+artifacts

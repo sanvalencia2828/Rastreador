@@ -60,10 +60,33 @@ Acceder a:
 
 ### Opción 2: Desarrollo Local
 
-#### 1. Base de Datos (opcional — la API funciona sin DB usando JSON)
+#### 1. Base de Datos (las lecturas públicas usan JSON sin base de datos; el login y las rutas necesitan base de datos)
 
 ```bash
 docker-compose up db
+```
+
+#### 1.1. OSRM local para rutas y optimización
+
+Para generar la geometría de ruta y la matriz de tiempos, levanta un contenedor OSRM con el OSM.PBF de Brasil:
+
+```bash
+# Descargar el PBF de Brasil (ejemplo con GeoFabrik o OSM Brazil)
+# https://download.geofabrik.de/south-america/brazil.html
+
+# Luego preparar y lanzar OSRM:
+mkdir -p osrm-data
+# Ejemplo manual:
+# docker run -t --rm -v "$PWD/osrm-data:/data" ghcr.io/project-osrm/osrm-backend osrm-extract -p /opt/footlight.lua /data/brazil-latest.osm.pbf
+# docker run -t --rm -v "$PWD/osrm-data:/data" ghcr.io/project-osrm/osrm-backend osrm-partition /data/brazil-latest.osrm
+# docker run -t --rm -v "$PWD/osrm-data:/data" -p 5000:5000 ghcr.io/project-osrm/osrm-backend osrm-routed --algorithm mld /data/brazil-latest.osrm
+```
+
+Y luego deja el valor en el entorno:
+
+```env
+OSRM_URL=http://osrm:5000
+OPTIMIZER_THRESHOLD_ORTOOLS=30
 ```
 
 #### 2. Backend API
@@ -110,7 +133,10 @@ En el panel de Vercel → *Settings → Environment Variables*, configurar:
 | Variable | Valor |
 |----------|-------|
 | `DATABASE_URL` | `postgresql://user:pass@host:5432/dbname` |
+| `JWT_SECRET_KEY` | Obligatorio y distinto de `change-me-in-production` si `APP_ENV≠development`; valor secreto para firmar tokens JWT | 
+| `CORS_ORIGINS` | Orígenes permitidos, por ejemplo `https://<tu-proyecto>.vercel.app` |
 | `NEXT_PUBLIC_API_URL` | `https://<tu-proyecto>.vercel.app` |
+| `BACKEND_URL` | URL del backend para el rewritting del frontend en Vercel |
 
 > **Nota:** Vercel asigna `$PORT` dinámicamente. El comando de arranque es:
 > ```bash
@@ -207,6 +233,9 @@ Todas las variables de configuración están documentadas en [`.env.example`](.e
 | `DB_NAME` | Nombre de la base de datos | `rastreador_db` |
 | `API_PORT` | Puerto del backend FastAPI | `8000` |
 | `NEXT_PUBLIC_API_URL` | URL pública del backend | `http://localhost:8000` |
+| `BACKEND_URL` | URL del backend para rewrites del frontend | `http://localhost:8000` |
+| `JWT_SECRET_KEY` | Obligatorio y distinto de `change-me-in-production` si `APP_ENV≠development` | `<secreto-largo-y-aleatorio>` |
+| `CORS_ORIGINS` | Orígenes permitidos por CORS | `http://localhost:3000,http://localhost:3001,http://localhost:8000` |
 | `PORT` | Puerto del frontend Next.js | `3000` |
 
 ## 📋 API Endpoints

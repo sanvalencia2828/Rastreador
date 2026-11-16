@@ -8,8 +8,12 @@ permitiendo que el script 'enriquecer_lojas.py' se ejecute correctamente.
 """
 
 import os
-import hashlib
+import sys
+
 import psycopg2
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from app.services.geo import assign_geographic_coords, synthetic_coords_allowed  # noqa: E402
 
 
 # Cargar variables de entorno del archivo .env
@@ -34,64 +38,12 @@ def load_env_file(dotenv_path: str = ".env") -> None:
 
 load_env_file()
 
-# Configuración de hubs de Londrina del api.py
-HUBS = {
-    1: {"name": "Centro (Calçadão)", "coords": [-51.1610, -23.3110]},
-    2: {"name": "Gleba Palhano (Av. Ayrton Senna)", "coords": [-51.1890, -23.3310]},
-    3: {"name": "Jardim Guanabara (Av. Higienópolis)", "coords": [-51.1670, -23.3220]},
-    4: {"name": "Zona Norte (Av. Saul Elkind)", "coords": [-51.1480, -23.2720]},
-    5: {"name": "Zona Leste (Av. Bandeirantes)", "coords": [-51.1550, -23.3180]},
-}
-
-
-def assign_geographic_coords(
-    cnpj: str, business_type: str, municipio: str = None
-) -> list:
-    """Calcula deterministamente coordenadas a partir del CNPJ, tipo de negocio y ciudad."""
-    h = hashlib.md5(cnpj.encode("utf-8")).hexdigest()
-    hash_val = int(h, 16)
-
-    city_key = municipio.strip().lower() if municipio else ""
-
-    # Determine centroid based on prefix to prevent encoding conflicts (e.g. UTF-8 vs Latin1)
-    center_lng, center_lat = None, None
-    if city_key.startswith("camb"):
-        center_lng, center_lat = [-51.2782, -23.2758]  # Cambé
-    elif city_key.startswith("ibipor"):
-        center_lng, center_lat = [-51.0478, -23.2694]  # Ibiporã
-    elif city_key.startswith("apucar") or "apucar" in city_key:
-        center_lng, center_lat = [-51.4614, -23.5521]  # Apucarana
-    elif "janda" in city_key or "jata" in city_key:
-        center_lng, center_lat = [-51.6447, -23.6064]  # Jandaia do Sul
-
-    # Si es una ciudad vecina, dispersar los puntos alrededor de su centroide
-    if center_lng is not None and center_lat is not None:
-        lng_factor = ((hash_val % 1000) - 500) / 500.0
-        lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
-
-        lng_offset = (lng_factor**3) * 0.015
-        lat_offset = (lat_factor**3) * 0.015
-        return [center_lng + lng_offset, center_lat + lat_offset]
-
-    # Por defecto: Hubs de Londrina
-    if business_type == "gastronomy":
-        hub_idx = [2, 3, 5, 1, 4][hash_val % 5]
-    else:
-        hub_idx = [1, 4, 2, 3, 5][hash_val % 5]
-
-    hub = HUBS[hub_idx]
-    center_lng, center_lat = hub["coords"]
-
-    lng_factor = ((hash_val % 1000) - 500) / 500.0
-    lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
-
-    lng_offset = (lng_factor**3) * 0.0075
-    lat_offset = (lat_factor**3) * 0.0075
-
-    return [center_lng + lng_offset, center_lat + lat_offset]
-
-
 def main():
+    if not synthetic_coords_allowed():
+        sys.exit(
+            "Este script escribe coordenadas INVENTADAS (hash del CNPJ) en latitude/longitude. "
+            "Solo corre con ALLOW_SYNTHETIC_COORDS=1 y APP_ENV=development."
+        )
     db_user = os.environ.get("DB_USER", "postgres")
     db_password = os.environ.get("DB_PASSWORD", "postgres")
     db_host = os.environ.get("DB_HOST", "localhost")

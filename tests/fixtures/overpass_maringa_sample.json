@@ -1,0 +1,132 @@
+{
+ "version": 0.6,
+ "generator": "frozen test fixture",
+ "elements": [
+  {
+   "type": "way",
+   "id": 1,
+   "tags": {
+    "highway": "residential",
+    "name": "Avenida Brasil"
+   },
+   "geometry": [
+    {
+     "lat": -23.42,
+     "lon": -51.93
+    },
+    {
+     "lat": -23.42,
+     "lon": -51.925
+    }
+   ]
+  },
+  {
+   "type": "way",
+   "id": 2,
+   "tags": {
+    "highway": "residential",
+    "name": "Avenida Brasil"
+   },
+   "geometry": [
+    {
+     "lat": -23.42,
+     "lon": -51.925
+    },
+    {
+     "lat": -23.42,
+     "lon": -51.92
+    }
+   ]
+  },
+  {
+   "type": "way",
+   "id": 3,
+   "tags": {
+    "highway": "residential",
+    "name": "Rua Santos Dumont"
+   },
+   "geometry": [
+    {
+     "lat": -23.418,
+     "lon": -51.93
+    },
+    {
+     "lat": -23.418,
+     "lon": -51.929
+    }
+   ]
+  },
+  {
+   "type": "way",
+   "id": 4,
+   "tags": {
+    "highway": "residential",
+    "name": "Av. Colombo"
+   },
+   "geometry": [
+    {
+     "lat": -23.41,
+     "lon": -51.94
+    },
+    {
+     "lat": -23.41,
+     "lon": -51.91
+    }
+   ]
+  },
+  {
+   "type": "way",
+   "id": 5,
+   "tags": {
+    "highway": "residential",
+    "name": "Praça Raposo Tavares"
+   },
+   "geometry": [
+    {
+     "lat": -23.415,
+     "lon": -51.935
+    },
+    {
+     "lat": -23.4151,
+     "lon": -51.9349
+    }
+   ]
+  },
+  {
+   "type": "way",
+   "id": 6,
+   "tags": {
+    "highway": "residential",
+    "name": "Avenida Doutor Gastão Vidigal"
+   },
+   "geometry": [
+    {
+     "lat": -23.4,
+     "lon": -51.93
+    },
+    {
+     "lat": -23.4,
+     "lon": -51.929
+    }
+   ]
+  },
+  {
+   "type": "way",
+   "id": 7,
+   "tags": {
+    "highway": "residential",
+    "name": "Rua Sem Comercios"
+   },
+   "geometry": [
+    {
+     "lat": -23.43,
+     "lon": -51.93
+    },
+    {
+     "lat": -23.43,
+     "lon": -51.929
+    }
+   ]
+  }
+ ]
+}

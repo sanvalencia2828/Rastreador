@@ -14,6 +14,7 @@ build/
 # Python dependencies & cache
 __pycache__/
 *.py[cod]
+*.pyc
 *$py.class
 .venv/
 venv/
@@ -37,6 +38,8 @@ postgres_data/
 .env.local.production
 
 # Data files (do not commit large CNPJ files or local processed data)
+data/
+.data/
 sample_estabelecimentos.csv
 londrina_businesses.json
 londrina_businesses_polars.json
@@ -70,3 +73,19 @@ espc.md
 # Opencode local agent instructions
 .opencode/
 
+
+# Local dev server logs
+frontend/npm-start*.log
+
+# Ad-hoc DB inspection script (contains a hardcoded connection string)
+inspect_db.py
+
+# Artefactos del pipeline de ML (modelos, métricas, predicciones por corrida)
+artifacts/
+
+# Nested repo that was committed as a broken submodule (no .gitmodules); keep local only
+cnpj_downloader/
+
+# Private customer lists (real data never goes in git; the fixture is the only exception)
+clientes*.csv
+!tests/fixtures/clientes_ejemplo.csv

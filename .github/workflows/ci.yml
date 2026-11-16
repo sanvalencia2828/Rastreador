@@ -10,6 +10,20 @@ jobs:
   backend-test:
     name: Backend Lint & Compilation
     runs-on: ubuntu-latest
+    # Throwaway Postgres for tests/test_clientes_pg.py (it drops tables: the database name must start with "test").
+    services:
+      postgres:
+        image: postgis/postgis:15-3.4  # PostGIS: tests/test_street_coverage_trigger.py runs the real trigger
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: test_rastreador
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d test_rastreador"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -23,10 +37,32 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          pip install -r requirements.txt pytest httpx
 
-      - name: Compile python files
-        run: python -m py_compile api.py enriquecer_lojas.py
+      - name: Import the API
+        env:
+          APP_ENV: development
+        run: python -c "import api"
+
+      - name: Backend tests
+        env:
+          APP_ENV: development
+          TEST_PG_URL: postgresql://postgres:postgres@localhost:5432/test_rastreador
+        run: pytest -q tests --ignore=tests/test_ml_pipeline.py
+
+  ml-pipeline-test:
+    name: ML Pipeline Tests (schema validation, train, evaluate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+          cache-dependency-path: requirements-ml.txt
+      - run: pip install -r requirements-ml.txt
+      - run: python -m pytest -q tests/test_ml_pipeline.py
+      - run: docker build -f Dockerfile.ml -t rastreador-ml:ci .
 
   frontend-build:
     name: Frontend Lint & Build
