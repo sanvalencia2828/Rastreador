@@ -65,6 +65,7 @@ HEADERS = {
     "User-Agent": "LondrinaRadarComercial-Geocoder/1.0 (londrina.radar@antigravity.dev)"
 }
 GEOCODE_MUNICIPIOS = ("Maringá", "Apucarana", "Arapongas")
+MAX_CONSECUTIVE_ERRORS = 5  # errores de red seguidos antes de abortar
 MAX_GEOCODE_ATTEMPTS = 3  # requiere migrations/008_geocode_attempts.sql
 CHECKPOINT_INTERVAL = 50  # commit cada N registros
 RATE_LIMIT_SLEEP = 1.1  # segundos entre requests (Nominatim TOS: max 1 req/s)
@@ -138,7 +139,7 @@ def build_address(
 def geocode_address(address: str) -> Optional[Tuple[float, float]]:
     """
     Consulta Nominatim /search con la dirección completa.
-    Retorna (lat, lon) o None si no hay resultados.
+    Retorna (lat, lon) o None si no hay resultados. Lanza excepción si falla la red/HTTP.
     """
     params = {
         "q": address,
@@ -146,23 +147,18 @@ def geocode_address(address: str) -> Optional[Tuple[float, float]]:
         "limit": 1,
         "addressdetails": 0,
     }
-    try:
-        resp = requests.get(
-            NOMINATIM_SEARCH_URL,
-            params=params,
-            headers=HEADERS,
-            timeout=15,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        if data and len(data) > 0:
-            lat = float(data[0]["lat"])
-            lon = float(data[0]["lon"])
-            return (lat, lon)
-        return None
-    except requests.exceptions.RequestException as e:
-        logger.warning(f"  HTTP error en geocode: {e}")
-        return None
+    # Los errores de red/HTTP se propagan: el llamador los distingue de "sin resultados".
+    resp = requests.get(
+        NOMINATIM_SEARCH_URL,
+        params=params,
+        headers=HEADERS,
+        timeout=15,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    if data and len(data) > 0:
+        return (float(data[0]["lat"]), float(data[0]["lon"]))
+    return None
 
 
 def fallback_coordinates(
@@ -196,6 +192,10 @@ def fallback_coordinates(
     lng_off = (lng_factor**3) * 0.0075
     lat_off = (lat_factor**3) * 0.0075
     return (center_lat + lat_off, center_lng + lng_off)
+
+
+class GeocodingAborted(RuntimeError):
+    """Demasiados errores de red seguidos; no tiene sentido seguir."""
 
 
 # ==============================================================================
@@ -258,6 +258,7 @@ def geocode_all_pending(conn: psycopg2.extensions.connection) -> Tuple[int, int,
     geocoded_count = 0
     not_found_count = 0
     error_count = 0
+    consecutive_errors = 0
 
     for i, row in enumerate(pendientes, 1):
         row_id, cnpj_completo, logradouro, numero, bairro, municipio, business_type = (
@@ -281,7 +282,19 @@ def geocode_all_pending(conn: psycopg2.extensions.connection) -> Tuple[int, int,
                     f"  Dirección no encontrada en Nominatim para ID={row_id}; queda pendiente"
                 )
         except Exception as e:
+            # Error de red/HTTP: no es "no encontrado" y no consume un intento.
+            error_count += 1
+            consecutive_errors += 1
             logger.error(f"  Error geocoding ID={row_id}: {e}")
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                conn.commit()
+                raise GeocodingAborted(
+                    f"{consecutive_errors} errores de red seguidos (último: {e}); "
+                    "abortando. Revisa la conexión y vuelve a correr."
+                )
+            time.sleep(RATE_LIMIT_SLEEP)
+            continue
+        consecutive_errors = 0
 
         if lat is None or lon is None:
             # Sin resultado real: no se escriben coords inventadas ni geocoded=TRUE;
@@ -361,6 +374,9 @@ def main():
         logger.info(f"  Errores:       {err}")
         logger.info("=" * 60)
         logger.info("Geocodificación completada.")
+    except GeocodingAborted as e:
+        logger.error(str(e))
+        sys.exit(2)
     except Exception as e:
         logger.error(f"Error fatal: {e}")
         sys.exit(1)
