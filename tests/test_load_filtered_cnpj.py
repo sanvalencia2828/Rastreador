@@ -1,0 +1,72 @@
+import csv
+
+import pytest
+
+import load_filtered_cnpj as lf
+from load_filtered_cnpj import parse_rows, row_to_dict
+
+
+def make_row(sit="2", mun="7691", cnae="6201501"):
+    r = [""] * 30
+    r[0:6] = ["123", "1", "9", "1", " Loja X ", sit]
+    r[11], r[14], r[15], r[17], r[20] = cnae, "Rua A", "10", "Centro", mun
+    return r
+
+
+def write_csv(tmp_path, rows):
+    p = tmp_path / "f.csv"
+    with open(p, "w", encoding="utf-8", newline="") as f:
+        csv.writer(f).writerows(rows)
+    return str(p)
+
+
+def test_row_to_dict_maps_columns():
+    d = row_to_dict(make_row())
+    assert d["cnpj_completo"] == "00000123000109"
+    assert d["municipio"] == "Maringá"
+    assert d["business_type"] == "tech"
+    assert d["nome_fantasia"] == "Loja X"
+    assert d["logradouro"] == "Rua A" and d["numero"] == "10" and d["bairro"] == "Centro"
+
+
+def test_non_tech_cnae_is_repairs():
+    assert row_to_dict(make_row(cnae="9529699"))["business_type"] == "repairs"
+
+
+@pytest.mark.parametrize("row,reason", [
+    (["1", "2", "3"], "corta"),
+    (make_row(mun="9999"), "municipio_desconocido"),
+    (make_row(sit="3"), "inactiva"),
+])
+def test_rejection_reasons(tmp_path, row, reason):
+    rows, rejected = parse_rows(write_csv(tmp_path, [make_row(), row]))
+    assert len(rows) == 1
+    assert [(line, m) for line, m, _ in rejected] == [(2, reason)]
+
+
+def test_non_numeric_situacao_in_valid_municipio_is_inactive(tmp_path):
+    _, rejected = parse_rows(write_csv(tmp_path, [make_row(sit="x")]))
+    assert rejected[0][1] == "inactiva"
+
+
+def _run(monkeypatch, path, *flags):
+    def no_db(*a, **k):
+        raise AssertionError("no debe conectarse a la base")
+
+    monkeypatch.setattr(lf, "prod_url", lambda: "postgresql://fake")  # nunca leer PROD_DATABASE_URL
+    monkeypatch.setattr(lf.psycopg2, "connect", no_db)
+    monkeypatch.setattr("sys.argv", ["load_filtered_cnpj.py", path, *flags])
+    lf.main()
+
+
+def test_apply_refuses_on_format_errors(tmp_path, monkeypatch):
+    path = write_csv(tmp_path, [make_row(), ["1"]])
+    with pytest.raises(SystemExit) as e:
+        _run(monkeypatch, path, "--apply")
+    assert "se niega" in str(e.value)  # sale antes de conectarse (connect fallaría con AssertionError)
+
+
+def test_inactive_rows_do_not_block_apply(tmp_path, monkeypatch):
+    path = write_csv(tmp_path, [make_row(), make_row(sit="3")])
+    with pytest.raises(AssertionError, match="no debe conectarse"):
+        _run(monkeypatch, path, "--apply")  # llegó a conectarse => no lo bloqueó la inactiva
