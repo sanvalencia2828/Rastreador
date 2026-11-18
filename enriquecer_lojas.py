@@ -12,7 +12,7 @@ a partir de logradouro, numero, bairro, municipio, y obtiene coordenadas reales
 Incluye:
   - Rate limiting (1 req/s) para cumplir TOS de Nominatim
   - Checkpoint cada N registros para reanudar si se interrumpe
-  - Fallback a coordenadas deterministas si Nominatim no retorna resultados
+  - Direcciones sin resultado quedan pendientes y se reintentan hasta MAX_GEOCODE_ATTEMPTS
   - Normalización de encoding Latin-1/UTF-8 en direcciones
 """
 
@@ -64,6 +64,8 @@ NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 HEADERS = {
     "User-Agent": "LondrinaRadarComercial-Geocoder/1.0 (londrina.radar@antigravity.dev)"
 }
+GEOCODE_MUNICIPIOS = ("Maringá", "Apucarana", "Arapongas")
+MAX_GEOCODE_ATTEMPTS = 3  # requiere migrations/008_geocode_attempts.sql
 CHECKPOINT_INTERVAL = 50  # commit cada N registros
 RATE_LIMIT_SLEEP = 1.1  # segundos entre requests (Nominatim TOS: max 1 req/s)
 
@@ -85,6 +87,7 @@ CITY_CENTERS = {
     "apucar": [-51.4614, -23.5521],     # Apucarana
     "cambir": [-51.5778, -23.5828],     # Cambira
     "janda": [-51.6447, -23.6064],      # Jandaia do Sul
+    "maring": [-51.9330, -23.4205],     # Maringá
 }
 
 
@@ -228,7 +231,7 @@ def geocode_all_pending(conn: psycopg2.extensions.connection) -> Tuple[int, int,
     """
     Itera sobre estabelecimientos sin geocodificar y les asigna
     coordenadas reales via Nominatim forward geocoding.
-    Retorna (geocodificados, fallbacks, errores).
+    Retorna (geocodificados, no_encontrados, errores).
     """
     ensure_geom_column(conn)
     cursor = conn.cursor()
@@ -240,8 +243,10 @@ def geocode_all_pending(conn: psycopg2.extensions.connection) -> Tuple[int, int,
         FROM estabelecimentos
         WHERE (geocoded IS NULL OR geocoded = FALSE)
           AND situacao_cadastral = 2
+          AND municipio = ANY(%s)
+          AND COALESCE(geocode_attempts, 0) < %s
         ORDER BY id
-    """)
+    """, (list(GEOCODE_MUNICIPIOS), MAX_GEOCODE_ATTEMPTS))
     pendientes = cursor.fetchall()
     total = len(pendientes)
     logger.info(f"Registros pendientes de geocodificar: {total}")
@@ -251,7 +256,7 @@ def geocode_all_pending(conn: psycopg2.extensions.connection) -> Tuple[int, int,
         return (0, 0, 0)
 
     geocoded_count = 0
-    fallback_count = 0
+    not_found_count = 0
     error_count = 0
 
     for i, row in enumerate(pendientes, 1):
@@ -273,18 +278,32 @@ def geocode_all_pending(conn: psycopg2.extensions.connection) -> Tuple[int, int,
                 source = "nominatim"
             else:
                 logger.warning(
-                    f"  Sin resultados Nominatim para ID={row_id}, usando fallback"
+                    f"  Dirección no encontrada en Nominatim para ID={row_id}; queda pendiente"
                 )
         except Exception as e:
             logger.error(f"  Error geocoding ID={row_id}: {e}")
 
         if lat is None or lon is None:
-            # Fallback determinista
-            lat, lon = fallback_coordinates(cnpj_completo, btype, municipio)
-            source = "fallback"
-            fallback_count += 1
-        else:
-            geocoded_count += 1
+            # Sin resultado real: no se escriben coords inventadas ni geocoded=TRUE;
+            # se registra el intento y la fila se reintenta hasta MAX_GEOCODE_ATTEMPTS.
+            not_found_count += 1
+            try:
+                cursor.execute(
+                    """
+                    UPDATE estabelecimentos
+                    SET geocode_attempts = COALESCE(geocode_attempts, 0) + 1,
+                        geocode_last_try = NOW()
+                    WHERE id = %s
+                """,
+                    (row_id,),
+                )
+            except Exception as e:
+                logger.error(f"  DB attempt update error ID={row_id}: {e}")
+                conn.rollback()
+                error_count += 1
+            time.sleep(RATE_LIMIT_SLEEP)
+            continue
+        geocoded_count += 1
 
         # Actualizar DB
         try:
@@ -319,9 +338,9 @@ def geocode_all_pending(conn: psycopg2.extensions.connection) -> Tuple[int, int,
 
     logger.info(
         f"Resumen: {geocoded_count} geocodificados, "
-        f"{fallback_count} fallback, {error_count} errores"
+        f"{not_found_count} no encontrados, {error_count} errores"
     )
-    return (geocoded_count, fallback_count, error_count)
+    return (geocoded_count, not_found_count, error_count)
 
 
 def main():
@@ -332,13 +351,13 @@ def main():
 
     try:
         conn = get_db_connection()
-        ok, fallback, err = geocode_all_pending(conn)
+        ok, not_found, err = geocode_all_pending(conn)
         conn.close()
 
         logger.info("=" * 60)
-        logger.info(f"  Total procesados: {ok + fallback + err}")
+        logger.info(f"  Total procesados: {ok + not_found + err}")
         logger.info(f"  Nominatim:     {ok}")
-        logger.info(f"  Fallback:      {fallback}")
+        logger.info(f"  No encontrados: {not_found}")
         logger.info(f"  Errores:       {err}")
         logger.info("=" * 60)
         logger.info("Geocodificación completada.")
