@@ -26,6 +26,7 @@ COPY api.py ./
 COPY app ./app
 COPY cnpj_etl_polars.py ./
 COPY enriquecer_lojas.py ./
+COPY cities.py ./
 COPY generate_sample_data.py ./
 
 # Expose port 8000

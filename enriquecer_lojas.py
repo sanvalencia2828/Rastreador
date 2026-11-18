@@ -24,6 +24,8 @@ import os
 import sys
 import hashlib
 import logging
+
+from cities import CITIES
 from typing import Optional, Tuple
 
 logging.basicConfig(
@@ -64,7 +66,7 @@ NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 HEADERS = {
     "User-Agent": "LondrinaRadarComercial-Geocoder/1.0 (londrina.radar@antigravity.dev)"
 }
-GEOCODE_MUNICIPIOS = ("Maringá", "Apucarana", "Arapongas")
+GEOCODE_MUNICIPIOS = tuple(c.name for c in CITIES)
 MAX_CONSECUTIVE_ERRORS = 5  # errores de red seguidos antes de abortar
 MAX_GEOCODE_ATTEMPTS = 3  # requiere migrations/008_geocode_attempts.sql
 CHECKPOINT_INTERVAL = 50  # commit cada N registros
@@ -79,17 +81,8 @@ HUBS = {
     5: {"coords": [-51.1550, -23.3180]},
 }
 
-# Centros de ciudades para fallback (BR-369 corridor)
-CITY_CENTERS = {
-    "camb": [-51.2782, -23.2758],       # Cambé
-    "ibipor": [-51.0478, -23.2694],     # Ibiporã
-    "roland": [-51.3897, -23.3105],     # Rolândia
-    "arapong": [-51.4244, -23.4194],    # Arapongas
-    "apucar": [-51.4614, -23.5521],     # Apucarana
-    "cambir": [-51.5778, -23.5828],     # Cambira
-    "janda": [-51.6447, -23.6064],      # Jandaia do Sul
-    "maring": [-51.9330, -23.4205],     # Maringá
-}
+# Centros de ciudades para fallback (derivados de cities.py: {nombre_en_minúsculas: [lon, lat]})
+CITY_CENTERS = {c.name.lower(): [c.lon, c.lat] for c in CITIES}
 
 
 # ==============================================================================

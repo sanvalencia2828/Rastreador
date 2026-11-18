@@ -16,7 +16,9 @@ from collections import Counter
 import psycopg2
 import psycopg2.extras
 
-MUN = {"7425": "Apucarana", "7427": "Arapongas", "7691": "Maringá"}
+from cities import CITIES
+
+MUN = {c.receita_code: c.name for c in CITIES if c.receita_code}
 TECH = {"6201501", "6202300", "6209100"}
 
 
