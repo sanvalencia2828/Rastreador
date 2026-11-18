@@ -60,7 +60,13 @@ ON CONFLICT (cnpj_completo) DO UPDATE SET
     nome_fantasia = EXCLUDED.nome_fantasia, cnae_fiscal = EXCLUDED.cnae_fiscal,
     logradouro = EXCLUDED.logradouro, numero = EXCLUDED.numero, bairro = EXCLUDED.bairro,
     municipio = EXCLUDED.municipio, business_type = EXCLUDED.business_type,
-    situacao_cadastral = EXCLUDED.situacao_cadastral
+    situacao_cadastral = EXCLUDED.situacao_cadastral,
+    geocoded = CASE WHEN estabelecimentos.logradouro IS DISTINCT FROM EXCLUDED.logradouro
+                      OR estabelecimentos.numero IS DISTINCT FROM EXCLUDED.numero
+                    THEN FALSE ELSE estabelecimentos.geocoded END,
+    geocode_attempts = CASE WHEN estabelecimentos.logradouro IS DISTINCT FROM EXCLUDED.logradouro
+                              OR estabelecimentos.numero IS DISTINCT FROM EXCLUDED.numero
+                            THEN 0 ELSE estabelecimentos.geocode_attempts END
 """
 
 
@@ -117,9 +123,11 @@ def main():
     conn = psycopg2.connect(prod_url())
     conn.set_session(readonly=not apply)
     cur = conn.cursor()
-    cur.execute("SELECT cnpj_completo FROM estabelecimentos WHERE cnpj_completo = ANY(%s)",
-                ([r["cnpj_completo"] for r in rows],))
-    existing = {x[0] for x in cur.fetchall()}
+    cur.execute("SELECT cnpj_completo, logradouro, numero FROM estabelecimentos "
+                "WHERE cnpj_completo = ANY(%s)", ([r["cnpj_completo"] for r in rows],))
+    existing = {x[0]: (x[1], x[2]) for x in cur.fetchall()}
+    moved = sum(1 for r in rows if r["cnpj_completo"] in existing
+                and existing[r["cnpj_completo"]] != (r["logradouro"], r["numero"]))
     new, upd = Counter(), Counter()
     for r in rows:
         (upd if r["cnpj_completo"] in existing else new)[r["municipio"]] += 1
@@ -127,6 +135,7 @@ def main():
     for m in MUN.values():
         print(f"{m:<12}{new[m]:>8}{upd[m]:>8}{new[m] + upd[m]:>8}")
     print(f"{'TOTAL':<12}{sum(new.values()):>8}{sum(upd.values()):>8}{len(rows):>8}")
+    print(f"filas existentes con dirección distinta (se re-geocodificarán): {moved}")
     if not apply:
         print("DRY-RUN: no se escribió nada.")
         return
