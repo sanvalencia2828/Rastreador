@@ -22,7 +22,6 @@ import psycopg2.extras
 import requests
 import os
 import sys
-import hashlib
 import logging
 
 from cities import CITIES
@@ -71,19 +70,6 @@ MAX_CONSECUTIVE_ERRORS = 5  # errores de red seguidos antes de abortar
 MAX_GEOCODE_ATTEMPTS = 3  # requiere migrations/008_geocode_attempts.sql
 CHECKPOINT_INTERVAL = 50  # commit cada N registros
 RATE_LIMIT_SLEEP = 1.1  # segundos entre requests (Nominatim TOS: max 1 req/s)
-
-# Hubs de Londrina para fallback determinista
-HUBS = {
-    1: {"coords": [-51.1610, -23.3110]},
-    2: {"coords": [-51.1890, -23.3310]},
-    3: {"coords": [-51.1670, -23.3220]},
-    4: {"coords": [-51.1480, -23.2720]},
-    5: {"coords": [-51.1550, -23.3180]},
-}
-
-# Centros de ciudades para fallback (derivados de cities.py: {nombre_en_minúsculas: [lon, lat]})
-CITY_CENTERS = {c.name.lower(): [c.lon, c.lat] for c in CITIES}
-
 
 # ==============================================================================
 # CONEXIÓN DB
@@ -152,39 +138,6 @@ def geocode_address(address: str) -> Optional[Tuple[float, float]]:
     if data and len(data) > 0:
         return (float(data[0]["lat"]), float(data[0]["lon"]))
     return None
-
-
-def fallback_coordinates(
-    cnpj_completo: str,
-    business_type: str,
-    municipio: Optional[str],
-) -> Tuple[float, float]:
-    """Coordenadas deterministas como fallback si Nominatim no responde."""
-    h = hashlib.md5(cnpj_completo.encode("utf-8")).hexdigest()
-    hash_val = int(h, 16)
-    city_key = (municipio or "").strip().lower()
-
-    for prefix, coords in CITY_CENTERS.items():
-        if prefix in city_key or city_key.startswith(prefix):
-            center_lng, center_lat = coords
-            lng_factor = ((hash_val % 1000) - 500) / 500.0
-            lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
-            lng_off = (lng_factor**3) * 0.015
-            lat_off = (lat_factor**3) * 0.015
-            return (center_lat + lat_off, center_lng + lng_off)
-
-    # Londrina hubs
-    if business_type == "tech":
-        hub_idx = [3, 2, 1, 5, 4][hash_val % 5]
-    else:
-        hub_idx = [1, 4, 2, 3, 5][hash_val % 5]
-    hub = HUBS[hub_idx]
-    center_lng, center_lat = hub["coords"]
-    lng_factor = ((hash_val % 1000) - 500) / 500.0
-    lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
-    lng_off = (lng_factor**3) * 0.0075
-    lat_off = (lat_factor**3) * 0.0075
-    return (center_lat + lat_off, center_lng + lng_off)
 
 
 class GeocodingAborted(RuntimeError):
