@@ -144,15 +144,11 @@ def _direccion(r: dict) -> str:
     return fix_encoding(", ".join(p for p in (calle, r.get("numero")) if p))
 
 
-def ordenar(rows: list, inicio) -> tuple:
-    """(paradas en orden de visita con distancia desde la anterior, fuente de costos)."""
-    points = [(r["lat"], r["lon"]) for r in rows]
-    table = osrm_table(points + [inicio]) if points else None
-    order = order_day(points, inicio, matrix=table[0] if table else None) if points else []
-    paradas, prev = [], inicio
-    for n, i in enumerate(order, 1):
-        r = rows[i]
-        paradas.append({
+def paradas(rows: list, inicio) -> list:
+    """Filas ya en orden de visita -> paradas con distancia desde la anterior (en línea recta) y enlace de Maps."""
+    out, prev = [], inicio
+    for n, r in enumerate(rows, 1):
+        out.append({
             "orden": n,
             "business_id": r["id"],
             "cnpj": r["cnpj_completo"],
@@ -163,11 +159,69 @@ def ordenar(rows: list, inicio) -> tuple:
             "tipo": r.get("business_type"),
             "lat": r["lat"],
             "lon": r["lon"],
-            "distancia_m": haversine_m(*prev, r["lat"], r["lon"]),  # en línea recta
+            "distancia_m": haversine_m(*prev, r["lat"], r["lon"]),
             "maps_url": maps_url(r["lat"], r["lon"]),
+            "hecha": bool(r.get("visited")),
         })
         prev = (r["lat"], r["lon"])
-    return paradas, "osrm" if table else "linea_recta"
+    return out
+
+
+def ordenar(rows: list, inicio) -> tuple:
+    """(paradas en orden de visita, fuente de costos): OSRM privado si hay, si no línea recta."""
+    points = [(r["lat"], r["lon"]) for r in rows]
+    table = osrm_table(points + [inicio]) if points else None
+    order = order_day(points, inicio, matrix=table[0] if table else None) if points else []
+    return paradas([rows[i] for i in order], inicio), "osrm" if table else "linea_recta"
+
+
+# Ruta guardada del propio usuario, en su orden, con lo ya marcado (route_stops.visited).
+RUTA_GUARDADA_SQL = text("""
+    SELECT r.name, CAST(r.start_lat AS float8) AS start_lat, CAST(r.start_lng AS float8) AS start_lng,
+           rs.visited, e.id, e.cnpj_completo, e.nome_fantasia, e.descricao_tipo_logradouro, e.logradouro,
+           e.numero, e.bairro, e.municipio, e.business_type,
+           CAST(rs.lat AS float8) AS lat, CAST(rs.lon AS float8) AS lon
+      FROM routes r
+      JOIN route_stops rs ON rs.route_id = r.id
+      JOIN estabelecimentos e ON e.id = rs.business_id
+     WHERE r.id = CAST(:route_id AS uuid) AND r.user_id = CAST(:user_id AS uuid)
+     ORDER BY rs.stop_order
+""")
+
+
+def ruta_guardada(conn, user_id: str, route_id: str) -> Optional[dict]:
+    rows = [dict(r._mapping) for r in conn.execute(RUTA_GUARDADA_SQL, {"route_id": route_id, "user_id": user_id})]
+    if not rows:
+        return None
+    inicio = (rows[0]["start_lat"], rows[0]["start_lng"])
+    lista = paradas(rows, inicio)
+    return ruta(lista, inicio, list(dict.fromkeys(p["ciudad"] for p in lista)), "guardada",
+                route_id=route_id, nombre=rows[0]["name"])
+
+
+def ruta(lista: list, inicio, nombres, fuente: str, route_id=None, nombre=None, aviso=None) -> dict:
+    return {
+        "route_id": route_id,
+        "nombre": nombre or f"Tarjetas {' + '.join(nombres)}",
+        "ciudades": list(nombres),
+        "origen": {"lat": inicio[0], "lon": inicio[1]},
+        "paradas": lista,
+        "total": len(lista),
+        "distancia_km": round(sum(p["distancia_m"] for p in lista) / 1000, 2),
+        "fuente_orden": fuente,
+        "aviso": aviso,
+    }
+
+
+def aviso_vacio(nombres, conteo: dict, hay_paradas: bool) -> Optional[str]:
+    """Mensaje útil cuando faltan datos: ciudades sin negocios geocodificados, o todo ya visitado."""
+    sin_geo = [n for n in nombres if conteo.get(n, (0, 0))[0] == 0]
+    if sin_geo:
+        return (f"{', '.join(sin_geo)}: todavía no hay negocios geocodificados. "
+                "Faltan por cargar (load_filtered_cnpj.py) y geocodificar (enriquecer_lojas.py).")
+    if not hay_paradas:
+        return f"No quedan negocios sin tarjeta en {', '.join(nombres)} con estos filtros."
+    return None
 
 
 def geocodificados(conn, user_id: str, nombres) -> dict:

@@ -1,13 +1,16 @@
 """Ruta de tarjetas: registro de entregas y resumen. Todo filtrado por el usuario del token."""
 
 from typing import List, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 
 from app.core.database import db_engine
 from app.core.security import get_current_user_id
-from app.schemas.tarjeta import EntregaCreate
+from app.routes.planned_routes import create_route
+from app.schemas.planned_route import PlannedRouteCreate
+from app.schemas.tarjeta import EntregaCreate, RutaTarjetasRequest
 from app.services import tarjetas
 
 router = APIRouter()
@@ -72,3 +75,59 @@ def resumen(
             return tarjetas.resumen(conn, user_id, nombres)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"No se pudo leer el resumen ({type(e).__name__})")
+
+
+def _guardar(r: dict, user_id: str) -> Optional[str]:
+    """Guarda la ruta con el mecanismo de rutas planificadas (routes + route_stops) para poder retomarla."""
+    try:
+        detalle = create_route(PlannedRouteCreate(
+            name=r["nombre"], business_ids=[p["business_id"] for p in r["paradas"]],
+            start_lat=r["origen"]["lat"], start_lng=r["origen"]["lon"], notes="ruta_tarjetas",
+        ), user_id)
+        return detalle["id"]
+    except HTTPException:
+        return None
+
+
+@router.post("/api/tarjetas/ruta")
+def generar_ruta(body: RutaTarjetasRequest, user_id: str = Depends(get_current_user_id)):
+    """Una ruta por ciudad (o una sola con `juntar`) con los negocios más cercanos al origen que aún no tienen tarjeta."""
+    try:
+        grupos = tarjetas.grupos(tarjetas.ciudades(body.cities), body.juntar)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    try:
+        with _db().connect() as conn:
+            conteo = tarjetas.geocodificados(conn, user_id, [c.name for g in grupos for c in g])
+            elegidos = []
+            for grupo in grupos:
+                nombres = [c.name for c in grupo]
+                inicio = tarjetas.origen(grupo, body.lat, body.lon)
+                rows = tarjetas.candidatos(conn, user_id, nombres, inicio, body.max_paradas, body.business_type, body.cnae)
+                elegidos.append((nombres, inicio, rows))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"No se pudo armar la ruta ({type(e).__name__})")
+
+    rutas = []
+    for nombres, inicio, rows in elegidos:
+        lista, fuente = tarjetas.ordenar(rows, inicio)
+        r = tarjetas.ruta(lista, inicio, nombres, fuente, aviso=tarjetas.aviso_vacio(nombres, conteo, bool(lista)))
+        if lista:
+            r["route_id"] = _guardar(r, user_id)
+            if r["route_id"] is None:
+                r["aviso"] = "No se pudo guardar la ruta: sirve para hoy, pero no podrás retomarla."
+        rutas.append(r)
+    return {"rutas": rutas}
+
+
+@router.get("/api/tarjetas/ruta/{route_id}")
+def retomar_ruta(route_id: UUID, user_id: str = Depends(get_current_user_id)):
+    """Una ruta de tarjetas guardada del usuario, con las paradas ya marcadas."""
+    try:
+        with _db().connect() as conn:
+            r = tarjetas.ruta_guardada(conn, user_id, str(route_id))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"No se pudo leer la ruta ({type(e).__name__})")
+    if not r:
+        raise HTTPException(status_code=404, detail="Ruta no encontrada")
+    return r
