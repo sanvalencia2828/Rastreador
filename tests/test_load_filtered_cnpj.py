@@ -1,3 +1,4 @@
+import codecs
 import csv
 
 import pytest
@@ -47,6 +48,34 @@ def test_rejection_reasons(tmp_path, row, reason):
 def test_non_numeric_situacao_in_valid_municipio_is_inactive(tmp_path):
     _, rejected = parse_rows(write_csv(tmp_path, [make_row(sit="x")]))
     assert rejected[0][1] == "inactiva"
+
+
+def _accent_row():
+    r = make_row()
+    r[4], r[14] = "Ótica Maringá", "Avenida São Paulo"
+    return r
+
+
+def _write_bytes(tmp_path, encoding, bom=b""):
+    p = tmp_path / "enc.csv"
+    p.write_bytes(bom + _csv_text(_accent_row()).encode(encoding))
+    return str(p)
+
+
+def _csv_text(row):
+    import io
+    buf = io.StringIO()
+    csv.writer(buf).writerow(row)
+    return buf.getvalue()
+
+
+@pytest.mark.parametrize("encoding,bom", [("utf-8", b""), ("latin-1", b""), ("utf-8", codecs.BOM_UTF8)])
+def test_encoding_is_detected_without_flag(tmp_path, encoding, bom):
+    rows, rejected = parse_rows(_write_bytes(tmp_path, encoding, bom))
+    assert rejected == []
+    assert rows[0]["cnpj_basico"] == "00000123"
+    assert rows[0]["nome_fantasia"] == "Ótica Maringá"
+    assert rows[0]["logradouro"] == "Avenida São Paulo"
 
 
 def _run(monkeypatch, path, *flags):

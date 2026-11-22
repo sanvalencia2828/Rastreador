@@ -6,9 +6,14 @@ Uso: python load_filtered_cnpj.py <filtered.csv> [--apply] [--skip-bad] [--no-db
 
 --no-db     solo valida el CSV (no se conecta a ninguna base).
 --skip-bad  permite --apply aunque haya filas con error de formato (se omiten).
+--encoding  por defecto se prueba UTF-8 (con o sin BOM) y, si falla, latin-1: los volcados
+            ESTABELE de la Receita vienen en ISO-8859-1, pero un CSV re-guardado suele ser UTF-8.
+            latin-1 nunca falla, por eso va segundo: leer UTF-8 como latin-1 daría "MaringÃ¡"
+            sin error. Pasa --encoding ENC para forzar una codificación concreta.
 """
 import argparse
 import csv
+import io
 import os
 import sys
 from collections import Counter
@@ -72,28 +77,42 @@ ON CONFLICT (cnpj_completo) DO UPDATE SET
 """
 
 
-def parse_rows(path, encoding="utf-8"):
+def _decode(raw, encoding=None):
+    """Devuelve (texto, nombre_de_codificación): la forzada, o UTF-8 y si falla latin-1."""
+    if encoding:
+        return raw.decode(encoding), encoding
+    try:
+        return raw.decode("utf-8-sig"), "utf-8"
+    except UnicodeDecodeError:
+        return raw.decode("latin-1"), "latin-1"
+
+
+def _read_text(path, encoding=None):
+    with open(path, "rb") as f:
+        return _decode(f.read(), encoding)[0]
+
+
+def parse_rows(path, encoding=None):
     """Devuelve (filas_validas, rechazadas); rechazada = (linea, motivo, detalle).
 
     Motivos con error de formato: 'corta', 'municipio_desconocido', 'formato'.
     'inactiva' (situacao_cadastral != 2) se omite sin considerarse error.
     """
     rows, rejected = [], []
-    with open(path, encoding=encoding, newline="") as f:
-        reader = csv.reader(f)
-        for r in reader:
-            line = reader.line_num
-            if len(r) < 30:
-                rejected.append((line, "corta", f"{len(r)} columnas"))
-            elif r[20] not in MUN:
-                rejected.append((line, "municipio_desconocido", r[20]))
-            elif r[5].strip() != "2":
-                rejected.append((line, "inactiva", f"situacao_cadastral={r[5]!r}"))
-            else:
-                try:
-                    rows.append(row_to_dict(r))
-                except (ValueError, IndexError) as e:
-                    rejected.append((line, "formato", repr(e)))
+    reader = csv.reader(io.StringIO(_read_text(path, encoding), newline=""))
+    for r in reader:
+        line = reader.line_num
+        if len(r) < 30:
+            rejected.append((line, "corta", f"{len(r)} columnas"))
+        elif r[20] not in MUN:
+            rejected.append((line, "municipio_desconocido", r[20]))
+        elif r[5].strip() != "2":
+            rejected.append((line, "inactiva", f"situacao_cadastral={r[5]!r}"))
+        else:
+            try:
+                rows.append(row_to_dict(r))
+            except (ValueError, IndexError) as e:
+                rejected.append((line, "formato", repr(e)))
     return rows, rejected
 
 
@@ -103,11 +122,14 @@ def main():
     ap.add_argument("--apply", action="store_true")
     ap.add_argument("--skip-bad", action="store_true")
     ap.add_argument("--no-db", action="store_true")
-    ap.add_argument("--encoding", default="utf-8")
+    ap.add_argument("--encoding", default=None)
     args = ap.parse_args()
     apply = args.apply
     if apply and args.no_db:
         sys.exit("--apply y --no-db son incompatibles.")
+    with open(args.path, "rb") as f:
+        enc = _decode(f.read(), args.encoding)[1]
+    print(f"codificación: {enc}" + (" (forzada)" if args.encoding else " (detectada)"))
     rows, rejected = parse_rows(args.path, args.encoding)
     by_reason = Counter(m for _, m, _ in rejected)
     bad_format = sum(n for m, n in by_reason.items() if m != "inactiva")
