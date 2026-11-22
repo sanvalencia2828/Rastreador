@@ -224,6 +224,12 @@ OPTIMIZER_THRESHOLD_ORTOOLS=30
 | `OSRM_URL` | URL de un OSRM **propio**. Solo se usa si apunta a un host privado (localhost, IP privada, `.local`/`.internal`, nombre de servicio docker); un servidor público se ignora para no enviarle coordenadas de clientes (`app/services/geo.py`). |
 | `OPTIMIZER_THRESHOLD_ORTOOLS` | Umbral de paradas movibles (30 por defecto) desde el cual `app/optimizer.py` resuelve también con OR-Tools y devuelve la mejor solución. |
 
+## Tests
+
+- Local, sin variables extra: `python -m pytest -q`
+- Postgres en CMD: `docker run -d --rm --name rastreador-test-pg -e POSTGRES_PASSWORD=x -e POSTGRES_DB=test_rastreador -p 55432:5432 postgis/postgis:15-3.4 && set "TEST_PG_URL=postgresql://postgres:x@localhost:55432/test_rastreador" && python -m pytest -q tests/test_tarjetas_pg.py tests/test_clientes_pg.py`
+- Postgres en PowerShell: `docker run -d --rm --name rastreador-test-pg -e POSTGRES_PASSWORD=x -e POSTGRES_DB=test_rastreador -p 55432:5432 postgis/postgis:15-3.4; $env:TEST_PG_URL="postgresql://postgres:x@localhost:55432/test_rastreador"; python -m pytest -q tests/test_tarjetas_pg.py tests/test_clientes_pg.py`
+
 ## 🧪 Flujo de trabajo recomendado
 
 ### Desarrollo local
