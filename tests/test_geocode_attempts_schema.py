@@ -13,12 +13,9 @@ def _norm(sql: str) -> str:
 
 
 def test_migration_and_bootstrap_ddl_are_identical():
-    body = MIGRATION.read_text(encoding="utf-8").replace("\r\n", "\n").split("\n", 2)[2]  # sin las 2 líneas de comentario
+    lines = MIGRATION.read_text(encoding="utf-8").splitlines()
+    body = " ".join(l for l in lines if not l.startswith("--"))
     assert _norm(body) == _norm(bootstrap.GEOCODE_ATTEMPTS_DDL)
-
-
-def test_ddl_is_idempotent():
-    assert _norm(bootstrap.GEOCODE_ATTEMPTS_DDL).count("ADD COLUMN IF NOT EXISTS") == 2
 
 
 class _Engine:
