@@ -67,7 +67,9 @@ HEADERS = {
 }
 GEOCODE_MUNICIPIOS = tuple(c.name for c in CITIES)
 MAX_CONSECUTIVE_ERRORS = 5  # errores de red seguidos antes de abortar
-MAX_GEOCODE_ATTEMPTS = 3  # requiere migrations/008_geocode_attempts.sql
+# Requiere las columnas de migrations/008_geocode_attempts.sql. La API las crea al arrancar
+# (app/db/bootstrap.py); si corres este script antes de desplegar la API, aplica ese archivo a mano.
+MAX_GEOCODE_ATTEMPTS = 3
 CHECKPOINT_INTERVAL = 50  # commit cada N registros
 RATE_LIMIT_SLEEP = 1.1  # segundos entre requests (Nominatim TOS: max 1 req/s)
 

@@ -99,3 +99,27 @@ def test_inactive_rows_do_not_block_apply(tmp_path, monkeypatch):
     path = write_csv(tmp_path, [make_row(), make_row(sit="3")])
     with pytest.raises(AssertionError, match="no debe conectarse"):
         _run(monkeypatch, path, "--apply")  # llegó a conectarse => no lo bloqueó la inactiva
+
+
+class _Cur:
+    def __init__(self):
+        self.sql = []
+
+    def execute(self, sql, params=None):
+        self.sql.append(sql)
+
+    def fetchone(self):
+        return None  # information_schema no devuelve la columna
+
+
+def test_apply_exits_when_geocode_attempts_column_is_missing(tmp_path, monkeypatch):
+    cur = _Cur()
+    conn = type("C", (), {"set_session": lambda self, **k: None, "cursor": lambda self: cur})()
+    path = write_csv(tmp_path, [make_row()])
+    monkeypatch.setattr(lf, "prod_url", lambda: "postgresql://fake")
+    monkeypatch.setattr(lf.psycopg2, "connect", lambda *a, **k: conn)
+    monkeypatch.setattr("sys.argv", ["load_filtered_cnpj.py", path, "--apply"])
+    with pytest.raises(SystemExit) as e:
+        lf.main()
+    assert "008_geocode_attempts.sql" in str(e.value)
+    assert len(cur.sql) == 1  # solo la consulta a information_schema; no llegó a escribir

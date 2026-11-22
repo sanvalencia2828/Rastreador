@@ -147,6 +147,13 @@ def main():
     conn = psycopg2.connect(prod_url())
     conn.set_session(readonly=not apply)
     cur = conn.cursor()
+    if apply:
+        cur.execute("SELECT 1 FROM information_schema.columns "
+                    "WHERE table_name = 'estabelecimentos' AND column_name = 'geocode_attempts'")
+        if not cur.fetchone():
+            sys.exit("Falta la columna estabelecimentos.geocode_attempts. "
+                     "La API la crea al arrancar (app/db/bootstrap.py). Si corres enriquecer_lojas.py o load_filtered_cnpj.py --apply antes de desplegar la API, aplica a mano "
+                     "migrations/008_geocode_attempts.sql.")
     cur.execute("SELECT cnpj_completo, logradouro, numero FROM estabelecimentos "
                 "WHERE cnpj_completo = ANY(%s)", ([r["cnpj_completo"] for r in rows],))
     existing = {x[0]: (x[1], x[2]) for x in cur.fetchall()}
