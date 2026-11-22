@@ -13,6 +13,7 @@ from app.routes import (
     daily_routes,
     geo,
     planned_routes,
+    tarjetas,
     visits,
 )
 from app.routes import street_time as street_time_routes
@@ -47,5 +48,6 @@ app.include_router(planned_routes.router)
 app.include_router(daily_routes.router)
 app.include_router(cities.router)
 app.include_router(clientes.router)
+app.include_router(tarjetas.router)
 app.include_router(streets_routes.router)
 app.include_router(street_time_routes.router)

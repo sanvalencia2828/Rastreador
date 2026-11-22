@@ -130,6 +130,27 @@ ALTER TABLE estabelecimentos
 """
 
 
+# Same DDL as migrations/009_tarjeta_entregas.sql (a test keeps them identical).
+TARJETA_ENTREGAS_DDL = """
+CREATE TABLE IF NOT EXISTS tarjeta_entregas (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    cnpj_completo VARCHAR(14) NOT NULL,
+    fecha DATE NOT NULL DEFAULT ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date),
+    resultado VARCHAR(20) NOT NULL,
+    nota VARCHAR(500),
+    lat NUMERIC(10,7),
+    lon NUMERIC(10,7),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT tarjeta_entregas_resultado_check CHECK (resultado IN ('tarjeta_entregada', 'cerrado', 'rechazo', 'interesado', 'no_encontrado')),
+    CONSTRAINT tarjeta_entregas_coords_pair CHECK ((lat IS NULL) = (lon IS NULL)),
+    CONSTRAINT tarjeta_entregas_lat_range CHECK (lat BETWEEN -90 AND 90),
+    CONSTRAINT tarjeta_entregas_lon_range CHECK (lon BETWEEN -180 AND 180)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tarjeta_entregas_user_cnpj_fecha ON tarjeta_entregas(user_id, cnpj_completo, fecha);
+"""
+
+
 def _ensure_clientes_schema() -> None:
     """Private per-user customer list; idempotent."""
     if not db_engine:
@@ -255,6 +276,17 @@ def _ensure_geocode_attempts_schema() -> None:
             conn.execute(text(GEOCODE_ATTEMPTS_DDL))
     except Exception as e:
         print(f"Error initializing geocode attempts columns ({_err(e)})")
+
+
+def _ensure_tarjeta_entregas_schema() -> None:
+    """Results of the business-card route (app/routes/tarjetas.py); idempotent."""
+    if not db_engine:
+        return
+    try:
+        with db_engine.begin() as conn:
+            conn.execute(text(TARJETA_ENTREGAS_DDL))
+    except Exception as e:
+        print(f"Error initializing tarjeta_entregas table ({_err(e)})")
 
 
 def _ensure_postgis() -> None:
@@ -416,6 +448,7 @@ def ensure_schema() -> None:
             print(f"Error initializing visit source column ({_err(e)})")
 
     _ensure_clientes_schema()  # needs users, created above
+    _ensure_tarjeta_entregas_schema()  # needs users
     _ensure_route_stops_cliente_id()  # needs clientes and route_stops
     _ensure_maringa_city()
     _ensure_city_list()
