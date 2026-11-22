@@ -75,12 +75,11 @@ CANDIDATOS_SQL = text(f"""
 """)
 
 GEOCODIFICADOS_SQL = text(f"""
-    SELECT e.municipio, COUNT(*) AS geocodificados,
-           COUNT(*) FILTER (WHERE NOT EXISTS (
-               SELECT 1 FROM tarjeta_entregas t
-                WHERE t.user_id = CAST(:user_id AS uuid) AND t.cnpj_completo = e.cnpj_completo
-                  AND t.resultado IN ('tarjeta_entregada', 'interesado'))) AS sin_tarjeta
+    SELECT e.municipio, COUNT(*) AS geocodificados, COUNT(*) FILTER (WHERE t.cnpj_completo IS NULL) AS sin_tarjeta
       FROM estabelecimentos e
+      LEFT JOIN (SELECT DISTINCT cnpj_completo FROM tarjeta_entregas
+                  WHERE user_id = CAST(:user_id AS uuid) AND resultado IN ('tarjeta_entregada', 'interesado')) t
+        ON t.cnpj_completo = e.cnpj_completo
      WHERE {BASE_SQL}
      GROUP BY e.municipio
 """)
