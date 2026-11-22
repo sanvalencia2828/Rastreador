@@ -13,14 +13,15 @@ def is_maringa(municipio: str | None) -> bool:
     return plain.strip().casefold() == "maringa"
 
 
-def order_day(points, depot=None):
-    """Indices de `points` [(lat, lon)] en orden de visita (distancia en linea recta).
+def order_day(points, depot=None, matrix=None):
+    """Indices de `points` [(lat, lon)] en orden de visita (distancia en linea recta, o `matrix` de costos).
 
+    `matrix`: costos entre points + [depot] en ese orden (p. ej. duraciones de OSRM).
     El optimizador necesita ancla de entrada y de salida: nodos ficticios de costo 0 donde no hay depot.
     """
     n = len(points)
     pts = list(points) + ([depot] if depot else [])
-    m = [[haversine_km(*a, *b) for b in pts] for a in pts]
+    m = [list(row) for row in matrix] if matrix else [[haversine_km(*a, *b) for b in pts] for a in pts]
     size = len(m)
     for row in m:
         row.extend([0.0, 0.0])

@@ -261,3 +261,31 @@ def osrm_base_url() -> Optional[str]:
     # rebuilt from parsed parts: drops userinfo/path tricks so requests and urlparse cannot disagree
     shown = f"[{host}]" if ":" in host else host
     return f"{parsed.scheme}://{shown}" + (f":{parsed.port}" if parsed.port else "")
+
+
+def osrm_table(coords) -> Optional[tuple]:
+    """(duraciones s, distancias km) de OSRM /table entre [(lat, lon)], o None sin OSRM privado o si no responde.
+
+    OSRM devuelve null entre puntos sin ruta: se conserva como None (el optimizador lo trata como infinito).
+    """
+    import requests
+
+    osrm_url = osrm_base_url()  # None unless explicitly set to a private host: coords never go to a public server
+    if not osrm_url or len(coords) <= 1:
+        return None
+    joined = ";".join(f"{lon},{lat}" for lat, lon in coords)
+    url = f"{osrm_url}/table/v1/driving/{joined}?annotations=duration,distance"
+    try:
+        response = requests.get(url, timeout=15, allow_redirects=False)  # a redirect would carry the coords elsewhere
+        response.raise_for_status()
+        data = response.json()
+    except Exception:  # pragma: no cover - fallback for local/offline tests
+        return None
+    durations = data.get("durations")
+    if not isinstance(durations, list) or len(durations) != len(coords):
+        return None
+    dur = [[None if v is None else float(v) for v in row] for row in durations]
+    distances = data.get("distances")
+    if isinstance(distances, list) and len(distances) == len(coords):
+        return dur, [[None if v is None else float(v) / 1000.0 for v in row] for row in distances]
+    return dur, [[haversine_km(*a, *b) for b in coords] for a in coords]
