@@ -122,6 +122,13 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_street_time_log_user ON street_time_log(user_id, municipio, street_key);
 """
 
+# Same DDL as migrations/008_geocode_attempts.sql (a test keeps them identical).
+GEOCODE_ATTEMPTS_DDL = """
+ALTER TABLE estabelecimentos
+    ADD COLUMN IF NOT EXISTS geocode_attempts INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS geocode_last_try TIMESTAMPTZ;
+"""
+
 
 def _ensure_clientes_schema() -> None:
     """Private per-user customer list; idempotent."""
@@ -239,6 +246,17 @@ def _ensure_business_visit_metrics_schema() -> None:
         print(f"Error initializing business visit metrics columns ({_err(e)})")
 
 
+def _ensure_geocode_attempts_schema() -> None:
+    """Bounded geocoder retries (enriquecer_lojas.py, load_filtered_cnpj.py); idempotent."""
+    if not db_engine:
+        return
+    try:
+        with db_engine.begin() as conn:
+            conn.execute(text(GEOCODE_ATTEMPTS_DDL))
+    except Exception as e:
+        print(f"Error initializing geocode attempts columns ({_err(e)})")
+
+
 def _ensure_postgis() -> None:
     """Enable PostGIS (Render allows CREATE EXTENSION for the database owner); warn loudly if it fails."""
     if not db_engine:
@@ -266,6 +284,7 @@ def ensure_schema() -> None:
     _ensure_postgis()
     _ensure_base_schema()
     _ensure_business_visit_metrics_schema()
+    _ensure_geocode_attempts_schema()
 
     # Initialize User Table
     if db_engine:
