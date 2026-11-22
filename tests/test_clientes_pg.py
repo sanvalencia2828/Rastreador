@@ -44,7 +44,7 @@ def pg():
         pytest.exit("TEST_PG_URL debe ser local y apuntar a una base cuyo nombre empiece por 'test'", returncode=2)
     engine = create_engine(PG)
     with engine.begin() as c:
-        c.execute(text("DROP TABLE IF EXISTS clientes"))
+        c.execute(text("DROP TABLE IF EXISTS clientes CASCADE"))  # route_stops.cliente_id FK (bootstrap) would block it
         c.execute(text(USERS_DDL))
         c.execute(text("DELETE FROM users"))
         c.execute(text(CLIENTES_DDL))
