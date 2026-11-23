@@ -123,7 +123,8 @@ class RouteGenerateRequest(BaseModel):
     city_id: int
     max_lojas: int = 80
     min_days_without_visit: int = 30
-    day: Optional[int] = Field(None, ge=0, le=4)  # solo Maringa: 0=lunes .. 4=viernes
+    day: Optional[int] = Field(None, ge=0, le=4)  # solo clientes: 0=lunes .. 4=viernes
+    cities: Optional[list[str]] = Field(None, max_length=10)  # con valor: ruta de clientes de esas ciudades
 
 
 class GeneratedStop(BaseModel):
@@ -137,6 +138,7 @@ class GeneratedStop(BaseModel):
     days_since_visit: Optional[int] = None  # None: clientes aun no tienen visitas enlazadas
     priority: Optional[int] = None
     cliente_id: Optional[str] = None
+    diario: bool = False  # cliente de visita diaria: va en todos los dias
 
 
 class ClienteListed(BaseModel):
@@ -160,6 +162,7 @@ class RouteGenerateResponse(BaseModel):
     day_label: Optional[str] = None
     day_counts: list[int] = []  # paradas por dia (lunes..viernes)
     sin_asignar: int = 0  # no caben en ningun dia con el tope
+    avisos: list[str] = []
 
 
 class WeekRouteRequest(BaseModel):
@@ -167,6 +170,7 @@ class WeekRouteRequest(BaseModel):
     max_stops: int = Field(10, ge=1, le=50)  # = MARINGA_MAX_STOPS por defecto
     start_lat: Optional[float] = Field(None, ge=-90, le=90)  # origen opcional, no se guarda
     start_lon: Optional[float] = Field(None, ge=-180, le=180)
+    cities: list[str] = Field(default_factory=lambda: ["Maringá"], max_length=10)
 
 
 class WeekDay(BaseModel):
@@ -185,6 +189,7 @@ class WeekRouteResponse(BaseModel):
     fuera_de_maringa: list[ClienteListed] = []
     pendientes: list[ClienteListed] = []
     sin_asignar: list[ClienteListed] = []  # no caben en ningun dia con el tope
+    avisos: list[str] = []  # p. ej. ciudades lejanas entre si en una misma ruta
 
 
 class RoutePoint(BaseModel):

@@ -1,16 +1,14 @@
 """Orden de un dia de visitas y enlaces de Google Maps (compartido por scripts/rutas_semana.py y /api/routes/generate)."""
 
-import unicodedata
-
 from app.optimizer import optimize_open_path
 from app.services.geo import haversine_km
+from cities import canonical_city
 
 MAX_WAYPOINTS = 9  # Google Maps: 9 waypoints por enlace (+ origen y destino)
 
 
 def is_maringa(municipio: str | None) -> bool:
-    plain = unicodedata.normalize("NFKD", municipio or "").encode("ascii", "ignore").decode()
-    return plain.strip().casefold() == "maringa"
+    return canonical_city(municipio) == "Maringá"
 
 
 def order_day(points, depot=None, matrix=None):

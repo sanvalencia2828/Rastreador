@@ -1,6 +1,7 @@
 """DB-backed planned routes: CRUD, completion, generation."""
 
 import os
+from itertools import combinations
 from datetime import date, datetime, timezone
 from typing import List, Dict, Any, Optional
 
@@ -31,6 +32,7 @@ from app.services.route_planning import (
     nearest_neighbor_order,
 )
 from app.services.visit_metrics import recalculate_visit_interval
+from cities import canonical_city, city_km
 
 router = APIRouter()
 
@@ -591,6 +593,32 @@ def delete_route(route_id: str, user_id: str = Depends(get_current_user_id)):
 # INTELLIGENT ROUTE GENERATION
 # ==============================================================================
 MARINGA_MAX_STOPS = 10  # tope de paradas por dia en Maringa (clientes)
+MAX_MIX_KM = 60  # dos ciudades mas lejanas no comparten ruta diaria
+WARN_MIX_KM = 40  # se permiten (p. ej. Maringa y Arapongas, ~52 km) pero se avisa
+
+
+def _check_cities(names: list[str]) -> tuple[list[str], list[str]]:
+    """Nombres canonicos sin repetir y avisos; 422 si hay una ciudad desconocida o dos a mas de MAX_MIX_KM."""
+    cities: list[str] = []
+    for name in names:
+        city = canonical_city(name)
+        if city is None:
+            raise HTTPException(status_code=422, detail=f"Ciudad desconocida: {name[:60]}")
+        if city not in cities:
+            cities.append(city)
+    if not cities:
+        raise HTTPException(status_code=422, detail="Elige al menos una ciudad")
+    avisos = []
+    for a, b in combinations(cities, 2):
+        km = city_km(a, b)
+        if km > MAX_MIX_KM:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{a} y {b} están a ~{km:.0f} km: una ruta diaria no puede mezclar ciudades a más de {MAX_MIX_KM} km",
+            )
+        if km > WARN_MIX_KM:
+            avisos.append(f"{a} y {b} están a ~{km:.0f} km: algunos días tendrán un tramo largo entre ciudades.")
+    return cities, avisos
 
 
 def _load_clientes(user_id: str):
@@ -598,7 +626,8 @@ def _load_clientes(user_id: str):
         with db_engine.connect() as conn:
             return conn.execute(
                 text("""
-                    SELECT id, nombre_cliente, nombre_negocio, direccion, bairro, municipio, lat, lon, geocode_status
+                    SELECT id, nombre_cliente, nombre_negocio, direccion, bairro, municipio, lat, lon, geocode_status,
+                           visita_diaria
                     FROM clientes WHERE user_id = :u ORDER BY external_id
                 """),
                 {"u": user_id},
@@ -611,56 +640,78 @@ def _listed(r) -> ClienteListed:
     return ClienteListed(nombre=r.nombre_negocio or r.nombre_cliente or "", direccion=r.direccion or "", municipio=r.municipio or "")
 
 
-def _plan_clientes(rows, dias: int, cap: int) -> dict:
-    """Separa y agrupa los clientes UNA vez (KMeans); lo usan el endpoint de un dia y el de la semana."""
+def _plan_clientes(rows, dias: int, cap: int, cities: list[str]) -> dict:
+    """Separa y agrupa los clientes UNA vez (KMeans); lo usan el endpoint de un dia y el de la semana.
+
+    Los de visita diaria no entran al KMeans: van en todos los dias y ocupan lugar en el tope `cap`.
+    """
     located = [r for r in rows if r.geocode_status == "ok" and r.lat is not None and r.lon is not None]
-    inside = [r for r in located if is_maringa(r.municipio)]
-    pts = [(float(r.lat), float(r.lon)) for r in inside]
-    groups, overflow = cluster_days(pts, dias, cap)
+    inside = [r for r in located if canonical_city(r.municipio) in cities]
+    daily = [r for r in inside if r.visita_diaria]
+    if len(daily) > cap:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Hay {len(daily)} clientes de visita diaria y el tope es {cap} paradas por día: sube el tope o desmarca alguno",
+        )
+    normal = [r for r in inside if not r.visita_diaria]
+    groups, overflow = cluster_days([(float(r.lat), float(r.lon)) for r in normal], dias, cap - len(daily))
+    if daily:  # sin clientes normales igual hay dias: los de los diarios
+        groups += [[] for _ in range(dias - len(groups))]
+    ordered = normal + daily  # los indices de groups/overflow apuntan a la parte `normal`
     return {
-        "inside": inside, "pts": pts, "groups": groups, "overflow": overflow,
-        "outside": [r for r in located if not is_maringa(r.municipio)],
+        "inside": ordered, "pts": [(float(r.lat), float(r.lon)) for r in ordered], "groups": groups,
+        "daily": list(range(len(normal), len(ordered))), "overflow": overflow,
+        "outside": [r for r in located if r not in inside],
         "pending": [r for r in rows if r not in located],
     }
 
 
 def _day_plan(plan: dict, group: list[int], depot=None):
-    """(paradas ordenadas, puntos del recorrido incluyendo el origen si hay) de un grupo de indices."""
+    """(paradas ordenadas, puntos del recorrido incluyendo el origen si hay) de un grupo mas los diarios."""
+    group = group + plan["daily"]
     pts = [plan["pts"][i] for i in group]
     order = order_day(pts, depot) if pts else []
+    daily = set(plan["daily"])
     stops = []
     for i in order:
         r = plan["inside"][group[i]]
         stops.append(GeneratedStop(
             cnpj="", nome_fantasia=r.nombre_negocio or r.nombre_cliente or "", cnae_label="Cliente",
             bairro=r.bairro or "", logradouro=r.direccion or "", lat=float(r.lat), lon=float(r.lon), cliente_id=str(r.id),
+            diario=group[i] in daily,
         ))
     return stops, ([depot] if depot else []) + [pts[i] for i in order]
 
 
-def _generate_from_clientes(user_id: str, city_name: str, max_lojas: int, day: int) -> RouteGenerateResponse:
+def _generate_from_clientes(
+    user_id: str, city_name: str, max_lojas: int, day: int,
+    cities: tuple[str, ...] | list[str] = ("Maringá",), avisos: list[str] | None = None,
+) -> RouteGenerateResponse:
     """Ruta de un dia (lunes..viernes, agrupado por cercania) con los clientes del propio usuario; sin datos en logs."""
     rows = _load_clientes(user_id)
-    plan = _plan_clientes(rows, len(DIAS_SEMANA), max(1, min(max_lojas, MARINGA_MAX_STOPS)))
+    plan = _plan_clientes(rows, len(DIAS_SEMANA), max(1, min(max_lojas, MARINGA_MAX_STOPS)), cities)
     groups = plan["groups"]
     stops, pts = _day_plan(plan, groups[day] if day < len(groups) else [])
+    n_daily = len(plan["daily"])
     print(f"Generated clientes route for '{city_name}' day {day}: {len(plan['inside'])} candidates, {len(stops)} selected")
     return RouteGenerateResponse(
         city=city_name, total_candidates=len(plan["inside"]), selected=len(stops), stops=stops,
         distance_km=round(path_km(pts), 2), distance_kind="linea_recta", maps_links=maps_links(pts),
         fuera_de_maringa=[_listed(r) for r in plan["outside"]], pendientes=[_listed(r) for r in plan["pending"]],
         day=day, day_label=DIAS_SEMANA[day],
-        day_counts=[len(g) for g in groups] + [0] * (len(DIAS_SEMANA) - len(groups)), sin_asignar=len(plan["overflow"]),
+        day_counts=[len(g) + n_daily for g in groups] + [n_daily] * (len(DIAS_SEMANA) - len(groups)),
+        sin_asignar=len(plan["overflow"]), avisos=avisos or [],
     )
 
 
 @router.post("/api/routes/generate-week", response_model=WeekRouteResponse)
 def generate_week(body: WeekRouteRequest, user_id: str = Depends(get_current_user_id)):
-    """Semana completa de clientes de Maringa (un solo clustering); el origen opcional no se guarda."""
+    """Semana completa de clientes de las ciudades pedidas (un solo clustering); el origen opcional no se guarda."""
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
+    cities, avisos = _check_cities(body.cities)
     rows = _load_clientes(user_id)
-    plan = _plan_clientes(rows, body.days, body.max_stops)
+    plan = _plan_clientes(rows, body.days, body.max_stops, cities)
     depot = (body.start_lat, body.start_lon) if body.start_lat is not None and body.start_lon is not None else None
     days = []
     for n, group in enumerate(plan["groups"]):
@@ -673,7 +724,7 @@ def generate_week(body: WeekRouteRequest, user_id: str = Depends(get_current_use
     return WeekRouteResponse(
         total_clientes=len(rows), days=days,
         fuera_de_maringa=[_listed(r) for r in plan["outside"]], pendientes=[_listed(r) for r in plan["pending"]],
-        sin_asignar=[_listed(plan["inside"][i]) for i in plan["overflow"]],
+        sin_asignar=[_listed(plan["inside"][i]) for i in plan["overflow"]], avisos=avisos,
     )
 
 
@@ -709,8 +760,9 @@ def generate_route(body: RouteGenerateRequest, user_id: str = Depends(get_curren
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to resolve city: {e}")
 
-    if is_maringa(city_name):
-        return _generate_from_clientes(user_id, city_name, body.max_lojas, body.day or 0)
+    if body.cities or is_maringa(city_name):
+        cities, avisos = _check_cities(body.cities or [city_name])
+        return _generate_from_clientes(user_id, city_name, body.max_lojas, body.day or 0, cities, avisos)
 
     # 2. Candidate businesses with days since last visit (fetch 2x for diversity)
     max_limit = body.max_lojas * 2

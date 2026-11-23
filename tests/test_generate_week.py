@@ -31,7 +31,7 @@ def rows_console():
 
 def rows_db():
     return [SimpleNamespace(id=e, nombre_negocio=f"N{e}", nombre_cliente="", direccion="d", bairro="b", municipio=m,
-                            lat=la, lon=lo, geocode_status="ok" if la is not None else "pendiente")
+                            lat=la, lon=lo, geocode_status="ok" if la is not None else "pendiente", visita_diaria=False)
             for e, la, lo, m in RAW]
 
 
@@ -77,7 +77,7 @@ def test_one_day_response_unchanged(client):
     """Mismas claves y valores que la implementacion anterior (clustering + order_day directos)."""
     one = pr._generate_from_clientes("u1", "Maringá", 80, 1).model_dump()
     assert set(one) == {"city", "total_candidates", "selected", "stops", "distance_km", "distance_kind", "maps_links",
-                        "fuera_de_maringa", "pendientes", "day", "day_label", "day_counts", "sin_asignar"}
+                        "fuera_de_maringa", "pendientes", "day", "day_label", "day_counts", "sin_asignar", "avisos"}
     inside = [r for r in rows_db() if r.lat is not None and r.municipio == "Maringa"]
     pts = [(float(r.lat), float(r.lon)) for r in inside]
     groups, overflow = cluster_days(pts, 5, 10)
