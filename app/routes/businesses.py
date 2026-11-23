@@ -321,7 +321,7 @@ def search_businesses(q: str, limit: int = 50):
             rows = conn.execute(
                 text(
                     """
-                    SELECT cnpj_completo, nome_fantasia, cnae_label, bairro,
+                    SELECT cnpj_completo, nome_fantasia, cnae_fiscal, bairro,
                            logradouro, municipio,
                            ST_Y(geom::geometry) as lat, ST_X(geom::geometry) as lon
                     FROM estabelecimentos
@@ -342,7 +342,7 @@ def search_businesses(q: str, limit: int = 50):
                 {
                     "cnpj": r[0],
                     "nome_fantasia": fix_encoding(r[1]),
-                    "cnae_label": fix_encoding(r[2]),
+                    "cnae_label": cnae_to_category(r[2]),
                     "bairro": fix_encoding(r[3]),
                     "logradouro": fix_encoding(r[4]),
                     "municipio": fix_encoding(r[5]),
@@ -353,8 +353,8 @@ def search_businesses(q: str, limit: int = 50):
             ]
     except HTTPException:
         raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Search failed: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="No se pudo buscar negocios")
 
 
 @router.get("/api/stats/summary")
@@ -424,7 +424,7 @@ def get_clients(limit: int = 500):
             rows = conn.execute(
                 text(
                     """
-                    SELECT e.cnpj_completo, e.nome_fantasia, e.cnae_label, e.bairro,
+                    SELECT e.cnpj_completo, e.nome_fantasia, e.cnae_fiscal, e.bairro,
                            e.logradouro, e.municipio,
                            ST_Y(e.geom::geometry) as lat, ST_X(e.geom::geometry) as lon
                     FROM business_status bs
@@ -439,7 +439,7 @@ def get_clients(limit: int = 500):
                 {
                     "cnpj": r[0],
                     "nome_fantasia": fix_encoding(r[1]),
-                    "cnae_label": fix_encoding(r[2]),
+                    "cnae_label": cnae_to_category(r[2]),
                     "bairro": fix_encoding(r[3]),
                     "logradouro": fix_encoding(r[4]),
                     "municipio": fix_encoding(r[5]),
@@ -448,8 +448,8 @@ def get_clients(limit: int = 500):
                 }
                 for r in rows
             ]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="No se pudieron leer los clientes")
 
 
 @router.get("/api/businesses/city-category")
@@ -466,7 +466,7 @@ def get_businesses_by_city_and_category(city: str, category: str = "pizza", limi
             rows = conn.execute(
                 text(
                     """
-                    SELECT cnpj_completo, nome_fantasia, cnae_label, cnae_fiscal_descricao,
+                    SELECT cnpj_completo, nome_fantasia, cnae_fiscal, cnae_fiscal_descricao,
                            bairro, logradouro, municipio,
                            ST_Y(geom::geometry) as lat, ST_X(geom::geometry) as lon
                     FROM estabelecimentos
@@ -475,8 +475,8 @@ def get_businesses_by_city_and_category(city: str, category: str = "pizza", limi
                       AND municipio ILIKE :city
                       AND (
                         nome_fantasia ILIKE :cat
+                        -- cnae_label no es columna (se calcula en Python); la descripción CNAE cubre el rubro
                         OR cnae_fiscal_descricao ILIKE :cat
-                        OR cnae_label ILIKE :cat
                       )
                     ORDER BY nome_fantasia
                     LIMIT :limit
@@ -492,7 +492,7 @@ def get_businesses_by_city_and_category(city: str, category: str = "pizza", limi
                 {
                     "cnpj": r[0],
                     "nome_fantasia": fix_encoding(r[1]),
-                    "cnae_label": fix_encoding(r[2]),
+                    "cnae_label": cnae_to_category(r[2]),
                     "cnae_fiscal_descricao": fix_encoding(r[3]),
                     "bairro": fix_encoding(r[4]),
                     "logradouro": fix_encoding(r[5]),
@@ -502,5 +502,5 @@ def get_businesses_by_city_and_category(city: str, category: str = "pizza", limi
                 }
                 for r in rows
             ]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to query businesses: {e}")
+    except Exception:
+        raise HTTPException(status_code=500, detail="No se pudieron leer los negocios")
