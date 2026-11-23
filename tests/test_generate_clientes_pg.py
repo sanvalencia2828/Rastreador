@@ -12,7 +12,7 @@ from sqlalchemy.engine import make_url
 
 from app.core.security import create_jwt_token
 from app.db import bootstrap
-from app.db.bootstrap import CLIENTES_DDL
+from app.db.bootstrap import CLIENTES_DDL, CLIENTES_VISITA_DIARIA_DDL
 from app.main import app
 from app.routes import cities, planned_routes
 
@@ -31,6 +31,7 @@ DDL = [
         stop_order INTEGER NOT NULL, address TEXT NOT NULL, lat NUMERIC(10,7) NOT NULL, lon NUMERIC(10,7) NOT NULL,
         cep VARCHAR(10), display_name TEXT)""",
     CLIENTES_DDL,
+    CLIENTES_VISITA_DIARIA_DDL,
 ]
 
 

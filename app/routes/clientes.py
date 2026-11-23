@@ -7,13 +7,14 @@ from sqlalchemy import text
 
 from app.core.database import db_engine
 from app.core.security import get_current_user_id
-from app.schemas.cliente import ClienteCreate
+from app.schemas.cliente import ClienteCreate, ClientePatch
+from cities import nearest_city
 
 router = APIRouter()
 
 _LIST_SQL = text("""
     SELECT id, external_id, nombre_cliente, nombre_negocio, direccion, bairro, municipio, cep,
-           lat, lon, geocode_status, geocode_source, nota
+           lat, lon, geocode_status, geocode_source, nota, visita_diaria
     FROM clientes
     WHERE user_id = :user_id
     ORDER BY nombre_negocio, id
@@ -22,16 +23,24 @@ _LIST_SQL = text("""
 
 
 _COLUMNS = ("id, external_id, nombre_cliente, nombre_negocio, direccion, bairro, municipio, cep, "
-            "lat, lon, geocode_status, geocode_source, nota")
+            "lat, lon, geocode_status, geocode_source, nota, visita_diaria")
 
-# municipio is fixed to Maringá (the only city this form serves): Gerar Semana drops other cities.
 _INSERT_SQL = text(f"""
     INSERT INTO clientes (user_id, external_id, nombre_cliente, nombre_negocio, direccion, bairro,
-                          municipio, lat, lon, geocode_status, geocode_source, nota)
+                          municipio, lat, lon, geocode_status, geocode_source, nota, visita_diaria)
     VALUES (:user_id, :external_id, :nombre_cliente, :nombre_negocio, :direccion, :bairro,
-            'Maringá', :lat, :lon, :geocode_status, :geocode_source, :nota)
+            :municipio, :lat, :lon, :geocode_status, :geocode_source, :nota, :visita_diaria)
     RETURNING {_COLUMNS}
 """)
+
+# Only the owner's row matches; the id arrives already validated as a UUID.
+_PATCH_SQL = text(f"""
+    UPDATE clientes SET municipio = COALESCE(:municipio, municipio),
+                        visita_diaria = COALESCE(:visita_diaria, visita_diaria), updated_at = NOW()
+    WHERE id = :id AND user_id = :user_id
+    RETURNING {_COLUMNS}
+""")
+MAX_CITY_KM = 40
 
 
 def _serialize(row) -> dict:
@@ -53,8 +62,14 @@ def create_cliente(
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
     located = body.lat is not None
+    municipio = body.municipio
+    if municipio is None:
+        municipio = nearest_city(body.lat, body.lon, MAX_CITY_KM) if located else "Maringá"
+        if municipio is None:
+            raise HTTPException(status_code=422, detail=f"Ninguna ciudad conocida a menos de {MAX_CITY_KM} km de esa ubicación")
     params = {
         **body.model_dump(),
+        "municipio": municipio,
         "user_id": user_id,
         "external_id": str(uuid.uuid4()),
         "geocode_status": "ok" if located else "pendiente",
@@ -85,3 +100,24 @@ def list_clientes(
         raise HTTPException(status_code=500, detail="Error al consultar clientes") from None
     response.headers["Cache-Control"] = "no-store"
     return [_serialize(row) for row in rows]
+
+
+@router.patch("/api/clientes/{cliente_id}")
+def patch_cliente(
+    cliente_id: uuid.UUID,
+    body: ClientePatch,
+    response: Response,
+    user_id: str = Depends(get_current_user_id),
+):
+    """Change municipio and/or visita_diaria of one of the caller's customers; another user's id is a 404."""
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    try:
+        with db_engine.begin() as conn:
+            row = conn.execute(_PATCH_SQL, {**body.model_dump(), "id": str(cliente_id), "user_id": user_id}).fetchone()
+    except Exception:  # driver messages embed bound parameters and row data: fixed text only
+        raise HTTPException(status_code=500, detail="Error al guardar el cliente") from None
+    if row is None:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    response.headers["Cache-Control"] = "no-store"
+    return _serialize(row)

@@ -19,7 +19,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
 from app.core.security import create_jwt_token
-from app.db.bootstrap import CLIENTES_DDL
+from app.db.bootstrap import CLIENTES_DDL, CLIENTES_VISITA_DIARIA_DDL
 from app.main import app
 from app.routes import clientes
 
@@ -48,6 +48,7 @@ def pg():
         c.execute(text(USERS_DDL))
         c.execute(text("DELETE FROM users"))
         c.execute(text(CLIENTES_DDL))
+        c.execute(text(CLIENTES_VISITA_DIARIA_DDL))
     yield engine
     engine.dispose()
 

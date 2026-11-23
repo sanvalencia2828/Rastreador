@@ -150,6 +150,11 @@ CREATE TABLE IF NOT EXISTS tarjeta_entregas (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tarjeta_entregas_user_cnpj_fecha ON tarjeta_entregas(user_id, cnpj_completo, fecha);
 """
 
+# Same DDL as migrations/010_clientes_visita_diaria.sql (a test keeps them identical).
+CLIENTES_VISITA_DIARIA_DDL = """
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS visita_diaria BOOLEAN NOT NULL DEFAULT FALSE;
+"""
+
 
 def _ensure_clientes_schema() -> None:
     """Private per-user customer list; idempotent."""
@@ -158,6 +163,7 @@ def _ensure_clientes_schema() -> None:
     try:
         with db_engine.begin() as conn:
             conn.execute(text(CLIENTES_DDL))
+            conn.execute(text(CLIENTES_VISITA_DIARIA_DDL))
     except Exception as e:
         print(f"Error initializing clientes table ({_err(e)})")
 

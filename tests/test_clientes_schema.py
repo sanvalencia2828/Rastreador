@@ -47,4 +47,4 @@ def test_ensure_clientes_schema_runs_the_ddl_and_tolerates_no_engine(monkeypatch
     engine = _Engine()
     monkeypatch.setattr(bootstrap, "db_engine", engine)
     bootstrap._ensure_clientes_schema()
-    assert engine.sql == [bootstrap.CLIENTES_DDL]
+    assert engine.sql == [bootstrap.CLIENTES_DDL, bootstrap.CLIENTES_VISITA_DIARIA_DDL]

@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { apiFetch, friendlyError } from "../../lib/auth";
+import { CIUDADES, ciudadCercana } from "../../lib/ciudades";
 
 type Coords = { lat: number; lon: number };
 
@@ -19,6 +20,8 @@ export default function NewClientePage() {
   const [nombre, setNombre] = useState("");
   const [direccion, setDireccion] = useState("");
   const [coords, setCoords] = useState<Coords | null>(null);
+  const [municipio, setMunicipio] = useState<string>("Maringá");
+  const [diaria, setDiaria] = useState(false);
   const [locating, setLocating] = useState(false);
   const [locError, setLocError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -36,6 +39,7 @@ export default function NewClientePage() {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         setCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude });
+        setMunicipio(ciudadCercana(pos.coords.latitude, pos.coords.longitude));
         setLocating(false);
       },
       (err) => {
@@ -64,6 +68,8 @@ export default function NewClientePage() {
         body: JSON.stringify({
           nombre_negocio: nombre.trim(),
           direccion: direccion.trim() || null,
+          municipio,
+          visita_diaria: diaria,
           ...(coords ?? {}),
         }),
       });
@@ -76,6 +82,7 @@ export default function NewClientePage() {
       setNombre("");
       setDireccion("");
       setCoords(null);
+      setDiaria(false);
       nameRef.current?.focus();
     } catch {
       setError("Não foi possível conectar ao servidor.");
@@ -88,7 +95,7 @@ export default function NewClientePage() {
     <main className="flex flex-col min-h-dvh px-4 py-4" style={{ maxWidth: "480px", margin: "0 auto", width: "100%" }}>
       <header className="mb-6">
         <h1 className="text-xl font-semibold tracking-tight" style={{ color: "var(--fg)" }}>Novo cliente</h1>
-        <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Maringá. Use sua localização para marcar o ponto onde você está.</p>
+        <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Use sua localização para marcar o ponto onde você está.</p>
       </header>
 
       <form onSubmit={save} className="flex flex-col" style={{ gap: "16px" }}>
@@ -120,6 +127,19 @@ export default function NewClientePage() {
           {coords && <p className="text-xs mt-2" style={{ color: "var(--success)" }}>✓ Localização capturada</p>}
           {locError && <p className="text-xs mt-2" style={{ color: "var(--error)" }}>{locError}</p>}
         </div>
+
+        <div>
+          <label htmlFor="municipio" className="text-xs block mb-2" style={{ color: "var(--muted)" }}>Ciudad</label>
+          <select id="municipio" value={municipio} onChange={(e) => setMunicipio(e.target.value)} style={FIELD}>
+            {CIUDADES.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+          </select>
+          {coords && <p className="text-xs mt-2" style={{ color: "var(--muted)" }}>Elegida por tu ubicación; cámbiala si no es correcta.</p>}
+        </div>
+
+        <label className="flex items-center text-sm" style={{ gap: "10px", minHeight: "48px", color: "var(--fg)" }}>
+          <input type="checkbox" checked={diaria} onChange={(e) => setDiaria(e.target.checked)} style={{ width: "22px", height: "22px", accentColor: "var(--accent)" }} />
+          Visitar todos los días
+        </label>
 
         <button
           type="submit" disabled={saving || !nombre.trim()}
