@@ -20,7 +20,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from sqlalchemy import text  # noqa: E402
 
+from cities import canonical_city  # noqa: E402
+
 HEADER = ["id", "cliente", "nombre_negocio", "direccion", "bairro", "municipio", "cep", "lat", "lon", "estado", "nota"]
+HEADER_DIARIA = HEADER + ["visita_diaria"]  # opcional: la cabecera de 11 columnas sigue valiendo
+BOOL_MAP = {"si": True, "sí": True, "1": True, "true": True, "no": False, "0": False, "false": False}
 STATE_MAP = {"coords_del_enlace": ("ok", "usuario"), "pendiente_geocodificar": ("pendiente", None)}
 
 # Upsert rules (enforced here only, deliberately no DB trigger):
@@ -31,13 +35,15 @@ STATE_MAP = {"coords_del_enlace": ("ok", "usuario"), "pendiente_geocodificar": (
 #  * a pending CSV row never wipes coordinates already resolved (the CASE expressions).
 UPSERT = text("""
     INSERT INTO clientes (user_id, external_id, nombre_cliente, nombre_negocio, direccion, bairro,
-                          municipio, cep, lat, lon, geocode_status, geocode_source, nota)
+                          municipio, cep, lat, lon, geocode_status, geocode_source, nota, visita_diaria)
     VALUES (:user_id, :external_id, :nombre_cliente, :nombre_negocio, :direccion, :bairro,
-            :municipio, :cep, :lat, :lon, :geocode_status, :geocode_source, :nota)
+            :municipio, :cep, :lat, :lon, :geocode_status, :geocode_source, :nota, COALESCE(:visita_diaria, FALSE))
     ON CONFLICT (user_id, external_id) DO UPDATE SET
         nombre_cliente = EXCLUDED.nombre_cliente, nombre_negocio = EXCLUDED.nombre_negocio,
         direccion = EXCLUDED.direccion, bairro = EXCLUDED.bairro, municipio = EXCLUDED.municipio,
         cep = EXCLUDED.cep, nota = EXCLUDED.nota,
+        -- CSV de 11 columnas (visita_diaria NULL): conserva lo marcado en la app
+        visita_diaria = COALESCE(:visita_diaria, clientes.visita_diaria),
         lat = CASE WHEN EXCLUDED.geocode_status = 'ok' THEN EXCLUDED.lat ELSE clientes.lat END,
         lon = CASE WHEN EXCLUDED.geocode_status = 'ok' THEN EXCLUDED.lon ELSE clientes.lon END,
         geocode_source = CASE WHEN EXCLUDED.geocode_status = 'ok' THEN EXCLUDED.geocode_source
@@ -66,7 +72,7 @@ def parse_rows(path):
         with open(path, encoding="utf-8-sig", newline="") as fh:
             reader = csv.reader(fh)
             header = next(reader, None)
-            if header != HEADER:
+            if header not in (HEADER, HEADER_DIARIA):
                 raise SeedError("cabecera inesperada")
             raw_rows = [(reader.line_num, r) for r in reader if any(c.strip() for c in r)]
     except (csv.Error, UnicodeDecodeError, OSError) as e:
@@ -74,10 +80,10 @@ def parse_rows(path):
 
     rows, errors, seen = [], [], set()
     for line, cells in raw_rows:
-        if len(cells) != len(HEADER):
+        if len(cells) != len(header):
             errors.append((line, "*", "columnas"))
             continue
-        r = dict(zip(HEADER, (c.strip() for c in cells)))
+        r = dict(zip(header, (c.strip() for c in cells)))
         bad = len(errors)
         status = source = lat = lon = None
         if not r["id"] or len(r["id"]) > 64:
@@ -98,12 +104,16 @@ def parse_rows(path):
                     errors.append((line, "lon", "invalido"))
             elif r["lat"] or r["lon"]:
                 errors.append((line, "lat/lon", "no_vacio"))
+        diaria = BOOL_MAP.get(r["visita_diaria"].casefold()) if "visita_diaria" in r else None
+        if "visita_diaria" in r and diaria is None:
+            errors.append((line, "visita_diaria", "invalido"))
         if len(errors) == bad:
             rows.append({
                 "external_id": r["id"], "nombre_cliente": r["cliente"], "nombre_negocio": r["nombre_negocio"],
-                "direccion": r["direccion"], "bairro": r["bairro"], "municipio": r["municipio"],
+                # ciudad conocida en su grafía canónica ("Maringa" -> "Maringá"); otra queda como viene
+                "direccion": r["direccion"], "bairro": r["bairro"], "municipio": canonical_city(r["municipio"]) or r["municipio"],
                 "cep": r["cep"] or None, "lat": lat, "lon": lon, "geocode_status": status,
-                "geocode_source": source, "nota": r["nota"] or None,
+                "geocode_source": source, "nota": r["nota"] or None, "visita_diaria": diaria,
             })
     return rows, errors
 
@@ -130,7 +140,8 @@ def main(argv=None) -> int:
             print("  %s %s %s" % item, file=sys.stderr)
         return 1
     ok = sum(r["geocode_status"] == "ok" for r in rows)
-    print(f"{len(rows)} filas validas ({ok} con coords, {len(rows) - ok} pendientes).")
+    diarias = sum(bool(r["visita_diaria"]) for r in rows)
+    print(f"{len(rows)} filas validas ({ok} con coords, {len(rows) - ok} pendientes, {diarias} de visita diaria).")
     if not args.apply:
         print("Dry-run: no se escribio nada. Usa --apply para cargar.")
         return 0
