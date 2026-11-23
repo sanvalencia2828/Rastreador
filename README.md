@@ -127,6 +127,7 @@ Variables de entorno (*Settings → Environment Variables*):
 | `CORS_ORIGINS` | Orígenes permitidos, p. ej. `https://<tu-proyecto>.vercel.app` |
 | `NEXT_PUBLIC_API_URL` | URL pública del backend desplegado |
 | `BACKEND_URL` | URL del backend para los rewrites del frontend |
+| `REGISTRATION_ENABLED` | `false` (sin importar mayúsculas) cierra `/auth/register` con 403 "Registro cerrado". Ausente: abierto |
 
 Probar antes de subir: `npm i -g vercel`, `vercel build`, `vercel deploy --prod`.
 
@@ -204,6 +205,8 @@ API_PORT=8000
 API_HOST=0.0.0.0
 # Obligatorio y distinto de change-me-in-production si APP_ENV≠development
 JWT_SECRET_KEY=change-me-in-production
+# false cierra /auth/register (403). Ausente = abierto: crea tu cuenta y después ciérralo
+REGISTRATION_ENABLED=true
 DEV_USER_ID=00000000-0000-0000-0000-000000000001
 CORS_ORIGINS=http://localhost:3000,http://localhost:3001,http://localhost:8000
 
@@ -221,6 +224,7 @@ OPTIMIZER_THRESHOLD_ORTOOLS=30
 
 | Variable | Descripción |
 |----------|-------------|
+| `REGISTRATION_ENABLED` | Con `false` (sin importar mayúsculas) `/auth/register` responde 403 "Registro cerrado". Si falta, el registro queda **abierto** para no dejar a nadie fuera: crea tu cuenta primero y ciérralo después. |
 | `OSRM_URL` | URL de un OSRM **propio**. Solo se usa si apunta a un host privado (localhost, IP privada, `.local`/`.internal`, nombre de servicio docker); un servidor público se ignora para no enviarle coordenadas de clientes (`app/services/geo.py`). |
 | `OPTIMIZER_THRESHOLD_ORTOOLS` | Umbral de paradas movibles (30 por defecto) desde el cual `app/optimizer.py` resuelve también con OR-Tools y devuelve la mejor solución. |
 
