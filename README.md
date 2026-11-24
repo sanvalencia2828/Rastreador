@@ -112,6 +112,8 @@ docker run -t --rm -v "$PWD/osrm-data:/data" -p 5000:5000 ghcr.io/project-osrm/o
 
 Luego en `.env`: `OSRM_URL=http://localhost:5000` (o el nombre del servicio si lo añades al compose).
 
+Producción en un VPS (API + PostGIS + Caddy con HTTPS): ver [docs/DEPLOY_VPS.md](docs/DEPLOY_VPS.md).
+
 ## ☁️ Despliegue en Vercel
 
 - **Backend (FastAPI)**: `pyproject.toml` define `[tool.vercel]` con `entrypoint = "api:app"` y `uvicorn api:app --host 0.0.0.0 --port ${PORT}` (Vercel inyecta `$PORT`).
