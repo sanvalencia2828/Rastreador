@@ -22,6 +22,9 @@ COPY cnpj_etl_polars.py .
 COPY enriquecer_lojas.py .
 COPY cities.py .
 COPY generate_sample_data.py .
+# Cargadores que se corren con `docker compose exec api` (docs/DEPLOY_VPS.md)
+COPY load_filtered_cnpj.py .
+COPY scripts ./scripts
 
 # Expose API port
 EXPOSE 8000

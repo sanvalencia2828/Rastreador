@@ -1,0 +1,80 @@
+# Producción en un VPS: API + Postgres/PostGIS + Caddy (HTTPS automático). Guía: docs/DEPLOY_VPS.md
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Lee .env de esta carpeta (copia de .env.prod.example, chmod 600). Solo caddy publica puertos;
+# la base y la API quedan en la red de Docker y no se ven desde internet.
+name: rastreador
+
+services:
+  db:
+    image: postgis/postgis:15-3.4
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?falta POSTGRES_USER en .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?falta POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: ${POSTGRES_DB:?falta POSTGRES_DB en .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # sin ports: solo accesible desde la red interna (api y docker compose exec)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks: [interna]
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    env_file: .env
+    environment:
+      APP_ENV: production
+      # la contraseña va sin escapar en la URL: genérala sin + / ni $ (ver .env.prod.example)
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      PROD_DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}  # load_filtered_cnpj.py
+      RASTREADOR_DATA_DIR: /app/.data
+    volumes:
+      - ./.data:/app/.data:ro  # CSV privados para seed_clientes.py y load_filtered_cnpj.py; fuera de git
+    depends_on:
+      db:
+        condition: service_healthy
+    # sin ports: solo la ve caddy por la red interna
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    mem_limit: 1g
+    networks: [interna]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?falta API_DOMAIN en .env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # certificados: no borrar (Let's Encrypt limita las emisiones)
+      - caddy_config:/config
+    depends_on:
+      - api
+    networks: [interna]
+    restart: unless-stopped
+
+# Red propia, no publicada. No es `internal: true` porque Caddy necesita salir a internet para
+# emitir el certificado y la API para geocodificar (Nominatim).
+networks:
+  interna:
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
