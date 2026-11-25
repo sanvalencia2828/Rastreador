@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import make_url
 
 from app.core.security import create_jwt_token
-from app.db.bootstrap import CLIENTES_DDL, CLIENTES_VISITA_DIARIA_DDL, TARJETA_ENTREGAS_DDL
+from app.db.bootstrap import CLIENTES_ATRASADO_DDL, CLIENTES_DDL, CLIENTES_VISITA_DIARIA_DDL, TARJETA_ENTREGAS_DDL
 from app.main import app
 from app.routes import planned_routes
 from app.routes import tarjetas as R
@@ -50,6 +50,7 @@ SETUP = [
         lat NUMERIC(10,7) NOT NULL DEFAULT 0, lon NUMERIC(10,7) NOT NULL DEFAULT 0, display_name TEXT)""",
     CLIENTES_DDL,
     CLIENTES_VISITA_DIARIA_DDL,
+    CLIENTES_ATRASADO_DDL,
     TARJETA_ENTREGAS_DDL,
 ]
 

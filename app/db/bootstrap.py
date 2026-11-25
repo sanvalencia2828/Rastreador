@@ -155,6 +155,11 @@ CLIENTES_VISITA_DIARIA_DDL = """
 ALTER TABLE clientes ADD COLUMN IF NOT EXISTS visita_diaria BOOLEAN NOT NULL DEFAULT FALSE;
 """
 
+# Same DDL as migrations/011_clientes_atrasado.sql (a test keeps them identical).
+CLIENTES_ATRASADO_DDL = """
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS atrasado BOOLEAN NOT NULL DEFAULT FALSE;
+"""
+
 
 def _ensure_clientes_schema() -> None:
     """Private per-user customer list; idempotent."""
@@ -164,6 +169,7 @@ def _ensure_clientes_schema() -> None:
         with db_engine.begin() as conn:
             conn.execute(text(CLIENTES_DDL))
             conn.execute(text(CLIENTES_VISITA_DIARIA_DDL))
+            conn.execute(text(CLIENTES_ATRASADO_DDL))
     except Exception as e:
         print(f"Error initializing clientes table ({_err(e)})")
 
