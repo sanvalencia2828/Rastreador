@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { apiFetch } from "../lib/auth";
 import { CIUDADES } from "../lib/ciudades";
+import { alternarVisitado, guardarRuta, hoy, leerCrudo, parsear, suscribir } from "../lib/visitados";
 
 interface Stop {
   id: string;
@@ -55,7 +56,14 @@ export default function ClientesDelDia() {
   const [clientes, setClientes] = useState<ClienteOption[] | null>(null);
   const [extra, setExtra] = useState<Set<string>>(new Set());
   const [filtro, setFiltro] = useState("");
-  const [result, setResult] = useState<DiaResult | null>(null);
+  // ruta y visitados del día viven en localStorage (lib/visitados): sobreviven a recargar la página
+  const fecha = hoy();
+  const raw = useSyncExternalStore(suscribir, () => leerCrudo(fecha), () => "");
+  const dia = useMemo(() => parsear(raw), [raw]);
+  const ruta = dia.ruta as DiaResult | null;
+  const result = ruta && Array.isArray(ruta.stops) ? ruta : null;
+  const visitados = new Set(dia.visitados);
+  const hechas = result ? result.stops.filter((s) => visitados.has(s.id)).length : 0;
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -100,7 +108,7 @@ export default function ClientesDelDia() {
         setError(typeof data.detail === "string" ? data.detail : "Error al generar la ruta");
         return;
       }
-      setResult(data);
+      guardarRuta(fecha, data);
     } catch {
       setError("Error de conexión");
     } finally {
@@ -180,6 +188,18 @@ export default function ClientesDelDia() {
 
       {result && (
         <div className="flex flex-col gap-3" aria-live="polite">
+          {result.stops.length > 0 && (
+            <div className="sticky top-0 z-10 flex flex-col gap-1 py-2" style={{ background: "var(--bg)" }}>
+              <div className="flex justify-between text-sm font-medium" style={{ color: "var(--fg)" }}>
+                <span id="progreso-label">Visitados</span>
+                <span>{hechas}/{result.stops.length}</span>
+              </div>
+              <div role="progressbar" aria-labelledby="progreso-label" aria-valuemin={0} aria-valuemax={result.stops.length}
+                aria-valuenow={hechas} style={{ height: "10px", borderRadius: "999px", background: "var(--border)", overflow: "hidden" }}>
+                <div style={{ width: `${(hechas / result.stops.length) * 100}%`, height: "100%", background: "var(--accent)", transition: "width .2s" }} />
+              </div>
+            </div>
+          )}
           <p className="text-sm" style={{ color: "var(--muted)" }}>
             {result.stops.length} paradas · {result.distance_km} km · salida {result.hora_salida} · fin aprox. {result.hora_fin}
           </p>
@@ -191,7 +211,7 @@ export default function ClientesDelDia() {
           ))}
           <ol className="flex flex-col gap-3">
             {result.stops.map((s, i) => (
-              <li key={s.id} className="flex gap-3 p-4" style={card}>
+              <li key={s.id} className="flex gap-3 p-4" style={{ ...card, opacity: visitados.has(s.id) ? 0.5 : 1 }}>
                 <span aria-hidden className="flex items-center justify-center font-bold shrink-0"
                   style={{ width: "40px", height: "40px", borderRadius: "999px", background: "var(--accent)", color: "#0f0f0f", fontSize: "18px" }}>
                   {i + 1}
@@ -207,6 +227,11 @@ export default function ClientesDelDia() {
                     {s.diario && <span style={badge("var(--accent-dim)", "var(--accent)")}>diario</span>}
                     {s.atrasado && <span style={badge("color-mix(in srgb, var(--error) 15%, transparent)", "var(--error)")}>atrasado</span>}
                   </div>
+                  <label className="flex items-center gap-3 mt-1 font-medium" style={{ minHeight: "48px", color: "var(--fg)" }}>
+                    <input type="checkbox" checked={visitados.has(s.id)} onChange={() => alternarVisitado(fecha, s.id)}
+                      style={{ width: "24px", height: "24px", accentColor: "var(--accent)" }} />
+                    visitado
+                  </label>
                   <a href={`https://www.google.com/maps/dir/?api=1&destination=${s.lat},${s.lon}`} target="_blank" rel="noopener noreferrer"
                     className="flex items-center justify-center font-medium mt-1"
                     style={{ ...big, ...card, color: "var(--accent)", textDecoration: "none" }}>
