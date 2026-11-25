@@ -1,7 +1,7 @@
 """DB-backed planned routes: CRUD, completion, generation."""
 
 import os
-from itertools import combinations
+from itertools import combinations, permutations
 from datetime import date, datetime, timezone
 from typing import List, Dict, Any, Optional
 
@@ -11,7 +11,11 @@ from sqlalchemy import text
 from app.core.database import db_engine
 from app.core.security import get_current_user_id
 from app.schemas.planned_route import (
+    ClienteDiaListed,
+    ClienteDiaStop,
     ClienteListed,
+    ClientesDiaRequest,
+    ClientesDiaResponse,
     GeneratedStop,
     PlannedRouteCreate,
     RouteCompleteRequest,
@@ -25,14 +29,14 @@ from app.schemas.planned_route import (
     WeekRouteResponse,
 )
 from app.services.day_route import DIAS_SEMANA, cluster_days, is_maringa, maps_links, order_day, path_km
-from app.services.geo import cnae_to_category, fix_encoding
+from app.services.geo import cnae_to_category, fix_encoding, haversine_km
 from app.services.route_planning import (
     _get_route_detail,
     _route_distance_km,
     nearest_neighbor_order,
 )
 from app.services.visit_metrics import recalculate_visit_interval
-from cities import canonical_city, city_km
+from cities import CITIES, canonical_city, city_km
 
 router = APIRouter()
 
@@ -595,6 +599,9 @@ def delete_route(route_id: str, user_id: str = Depends(get_current_user_id)):
 MARINGA_MAX_STOPS = 10  # tope de paradas por dia en Maringa (clientes)
 MAX_MIX_KM = 60  # dos ciudades mas lejanas no comparten ruta diaria
 WARN_MIX_KM = 40  # se permiten (p. ej. Maringa y Arapongas, ~52 km) pero se avisa
+VISITA_MIN = 15  # /clientes-dia: minutos por visita para la hora estimada
+VELOCIDAD_KMH = 40  # /clientes-dia: velocidad media (linea recta) para la hora estimada
+MAX_PERMUT_CIUDADES = 7  # hasta aqui se prueban todos los ordenes de ciudades (7! = 5040)
 
 
 def _check_cities(names: list[str]) -> tuple[list[str], list[str]]:
@@ -627,7 +634,7 @@ def _load_clientes(user_id: str):
             return conn.execute(
                 text("""
                     SELECT id, nombre_cliente, nombre_negocio, direccion, bairro, municipio, lat, lon, geocode_status,
-                           visita_diaria
+                           visita_diaria, atrasado
                     FROM clientes WHERE user_id = :u ORDER BY external_id
                 """),
                 {"u": user_id},
@@ -882,3 +889,92 @@ def optimize_route(body: RouteOptimizeRequest):
         "total_distance_km": round(total_distance_km, 3),
         "total_duration_min": round(total_distance_km / 40.0 * 60.0, 1),
     }
+
+
+def _city_sequence(start, groups: dict) -> list[str]:
+    """Orden de ciudades con menos km: inicio -> centro de los clientes de cada ciudad, en cadena."""
+    centers = {c: (sum(p[0] for p in g) / len(g), sum(p[1] for p in g) / len(g)) for c, g in groups.items()}
+
+    def cost(seq):
+        pts = [start] + [centers[c] for c in seq]
+        return path_km(pts)
+
+    names = sorted(groups)
+    if len(names) <= MAX_PERMUT_CIUDADES:
+        return list(min(permutations(names), key=cost))
+    # shortcut: con mas ciudades, la mas cercana cada vez (no optima); subir el limite si hiciera falta
+    seq, here = [], start
+    while names:
+        nxt = min(names, key=lambda c: haversine_km(*here, *centers[c]))
+        seq.append(nxt)
+        names.remove(nxt)
+        here = centers[nxt]
+    return seq
+
+
+def _hhmm(minutes: float) -> str:
+    m = round(minutes) % (24 * 60)
+    return f"{m // 60:02d}:{m % 60:02d}"
+
+
+@router.post("/api/routes/clientes-dia", response_model=ClientesDiaResponse)
+def clientes_dia(body: ClientesDiaRequest, user_id: str = Depends(get_current_user_id)):
+    """Ruta de hoy: diarios + atrasados + extras; ciudad por ciudad y vecino mas cercano dentro de cada una.
+
+    Si no caben en max_paradas se descartan primero los extras, luego los diarios y por ultimo los atrasados
+    (a igual prioridad, el mas lejano del inicio). Distancias en linea recta; nada se guarda.
+    """
+    if not db_engine:
+        raise HTTPException(status_code=500, detail="Database connection unavailable")
+    if body.start_lat is not None:
+        start = (body.start_lat, body.start_lon)
+    else:
+        name = canonical_city(body.start_city)
+        if name is None:
+            raise HTTPException(status_code=422, detail=f"Ciudad desconocida: {body.start_city[:60]}")
+        city = next(c for c in CITIES if c.name == name)
+        start = (city.lat, city.lon)
+
+    extra = {str(i) for i in body.extra_ids}
+    rows = _load_clientes(user_id)
+    found = {str(r.id) for r in rows}
+    wanted = [r for r in rows if r.visita_diaria or r.atrasado or str(r.id) in extra]
+    nombre = lambda r: r.nombre_negocio or r.nombre_cliente or ""  # noqa: E731
+    ciudad = lambda r: canonical_city(r.municipio) or r.municipio or ""  # noqa: E731
+    listed = lambda r: ClienteDiaListed(id=str(r.id), nombre=nombre(r), ciudad=ciudad(r))  # noqa: E731
+    located = [r for r in wanted if r.geocode_status == "ok" and r.lat is not None and r.lon is not None]
+    pt = lambda r: (float(r.lat), float(r.lon))  # noqa: E731
+    # menor = se queda: atrasado, luego diario, luego extra; a igual prioridad, el mas cercano al inicio
+    located.sort(key=lambda r: (not r.atrasado, not r.visita_diaria, haversine_km(*start, *pt(r))))
+    keep, dropped = located[:body.max_paradas], located[body.max_paradas:]
+
+    groups: dict[str, list] = {}
+    for r in keep:
+        groups.setdefault(ciudad(r), []).append(r)
+    ordered, here = [], start
+    for c in _city_sequence(start, {c: [pt(r) for r in g] for c, g in groups.items()}):
+        g = groups[c]
+        idx = order_day([pt(r) for r in g], here)
+        ordered += [g[i] for i in idx]
+        here = pt(ordered[-1])
+
+    h, m = map(int, body.hora_salida.split(":"))
+    t, prev, stops = h * 60 + m, start, []
+    for r in ordered:
+        km = haversine_km(*prev, *pt(r))
+        t += km / VELOCIDAD_KMH * 60
+        stops.append(ClienteDiaStop(
+            id=str(r.id), nombre=nombre(r), ciudad=ciudad(r), lat=pt(r)[0], lon=pt(r)[1],
+            km_desde_anterior=round(km, 1), llegada=_hhmm(t), diario=bool(r.visita_diaria), atrasado=bool(r.atrasado),
+        ))
+        t += VISITA_MIN
+        prev = pt(r)
+    pts = [start] + [pt(r) for r in ordered]
+    print(f"clientes-dia: {len(wanted)} pedidos, {len(stops)} en ruta, {len(dropped)} fuera por tope")
+    return ClientesDiaResponse(
+        hora_salida=body.hora_salida, hora_fin=_hhmm(t), distance_km=round(path_km(pts), 2), stops=stops,
+        maps_links=maps_links(pts) if stops else [],
+        sin_ubicacion=[listed(r) for r in wanted if r not in located],
+        fuera_por_tope=[listed(r) for r in dropped],
+        extra_no_encontrados=len(extra - found),
+    )

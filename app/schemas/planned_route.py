@@ -3,7 +3,9 @@
 from datetime import date, datetime
 from typing import List, Dict, Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from uuid import UUID
+
+from pydantic import BaseModel, Field, model_validator
 
 
 class RouteStopCreate(BaseModel):
@@ -191,6 +193,54 @@ class WeekRouteResponse(BaseModel):
     sin_asignar: list[ClienteListed] = []  # no caben en ningun dia con el tope
     avisos: list[str] = []  # p. ej. ciudades lejanas entre si en una misma ruta
 
+
+
+class ClientesDiaRequest(BaseModel):
+    """Ruta de hoy con mis clientes: diarios + atrasados + extras, desde una ciudad o un punto (no se guarda)."""
+    start_city: Optional[str] = Field(None, max_length=60)
+    start_lat: Optional[float] = Field(None, ge=-90, le=90)
+    start_lon: Optional[float] = Field(None, ge=-180, le=180)
+    hora_salida: str = Field("09:00", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    extra_ids: list[UUID] = Field(default_factory=list, max_length=100)
+    max_paradas: int = Field(12, ge=1, le=50)
+
+    @model_validator(mode="after")
+    def _start(self):
+        if (self.start_lat is None) != (self.start_lon is None):
+            raise ValueError("start_lat y start_lon van juntos")
+        if self.start_city is None and self.start_lat is None:
+            raise ValueError("indica start_city o start_lat/start_lon")
+        return self
+
+
+class ClienteDiaStop(BaseModel):
+    id: str
+    nombre: str
+    ciudad: str
+    lat: float
+    lon: float
+    km_desde_anterior: float  # linea recta
+    llegada: str  # HH:MM estimada
+    diario: bool
+    atrasado: bool
+
+
+class ClienteDiaListed(BaseModel):
+    id: str
+    nombre: str
+    ciudad: str
+
+
+class ClientesDiaResponse(BaseModel):
+    hora_salida: str
+    hora_fin: str  # al terminar la ultima visita
+    distance_km: float
+    distance_kind: str = "linea_recta"
+    stops: list[ClienteDiaStop]
+    maps_links: list[str] = []
+    sin_ubicacion: list[ClienteDiaListed] = []
+    fuera_por_tope: list[ClienteDiaListed] = []
+    extra_no_encontrados: int = 0  # ids pedidos que no son clientes del usuario
 
 class RoutePoint(BaseModel):
     id: int
