@@ -383,6 +383,10 @@ cuando falta `BACKEND_URL`.
 (`frontend/next.config.ts`) se fijan **al compilar**: si solo cambias la variable y no
 redespliegas, el frontend sigue llamando a la API vieja.
 
+> **Si el frontend llama a un prefijo nuevo, hay que agregarlo a `frontend/next.config.ts`**
+> (arreglo `BACKEND_PREFIXES`); si no, Vercel responde el 404 de Next. La prueba
+> `tests/test_frontend_rewrites.py` lo verifica.
+
 Prueba en el sitio de Vercel, en este orden:
 
 1. **Login** con la cuenta del paso e.

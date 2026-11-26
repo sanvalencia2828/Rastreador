@@ -128,7 +128,7 @@ Variables de entorno (*Settings → Environment Variables*):
 | `JWT_SECRET_KEY` | Obligatorio y distinto de `change-me-in-production` si `APP_ENV≠development` |
 | `CORS_ORIGINS` | Orígenes permitidos, p. ej. `https://<tu-proyecto>.vercel.app` |
 | `NEXT_PUBLIC_API_URL` | URL pública del backend desplegado |
-| `BACKEND_URL` | URL del backend para los rewrites del frontend |
+| `BACKEND_URL` | URL del backend para los rewrites del frontend. Se fija al compilar: después de cambiarla hay que **redesplegar** |
 | `REGISTRATION_ENABLED` | `false` (sin importar mayúsculas) cierra `/auth/register` con 403 "Registro cerrado". Ausente: abierto |
 
 Probar antes de subir: `npm i -g vercel`, `vercel build`, `vercel deploy --prod`.
