@@ -11,9 +11,12 @@ Date: 2026-05-30
 import os
 import json
 import argparse
-import hashlib
+import sys
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+from app.services.geo import assign_geographic_coords, synthetic_coords_allowed  # noqa: E402
 
 
 # Lazy imports for geographic and scientific libs
@@ -47,58 +50,11 @@ def run_kde(input_path: str, out_dir: str, resolution: float, bandwidths: list):
 
     print(f"Successfully loaded {len(data)} businesses.")
 
-    # ------------------------------------------------------------------------------
-    # GEOGRAPHIC COORDS ASSIGNMENT (Deterministic logic from api.py)
-    # ------------------------------------------------------------------------------
-    HUBS = {
-        1: {"coords": [-51.1610, -23.3110]},
-        2: {"coords": [-51.1890, -23.3310]},
-        3: {"coords": [-51.1670, -23.3220]},
-        4: {"coords": [-51.1480, -23.2720]},
-        5: {"coords": [-51.1550, -23.3180]},
-    }
-
-    def assign_geographic_coords(
-        cnpj: str, business_type: str, municipio: str = None
-    ) -> list:
-        h = hashlib.md5(cnpj.encode("utf-8")).hexdigest()
-        hash_val = int(h, 16)
-        city_key = municipio.strip().lower() if municipio else ""
-
-        center_lng, center_lat = None, None
-        if city_key.startswith("camb"):
-            center_lng, center_lat = [-51.2782, -23.2758]
-        elif city_key.startswith("ibipor"):
-            center_lng, center_lat = [-51.0478, -23.2694]
-        elif city_key.startswith("apucar") or "apucar" in city_key:
-            center_lng, center_lat = [-51.4614, -23.5521]
-        elif "janda" in city_key or "jata" in city_key:
-            center_lng, center_lat = [-51.6447, -23.6064]
-
-        if center_lng is not None and center_lat is not None:
-            lng_factor = ((hash_val % 1000) - 500) / 500.0
-            lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
-            lng_offset = (lng_factor**3) * 0.015
-            lat_offset = (lat_factor**3) * 0.015
-            return [center_lng + lng_offset, center_lat + lat_offset]
-
-        if business_type == "gastronomy":
-            hub_idx = [2, 3, 5, 1, 4][hash_val % 5]
-        else:
-            hub_idx = [1, 4, 2, 3, 5][hash_val % 5]
-
-        hub = HUBS[hub_idx]
-        center_lng, center_lat = hub["coords"]
-        lng_factor = ((hash_val % 1000) - 500) / 500.0
-        lat_factor = (((hash_val // 1000) % 1000) - 500) / 500.0
-        lng_offset = (lng_factor**3) * 0.0075
-        lat_offset = (lat_factor**3) * 0.0075
-        return [center_lng + lng_offset, center_lat + lat_offset]
-
     # Process and build GeoDataFrame
     points = []
     types = []
     names = []
+    skipped = 0
 
     for biz in data:
         cnpj = (
@@ -109,10 +65,22 @@ def run_kde(input_path: str, out_dir: str, resolution: float, bandwidths: list):
         biz_type = biz.get("business_type", "retail")
         municipio = biz.get("municipio")
 
-        coords = assign_geographic_coords(cnpj, biz_type, municipio)
+        lat, lon = biz.get("latitude"), biz.get("longitude")
+        if lat is not None and lon is not None:
+            coords = [float(lon), float(lat)]
+        elif synthetic_coords_allowed():
+            coords = assign_geographic_coords(cnpj, biz_type, municipio)
+        else:
+            skipped += 1
+            continue
         points.append(Point(coords[0], coords[1]))
         types.append(biz_type)
         names.append(biz.get("nome_fantasia", "Comercio"))
+
+    print(f"Businesses without real coordinates skipped: {skipped}")
+    if not points:
+        print("No business has real coordinates; nothing to estimate. (ALLOW_SYNTHETIC_COORDS=1 in development uses invented ones.)")
+        return
 
     gdf = gpd.GeoDataFrame(
         {"nome": names, "type": types}, geometry=points, crs="EPSG:4326"

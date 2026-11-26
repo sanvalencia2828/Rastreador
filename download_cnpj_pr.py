@@ -30,7 +30,7 @@ def load_env_list(env_key: str, default_value: str) -> List[str]:
 
 
 TARGET_MUNICIPIOS = load_env_list(
-    "TARGET_MUNICIPIOS", "LONDRINA,CAMBE,IBIPORA,ROLANDIA,ARAPONGAS,APUCARANA,CAMBIRA,JANDAIA DO SUL"
+    "TARGET_MUNICIPIOS", "LONDRINA,CAMBE,IBIPORA,ROLANDIA,ARAPONGAS,APUCARANA,CAMBIRA,JANDAIA DO SUL,MARINGA"
 )
 
 MUN_NAME_MAP = {
@@ -42,6 +42,7 @@ MUN_NAME_MAP = {
     "APUCARANA": "Apucarana",
     "CAMBIRA": "Cambira",
     "JANDAIA DO SUL": "Jandaia do Sul",
+    "MARINGA": "Maringá",
 }
 
 TECH_CNAE_CODES = {6201501, 6202300, 6209100}
@@ -130,7 +131,7 @@ def main():
 
     print("=" * 60)
     print("  Data Pipeline CNPJ - Sector Tech (DuckDB → PostgreSQL)")
-    print("  Filtro: Tech + Repairs | Municipios: 5 RML")
+    print("  Filtro: Tech + Repairs | Municipios: 9 RML")
     print("=" * 60)
 
     # 1. Conexión DuckDB

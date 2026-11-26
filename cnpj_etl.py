@@ -41,8 +41,8 @@ def load_env_file(dotenv_path: str = ".env") -> None:
 load_env_file()
 
 
-# Regional cities IBGE codes (Londrina, Cambé, Ibiporã, Apucarana, Jandaia do Sul)
-REGIONAL_IBGE_CODES = [4113700, 4103701, 4109807, 4101408, 4112108]
+# Regional cities IBGE codes (Londrina, Cambé, Ibiporã, Apucarana, Jandaia do Sul, Maringá)
+REGIONAL_IBGE_CODES = [4113700, 4103701, 4109807, 4101408, 4112108, 4115200]
 
 # CNAE codes for retail and gastronomy (simplified list)
 RETAIL_CNAE_CODES = [

@@ -1,0 +1,28 @@
+services:
+  - type: web
+    name: rastreador-api
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: APP_ENV
+        value: production
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: rastreador-db
+          property: connectionString
+      - key: DEMO_USER
+        sync: false
+      - key: DEMO_PASSWORD
+        sync: false
+
+databases:
+  - name: rastreador-db
+    databaseName: londrina_comercio
+    user: rastreador
+    plan: free
