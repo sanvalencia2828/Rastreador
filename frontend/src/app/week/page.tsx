@@ -3,12 +3,14 @@
 import { useCallback, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "../lib/auth";
+import { CIUDADES } from "../lib/ciudades";
 
 interface Stop {
   nome_fantasia: string;
   bairro: string;
   logradouro: string;
   cliente_id?: string | null;
+  diario?: boolean;
 }
 
 interface WeekDay {
@@ -32,11 +34,13 @@ interface WeekResult {
   fuera_de_maringa: Listed[];
   pendientes: Listed[];
   sin_asignar: Listed[];
+  avisos?: string[];
 }
 
 export default function WeekPage() {
   const [days, setDays] = useState(5);
   const [maxStops, setMaxStops] = useState(10);
+  const [cities, setCities] = useState<string[]>(["Maringá"]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<WeekResult | null>(null);
@@ -48,7 +52,7 @@ export default function WeekPage() {
       const res = await apiFetch("/api/routes/generate-week", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ days, max_stops: maxStops }),
+        body: JSON.stringify({ days, max_stops: maxStops, cities }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -62,10 +66,13 @@ export default function WeekPage() {
     } finally {
       setLoading(false);
     }
-  }, [days, maxStops]);
+  }, [days, maxStops, cities]);
+
+  const toggleCity = (name: string) =>
+    setCities((cur) => (cur.includes(name) ? cur.filter((c) => c !== name) : [...cur, name]));
 
   const lists: Array<[string, Listed[] | undefined]> = [
-    ["Fora de Maringá (viagem à parte)", result?.fuera_de_maringa],
+    ["Fuera de las ciudades elegidas", result?.fuera_de_maringa],
     ["Pendentes de localizar", result?.pendientes],
     ["Sem atribuir (excedem o limite de paradas)", result?.sin_asignar],
   ];
@@ -77,7 +84,7 @@ export default function WeekPage() {
           ← Gerar Rota
         </Link>
         <h1 className="text-xl font-semibold tracking-tight" style={{ color: "var(--fg)" }}>Rotas da Semana</h1>
-        <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Seus clientes de Maringá agrupados por proximidade, um grupo por dia</p>
+        <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Tus clientes de las ciudades elegidas, agrupados por cercanía; los de visita diaria salen todos los días</p>
       </header>
 
       <section>
@@ -94,13 +101,24 @@ export default function WeekPage() {
             />
           </div>
         ))}
+        <fieldset className="mb-5">
+          <legend className="text-xs mb-2" style={{ color: "var(--muted)" }}>Ciudades</legend>
+          <div className="flex flex-wrap" style={{ gap: "8px" }}>
+            {CIUDADES.map((c) => (
+              <label key={c.name} className="flex items-center text-xs" style={{ gap: "6px", minHeight: "36px", padding: "4px 10px", border: "1px solid var(--border)", borderRadius: "999px", color: "var(--fg)" }}>
+                <input type="checkbox" checked={cities.includes(c.name)} onChange={() => toggleCity(c.name)} style={{ accentColor: "var(--accent)" }} />
+                {c.name}
+              </label>
+            ))}
+          </div>
+        </fieldset>
         <button
           onClick={generate}
-          disabled={loading}
+          disabled={loading || cities.length === 0}
           style={{
             padding: "12px 24px", background: "var(--accent)", color: "#0f0f0f", fontWeight: 500, fontSize: "14px",
             borderRadius: "var(--radius)", width: "100%", border: "none",
-            cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.5 : 1,
+            cursor: loading ? "not-allowed" : "pointer", opacity: loading || cities.length === 0 ? 0.5 : 1,
           }}
         >
           {loading ? "Gerando..." : "Gerar Semana"}
@@ -115,8 +133,12 @@ export default function WeekPage() {
             {result.total_clientes} clientes. Distâncias aproximadas em linha reta (não por rua).
           </p>
 
+          {result.avisos?.map((a) => (
+            <p key={a} className="text-xs mb-3" style={{ color: "var(--warning, var(--muted))" }}>⚠ {a}</p>
+          ))}
+
           {result.days.length === 0 && (
-            <p className="text-sm" style={{ color: "var(--fg-secondary)" }}>Nenhum cliente localizado em Maringá.</p>
+            <p className="text-sm" style={{ color: "var(--fg-secondary)" }}>Ningún cliente ubicado en las ciudades elegidas.</p>
           )}
 
           {result.days.map((d) => (
@@ -130,7 +152,7 @@ export default function WeekPage() {
               <ol className="text-xs" style={{ color: "var(--fg-secondary)", paddingLeft: "20px", listStyle: "decimal" }}>
                 {d.stops.map((s, i) => (
                   <li key={s.cliente_id ?? i} style={{ padding: "2px 0" }}>
-                    <span style={{ color: "var(--fg)" }}>{s.nome_fantasia}</span> — {s.logradouro}{s.bairro ? `, ${s.bairro}` : ""}
+                    <span style={{ color: "var(--fg)" }}>{s.nome_fantasia}</span>{s.diario && <span style={{ marginLeft: "6px", padding: "1px 6px", borderRadius: "999px", fontSize: "10px", fontWeight: 600, background: "var(--accent-dim)", color: "var(--accent)" }}>Diario</span>} — {s.logradouro}{s.bairro ? `, ${s.bairro}` : ""}
                   </li>
                 ))}
               </ol>

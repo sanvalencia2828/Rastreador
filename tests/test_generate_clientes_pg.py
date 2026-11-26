@@ -12,7 +12,7 @@ from sqlalchemy.engine import make_url
 
 from app.core.security import create_jwt_token
 from app.db import bootstrap
-from app.db.bootstrap import CLIENTES_DDL
+from app.db.bootstrap import CLIENTES_ATRASADO_DDL, CLIENTES_DDL, CLIENTES_VISITA_DIARIA_DDL
 from app.main import app
 from app.routes import cities, planned_routes
 
@@ -31,6 +31,8 @@ DDL = [
         stop_order INTEGER NOT NULL, address TEXT NOT NULL, lat NUMERIC(10,7) NOT NULL, lon NUMERIC(10,7) NOT NULL,
         cep VARCHAR(10), display_name TEXT)""",
     CLIENTES_DDL,
+    CLIENTES_VISITA_DIARIA_DDL,
+    CLIENTES_ATRASADO_DDL,
 ]
 
 
@@ -59,15 +61,15 @@ def _user(engine, name):
         return str(c.execute(text("INSERT INTO users(username) VALUES (:n) RETURNING id"), {"n": name}).scalar())
 
 
-def _cliente(engine, uid, n, municipio="Maringa", lat=-23.42, lon=-51.93, status="ok", name=None):
+def _cliente(engine, uid, n, municipio="Maringa", lat=-23.42, lon=-51.93, status="ok", name=None, diaria=False):
     if status != "ok":
         lat = lon = None
     with engine.begin() as c:
         c.execute(
             text("""INSERT INTO clientes(user_id, external_id, nombre_cliente, nombre_negocio, direccion, bairro,
-                    municipio, lat, lon, geocode_status, geocode_source)
-                    VALUES (:u, :e, 'c', :nm, 'Rua X', 'Zona 1', :m, :la, :lo, :s, CASE WHEN :s = 'ok' THEN 'usuario' END)"""),
-            {"u": uid, "e": str(n), "nm": name or f"Neg {n}", "m": municipio, "la": lat, "lo": lon, "s": status},
+                    municipio, lat, lon, geocode_status, geocode_source, visita_diaria)
+                    VALUES (:u, :e, 'c', :nm, 'Rua X', 'Zona 1', :m, :la, :lo, :s, CASE WHEN :s = 'ok' THEN 'usuario' END, :d)"""),
+            {"u": uid, "e": str(n), "nm": name or f"Neg {n}", "m": municipio, "la": lat, "lo": lon, "s": status, "d": diaria},
         )
 
 
@@ -155,3 +157,26 @@ def test_day_selector_splits_clientes_into_five_groups_without_overlap(pg):
     assert labels == ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"]
     assert d["sin_asignar"] == 0
     assert client.post("/api/routes/generate", headers=_h(a), json={"city_id": cid, "day": 5}).status_code == 422
+
+
+def test_week_with_daily_clientes_in_two_cities(pg):
+    a, b = _user(pg, "a"), _user(pg, "b")
+    _cliente(pg, a, 1, municipio="Arapongas", lat=-23.395, lon=-51.411, name="Diario-Arapongas", diaria=True)
+    _cliente(pg, a, 2, municipio="APUCARANA", lat=-23.552, lon=-51.461, name="Diario-Apucarana", diaria=True)
+    for i in range(8):
+        _cliente(pg, a, 10 + i, municipio="Arapongas" if i % 2 else "Apucarana", lat=-23.40 - i * 0.02, lon=-51.43)
+    _cliente(pg, a, 50, municipio="Maringa", name="En-Maringa")
+    _cliente(pg, b, 60, municipio="Arapongas", lat=-23.40, lon=-51.42, name="SECRETO-DE-B", diaria=True)
+    r = TestClient(app).post("/api/routes/generate-week", headers=_h(a),
+                             json={"cities": ["Arapongas", "Apucarana"], "days": 5, "max_stops": 4})
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert len(d["days"]) == 5 and d["avisos"] == []
+    normales = []
+    for day in d["days"]:
+        names = [s["nome_fantasia"] for s in day["stops"]]
+        assert {"Diario-Arapongas", "Diario-Apucarana"} <= set(names) and len(names) <= 4
+        normales += [s["nome_fantasia"] for s in day["stops"] if not s["diario"]]
+    assert sorted(normales) == sorted(f"Neg {10 + i}" for i in range(8))
+    assert [x["nombre"] for x in d["fuera_de_maringa"]] == ["En-Maringa"]
+    assert "SECRETO-DE-B" not in r.text

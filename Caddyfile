@@ -1,0 +1,15 @@
+# Proxy HTTPS delante de la API (docker-compose.prod.yml). Caddy pide y renueva el certificado solo;
+# API_DOMAIN viene de .env (p. ej. api.tudominio.com). Sin CORS aquí: la API lo maneja con CORS_ORIGINS.
+{$API_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	reverse_proxy api:8000
+}

@@ -4,6 +4,7 @@ import { apiFetch } from "../lib/auth";
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
+import ClientesDelDia from "./ClientesDelDia";
 
 interface CityOption {
   id: string | number;
@@ -33,6 +34,7 @@ interface GeneratedStop {
   days_since_visit: number | null;
   priority: string | number | null;
   cliente_id?: string | null;
+  diario?: boolean;
 }
 
 interface ListedCliente {
@@ -55,6 +57,7 @@ interface GenerateResult {
   day_label?: string | null;
   day_counts?: number[];
   sin_asignar?: number;
+  avisos?: string[];
 }
 
 const DAYS = ["Lunes", "Martes", "Miercoles", "Jueves", "Viernes"];
@@ -270,6 +273,8 @@ export default function GeneratePage() {
         <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Seleciona lojas por visitar priorizando as que faz mais tempo sem visita</p>
       </header>
 
+      <ClientesDelDia />
+
       {fetchError && (
         <p className="text-xs mb-4" style={{ color: "var(--error)" }}>{fetchError}</p>
       )}
@@ -431,6 +436,9 @@ export default function GeneratePage() {
               </p>
             ))}
             {totalDistance === null && <div className="mb-4" />}
+            {result.avisos?.map((a) => (
+              <p key={a} className="text-xs mb-2" style={{ color: "var(--warning, var(--muted))" }}>⚠ {a}</p>
+            ))}
 
             <div style={{ maxHeight: "400px", overflowY: "auto", overflowX: "auto", WebkitOverflowScrolling: "touch", borderRadius: "var(--radius)", border: "1px solid var(--border)" }}>
               <div style={{ minWidth: "600px" }}>
@@ -450,7 +458,7 @@ export default function GeneratePage() {
                     }}
                   >
                     <div style={{ padding: "8px", fontSize: "12px", color: "var(--muted)" }}>{i + 1}</div>
-                    <div style={{ padding: "8px", fontSize: "12px", color: "var(--fg)" }}>{stop.nome_fantasia}</div>
+                    <div style={{ padding: "8px", fontSize: "12px", color: "var(--fg)" }}>{stop.nome_fantasia}{stop.diario && <span style={{ marginLeft: "6px", padding: "1px 6px", borderRadius: "999px", fontSize: "10px", fontWeight: 600, background: "var(--accent-dim)", color: "var(--accent)" }}>Diario</span>}</div>
                     <div style={{ padding: "8px", fontSize: "12px", color: "var(--fg-secondary)" }}>{stop.bairro}</div>
                     <div style={{ padding: "8px", fontSize: "12px", color: "var(--fg-secondary)" }}>{stop.logradouro}</div>
                     <div style={{ padding: "8px", fontSize: "12px", color: daysColor(stop.days_since_visit ?? 0), textAlign: "right", fontWeight: 600 }}>{stop.days_since_visit ?? "—"}</div>

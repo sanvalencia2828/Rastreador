@@ -5,7 +5,19 @@ import { apiFetch } from "../lib/auth";
 import { useState, useCallback } from "react";
 import Link from "next/link";
 
-type ExportType = "visits" | "clients" | "coverage" | null;
+type ExportType = "visits" | "clients" | "marked" | "coverage" | null;
+
+type Cliente = {
+  nombre_cliente: string | null; nombre_negocio: string | null; direccion: string | null; bairro: string | null;
+  municipio: string | null; lat: number | null; lon: number | null; nota: string | null;
+};
+
+// Sin telefono ni correo: el CSV se comparte fuera de la app.
+const CLIENTE_COLS = ["nombre_cliente", "nombre_negocio", "direccion", "bairro", "municipio", "lat", "lon", "nota"] as const;
+
+function clientesToRows(data: Cliente[]): string[][] {
+  return [[...CLIENTE_COLS], ...data.map(c => CLIENTE_COLS.map(k => (c[k] == null ? "" : String(c[k]))))];
+}
 
 function downloadCSV(filename: string, rows: string[][]) {
   const csv = rows.map(r =>
@@ -81,6 +93,26 @@ export default function ReportsPage() {
   const handleExportClients = useCallback(async () => {
     setExporting("clients");
     try {
+      const res = await apiFetch("/api/clientes?limit=500");
+      if (res.status === 401) { showMessage("Tu sesión expiró. Entra de nuevo.", "error"); return; }
+      if (!res.ok) { showMessage("El servidor no pudo leer los clientes.", "error"); return; }
+      const data: Cliente[] = await res.json();
+      if (data.length === 0) {
+        showMessage("Sin clientes para exportar.", "error");
+        return;
+      }
+      downloadCSV(`clientes_${todayStamp()}.csv`, clientesToRows(data));
+      showMessage(`Exportados ${data.length} clientes.`, "success");
+    } catch {
+      showMessage("Error al exportar clientes.", "error");
+    } finally {
+      setExporting(null);
+    }
+  }, [showMessage]);
+
+  const handleExportMarked = useCallback(async () => {
+    setExporting("marked");
+    try {
       const res = await fetch("/api/businesses/clients?limit=500");
       if (!res.ok) throw new Error("fail");
       const data = await res.json();
@@ -96,13 +128,13 @@ export default function ReportsPage() {
         ]);
       }
       if (data.length === 0) {
-        showMessage("Sin clientes para exportar.", "error");
+        showMessage("Sin negocios marcados como cliente.", "error");
         return;
       }
-      downloadCSV(`clientes_${todayStamp()}.csv`, rows);
-      showMessage(`Exportados ${data.length} clientes.`, "success");
+      downloadCSV(`negocios_cliente_${todayStamp()}.csv`, rows);
+      showMessage(`Exportados ${data.length} negocios.`, "success");
     } catch {
-      showMessage("Error al exportar clientes.", "error");
+      showMessage("Error al exportar negocios marcados como cliente.", "error");
     } finally {
       setExporting(null);
     }
@@ -148,7 +180,7 @@ export default function ReportsPage() {
     },
     {
       title: "Clientes",
-      description: "Exportar lista de clientes registrados",
+      description: "Exportar tus clientes (nombre, negocio, dirección, coordenadas y nota)",
       icon: (
         <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
@@ -160,6 +192,20 @@ export default function ReportsPage() {
       color: "#8b5cf6",
       action: handleExportClients,
       key: "clients" as ExportType,
+    },
+    {
+      title: "Negocios marcados como cliente",
+      description: "Exportar negocios del padrón marcados como cliente (CNPJ, rubro y dirección)",
+      icon: (
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M3 21h18" />
+          <path d="M5 21V7l7-4 7 4v14" />
+          <path d="M9 21v-6h6v6" />
+        </svg>
+      ),
+      color: "#f59e0b",
+      action: handleExportMarked,
+      key: "marked" as ExportType,
     },
     {
       title: "Cobertura por ciudad",
@@ -194,7 +240,7 @@ export default function ReportsPage() {
         <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Exportá datos en formato CSV</p>
       </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {cards.map((card) => {
           const isExporting = exporting === card.key;
           return (

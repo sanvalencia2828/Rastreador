@@ -1,26 +1,25 @@
 """Orden de un dia de visitas y enlaces de Google Maps (compartido por scripts/rutas_semana.py y /api/routes/generate)."""
 
-import unicodedata
-
 from app.optimizer import optimize_open_path
 from app.services.geo import haversine_km
+from cities import canonical_city
 
 MAX_WAYPOINTS = 9  # Google Maps: 9 waypoints por enlace (+ origen y destino)
 
 
 def is_maringa(municipio: str | None) -> bool:
-    plain = unicodedata.normalize("NFKD", municipio or "").encode("ascii", "ignore").decode()
-    return plain.strip().casefold() == "maringa"
+    return canonical_city(municipio) == "Maringá"
 
 
-def order_day(points, depot=None):
-    """Indices de `points` [(lat, lon)] en orden de visita (distancia en linea recta).
+def order_day(points, depot=None, matrix=None):
+    """Indices de `points` [(lat, lon)] en orden de visita (distancia en linea recta, o `matrix` de costos).
 
+    `matrix`: costos entre points + [depot] en ese orden (p. ej. duraciones de OSRM).
     El optimizador necesita ancla de entrada y de salida: nodos ficticios de costo 0 donde no hay depot.
     """
     n = len(points)
     pts = list(points) + ([depot] if depot else [])
-    m = [[haversine_km(*a, *b) for b in pts] for a in pts]
+    m = [list(row) for row in matrix] if matrix else [[haversine_km(*a, *b) for b in pts] for a in pts]
     size = len(m)
     for row in m:
         row.extend([0.0, 0.0])

@@ -1,6 +1,7 @@
 """OSRM solo si OSRM_URL esta definido y es un host privado: las coordenadas de clientes no salen a servidores publicos."""
 
 import pytest
+import requests
 
 from app.routes import routes as R
 from app.schemas.route import RouteCreateRequest, RouteStopCreateRequest
@@ -36,7 +37,7 @@ def test_route_matrices_make_no_request_without_private_osrm(monkeypatch, value)
     def boom(*a, **k):
         raise AssertionError("no debe haber ninguna peticion de red")
 
-    monkeypatch.setattr(R.requests, "get", boom)
+    monkeypatch.setattr(requests, "get", boom)
     R.ROUTE_STORE.clear()
     route = R.create_route(RouteCreateRequest(name="t", entry_point_id=1, exit_point_id=5))
     R.add_stop(route.id, RouteStopCreateRequest(point_id=2))
@@ -65,7 +66,7 @@ def test_private_osrm_is_requested_without_following_redirects(monkeypatch):
         seen.update(url=url, **kw)
         return Fake()
 
-    monkeypatch.setattr(R.requests, "get", fake_get)
+    monkeypatch.setattr(requests, "get", fake_get)
     R.ROUTE_STORE.clear()
     route = R.create_route(RouteCreateRequest(name="t", entry_point_id=1, exit_point_id=5))
     *_, source = R._route_matrices(R._read_route(route.id))

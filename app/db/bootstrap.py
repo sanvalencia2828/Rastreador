@@ -122,6 +122,44 @@ END $$;
 CREATE INDEX IF NOT EXISTS idx_street_time_log_user ON street_time_log(user_id, municipio, street_key);
 """
 
+# Same DDL as migrations/008_geocode_attempts.sql (a test keeps them identical).
+GEOCODE_ATTEMPTS_DDL = """
+ALTER TABLE estabelecimentos
+    ADD COLUMN IF NOT EXISTS geocode_attempts INTEGER DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS geocode_last_try TIMESTAMPTZ;
+"""
+
+
+# Same DDL as migrations/009_tarjeta_entregas.sql (a test keeps them identical).
+TARJETA_ENTREGAS_DDL = """
+CREATE TABLE IF NOT EXISTS tarjeta_entregas (
+    id BIGSERIAL PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    cnpj_completo VARCHAR(14) NOT NULL,
+    fecha DATE NOT NULL DEFAULT ((NOW() AT TIME ZONE 'America/Sao_Paulo')::date),
+    resultado VARCHAR(20) NOT NULL,
+    nota VARCHAR(500),
+    lat NUMERIC(10,7),
+    lon NUMERIC(10,7),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT tarjeta_entregas_resultado_check CHECK (resultado IN ('tarjeta_entregada', 'cerrado', 'rechazo', 'interesado', 'no_encontrado')),
+    CONSTRAINT tarjeta_entregas_coords_pair CHECK ((lat IS NULL) = (lon IS NULL)),
+    CONSTRAINT tarjeta_entregas_lat_range CHECK (lat BETWEEN -90 AND 90),
+    CONSTRAINT tarjeta_entregas_lon_range CHECK (lon BETWEEN -180 AND 180)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tarjeta_entregas_user_cnpj_fecha ON tarjeta_entregas(user_id, cnpj_completo, fecha);
+"""
+
+# Same DDL as migrations/010_clientes_visita_diaria.sql (a test keeps them identical).
+CLIENTES_VISITA_DIARIA_DDL = """
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS visita_diaria BOOLEAN NOT NULL DEFAULT FALSE;
+"""
+
+# Same DDL as migrations/011_clientes_atrasado.sql (a test keeps them identical).
+CLIENTES_ATRASADO_DDL = """
+ALTER TABLE clientes ADD COLUMN IF NOT EXISTS atrasado BOOLEAN NOT NULL DEFAULT FALSE;
+"""
+
 
 def _ensure_clientes_schema() -> None:
     """Private per-user customer list; idempotent."""
@@ -130,6 +168,8 @@ def _ensure_clientes_schema() -> None:
     try:
         with db_engine.begin() as conn:
             conn.execute(text(CLIENTES_DDL))
+            conn.execute(text(CLIENTES_VISITA_DIARIA_DDL))
+            conn.execute(text(CLIENTES_ATRASADO_DDL))
     except Exception as e:
         print(f"Error initializing clientes table ({_err(e)})")
 
@@ -239,6 +279,28 @@ def _ensure_business_visit_metrics_schema() -> None:
         print(f"Error initializing business visit metrics columns ({_err(e)})")
 
 
+def _ensure_geocode_attempts_schema() -> None:
+    """Bounded geocoder retries (enriquecer_lojas.py, load_filtered_cnpj.py); idempotent."""
+    if not db_engine:
+        return
+    try:
+        with db_engine.begin() as conn:
+            conn.execute(text(GEOCODE_ATTEMPTS_DDL))
+    except Exception as e:
+        print(f"Error initializing geocode attempts columns ({_err(e)})")
+
+
+def _ensure_tarjeta_entregas_schema() -> None:
+    """Results of the business-card route (app/routes/tarjetas.py); idempotent."""
+    if not db_engine:
+        return
+    try:
+        with db_engine.begin() as conn:
+            conn.execute(text(TARJETA_ENTREGAS_DDL))
+    except Exception as e:
+        print(f"Error initializing tarjeta_entregas table ({_err(e)})")
+
+
 def _ensure_postgis() -> None:
     """Enable PostGIS (Render allows CREATE EXTENSION for the database owner); warn loudly if it fails."""
     if not db_engine:
@@ -266,6 +328,7 @@ def ensure_schema() -> None:
     _ensure_postgis()
     _ensure_base_schema()
     _ensure_business_visit_metrics_schema()
+    _ensure_geocode_attempts_schema()
 
     # Initialize User Table
     if db_engine:
@@ -397,6 +460,7 @@ def ensure_schema() -> None:
             print(f"Error initializing visit source column ({_err(e)})")
 
     _ensure_clientes_schema()  # needs users, created above
+    _ensure_tarjeta_entregas_schema()  # needs users
     _ensure_route_stops_cliente_id()  # needs clientes and route_stops
     _ensure_maringa_city()
     _ensure_city_list()

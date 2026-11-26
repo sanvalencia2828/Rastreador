@@ -12,6 +12,7 @@ const NAV_LINKS = [
   { href: "/week", label: "Semana" },
   { href: "/clientes/nuevo", label: "+ Cliente" },
   { href: "/routes", label: "🗺️ Rutas" },
+  { href: "/tarjetas", label: "Tarjetas" },
   { href: "/visits", label: "Visitas" },
   { href: "/dashboard", label: "Dashboard" },
   { href: "/reports", label: "Relatórios" },

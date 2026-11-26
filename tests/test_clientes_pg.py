@@ -19,7 +19,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
 from app.core.security import create_jwt_token
-from app.db.bootstrap import CLIENTES_DDL
+from app.db.bootstrap import CLIENTES_ATRASADO_DDL, CLIENTES_DDL, CLIENTES_VISITA_DIARIA_DDL
 from app.main import app
 from app.routes import clientes
 
@@ -44,10 +44,12 @@ def pg():
         pytest.exit("TEST_PG_URL debe ser local y apuntar a una base cuyo nombre empiece por 'test'", returncode=2)
     engine = create_engine(PG)
     with engine.begin() as c:
-        c.execute(text("DROP TABLE IF EXISTS clientes"))
+        c.execute(text("DROP TABLE IF EXISTS clientes CASCADE"))  # route_stops.cliente_id FK (bootstrap) would block it
         c.execute(text(USERS_DDL))
         c.execute(text("DELETE FROM users"))
         c.execute(text(CLIENTES_DDL))
+        c.execute(text(CLIENTES_VISITA_DIARIA_DDL))
+        c.execute(text(CLIENTES_ATRASADO_DDL))
     yield engine
     engine.dispose()
 
@@ -182,3 +184,27 @@ def test_get_clientes_isolates_two_users_on_real_postgres(pg, tmp_path, monkeypa
     assert ra.json()[1]["lat"] == -23.4 and ra.json()[0]["lat"] is None
     assert [r["nombre_negocio"] for r in get(a, "?limit=1").json()] == ["Alfa"]
     assert get(a, "?limit=501").status_code == 422
+
+
+def test_patch_and_visita_diaria_on_real_postgres(pg, tmp_path, monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setattr(clientes, "db_engine", pg)
+    a, b = _user(pg, "a"), _user(pg, "b")
+    _upsert(pg, a, _csv(tmp_path, "1,x,Mio,d,b,Maringa,c,-23.4,-51.9,coords_del_enlace,"))
+    with pg.begin() as c:
+        cid = str(c.execute(text("SELECT id FROM clientes WHERE user_id = :u"), {"u": a}).scalar())
+    client = TestClient(app)
+
+    def auth(uid):
+        return {"Authorization": f"Bearer {create_jwt_token({'user_id': uid})}"}
+
+    assert client.patch(f"/api/clientes/{cid}", headers=auth(b), json={"visita_diaria": True}).status_code == 404
+    r = client.patch(f"/api/clientes/{cid}", headers=auth(a), json={"visita_diaria": True, "municipio": "ARAPONGAS"})
+    assert r.status_code == 200 and r.json()["visita_diaria"] is True and r.json()["municipio"] == "Arapongas"
+    listed = client.get("/api/clientes", headers=auth(a)).json()
+    assert listed[0]["visita_diaria"] is True and listed[0]["municipio"] == "Arapongas"
+    assert not set(listed[0]) & {"telefono", "telefone", "correo", "email"}
+    # un re-seed con el CSV de 11 columnas no borra lo marcado en la app (solo si la fila no es 'manual')
+    _upsert(pg, a, _csv(tmp_path, "1,x,Mio,d,b,Maringa,c,-23.4,-51.9,coords_del_enlace,"))
+    with pg.begin() as c:
+        assert c.execute(text("SELECT visita_diaria, municipio FROM clientes WHERE id = :i"), {"i": cid}).one() == (True, "Maringá")

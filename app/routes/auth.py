@@ -1,5 +1,7 @@
 """Registration and login endpoints."""
 
+import os
+
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -27,6 +29,9 @@ def _client_key(request: Request) -> str:
 # ------------------------------------------------------------------------------
 @router.post("/auth/register")
 def register_user(user: UserRegister, request: Request):
+    # open by default so the owner can create their account first, then set REGISTRATION_ENABLED=false
+    if os.environ.get("REGISTRATION_ENABLED", "").strip().lower() == "false":
+        raise HTTPException(status_code=403, detail="Registro cerrado")
     if not db_engine:
         raise HTTPException(status_code=503, detail="Database connection unavailable")
     key = _client_key(request)
