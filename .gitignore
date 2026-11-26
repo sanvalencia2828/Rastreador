@@ -68,7 +68,8 @@ K3241*
 espc.md
 
 # Claude Code local config
-.claude/
+.claude/*
+!.claude/agents/
 
 # Opencode local agent instructions
 .opencode/
