@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import StatusMessage from "../components/StatusMessage";
+import { authHeaders } from "../lib/auth";
 
 const MapaCobertura = dynamic(() => import("./MapaCobertura"), { ssr: false });
 
@@ -11,6 +12,7 @@ interface StatsSummary {
   total_businesses: number;
   visited: number;
   clients: number;
+  clientes_propios?: number; // con sesión: los de la tabla clientes del usuario
   cities: CityStat[];
 }
 
@@ -22,6 +24,7 @@ interface CityStat {
   lon: number | null;
   total: number;
   visited: number;
+  clientes?: number; // con sesión
 }
 
 type Status = "loading" | "error" | "success";
@@ -36,7 +39,7 @@ export default function DashboardPage() {
 
     const load = async () => {
       try {
-        const res = await fetch("/api/stats/summary");
+        const res = await fetch("/api/stats/summary", { headers: authHeaders() });
         if (!res.ok) throw new Error("fail");
         const data: StatsSummary = await res.json();
         if (!isMounted) return;
@@ -81,6 +84,18 @@ export default function DashboardPage() {
             </svg>
           ),
         },
+        ...(stats.clientes_propios
+          ? [{
+              label: "Mis clientes",
+              value: stats.clientes_propios,
+              color: "#3b82f6",
+              icon: (
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 2 L22 12 L12 22 L2 12 Z" />
+                </svg>
+              ),
+            }]
+          : []),
         {
           label: "Clientes",
           value: stats.clients,
@@ -119,7 +134,7 @@ export default function DashboardPage() {
 
       {status === "success" && stats && (
         <>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+          <div className={`grid grid-cols-1 gap-3 mb-6 ${cards.length > 3 ? "sm:grid-cols-4" : "sm:grid-cols-3"}`}>
             {cards.map((card) => (
               <div
                 key={card.label}
@@ -156,12 +171,22 @@ export default function DashboardPage() {
                 >
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium" style={{ color: "var(--fg)" }}>{city.name}</span>
-                    <span className="text-xs" style={{ color: "var(--muted)" }}>
-                      <span style={{ color: "var(--accent)", fontWeight: 600 }}>{city.visited}</span>
-                      {" de "}
-                      <span style={{ color: "var(--fg-secondary)", fontWeight: 600 }}>{city.total}</span>
-                      {" lojas"}
-                      <span style={{ marginLeft: "6px", color: "var(--fg-secondary)" }}>({pct}%)</span>
+                    <span className="text-xs text-right" style={{ color: "var(--muted)" }}>
+                      {/* sin lojas pero con clientes: no mostrar "0 de 0 lojas" */}
+                      {city.total > 0 || !city.clientes ? (
+                        <>
+                          <span style={{ color: "var(--accent)", fontWeight: 600 }}>{city.visited}</span>
+                          {" de "}
+                          <span style={{ color: "var(--fg-secondary)", fontWeight: 600 }}>{city.total}</span>
+                          {" lojas"}
+                          <span style={{ marginLeft: "6px", color: "var(--fg-secondary)" }}>({pct}%)</span>
+                        </>
+                      ) : null}
+                      {city.clientes ? (
+                        <span style={{ marginLeft: city.total > 0 ? "6px" : 0, color: "#3b82f6", fontWeight: 600 }}>
+                          {city.total > 0 ? "· " : ""}{city.clientes} mis clientes
+                        </span>
+                      ) : null}
                     </span>
                   </div>
                   <div style={{ height: "6px", background: "var(--border)", borderRadius: "3px", overflow: "hidden" }}>
