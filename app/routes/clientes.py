@@ -14,7 +14,7 @@ router = APIRouter()
 
 _LIST_SQL = text("""
     SELECT id, external_id, nombre_cliente, nombre_negocio, direccion, bairro, municipio, cep,
-           lat, lon, geocode_status, geocode_source, nota, visita_diaria
+           lat, lon, geocode_status, geocode_source, nota, visita_diaria, atrasado
     FROM clientes
     WHERE user_id = :user_id
     ORDER BY nombre_negocio, id
@@ -23,7 +23,7 @@ _LIST_SQL = text("""
 
 
 _COLUMNS = ("id, external_id, nombre_cliente, nombre_negocio, direccion, bairro, municipio, cep, "
-            "lat, lon, geocode_status, geocode_source, nota, visita_diaria")
+            "lat, lon, geocode_status, geocode_source, nota, visita_diaria, atrasado")
 
 _INSERT_SQL = text(f"""
     INSERT INTO clientes (user_id, external_id, nombre_cliente, nombre_negocio, direccion, bairro,
@@ -33,10 +33,19 @@ _INSERT_SQL = text(f"""
     RETURNING {_COLUMNS}
 """)
 
-# Only the owner's row matches; the id arrives already validated as a UUID.
+# Only the owner's row matches; the id arrives already validated as a UUID. Coordinates typed in the app are
+# 'manual', so reloading the CSV never overwrites them (seed_clientes skips manual rows).
 _PATCH_SQL = text(f"""
     UPDATE clientes SET municipio = COALESCE(:municipio, municipio),
-                        visita_diaria = COALESCE(:visita_diaria, visita_diaria), updated_at = NOW()
+                        visita_diaria = COALESCE(:visita_diaria, visita_diaria),
+                        atrasado = COALESCE(:atrasado, atrasado),
+                        nombre_negocio = COALESCE(:nombre_negocio, nombre_negocio),
+                        nota = CASE WHEN CAST(:set_nota AS BOOLEAN) THEN CAST(:nota AS TEXT) ELSE nota END,
+                        lat = COALESCE(CAST(:lat AS NUMERIC), lat),
+                        lon = COALESCE(CAST(:lon AS NUMERIC), lon),
+                        geocode_status = CASE WHEN CAST(:lat AS NUMERIC) IS NULL THEN geocode_status ELSE 'ok' END,
+                        geocode_source = CASE WHEN CAST(:lat AS NUMERIC) IS NULL THEN geocode_source ELSE 'manual' END,
+                        updated_at = NOW()
     WHERE id = :id AND user_id = :user_id
     RETURNING {_COLUMNS}
 """)
@@ -109,12 +118,18 @@ def patch_cliente(
     response: Response,
     user_id: str = Depends(get_current_user_id),
 ):
-    """Change municipio and/or visita_diaria of one of the caller's customers; another user's id is a 404."""
+    """Edit one of the caller's customers (only the fields sent); another user's id is a 404.
+    New lat/lon without municipio picks the nearest known city (if any within MAX_CITY_KM)."""
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
+    params = {**body.model_dump(), "set_nota": "nota" in body.model_fields_set,
+              "id": str(cliente_id), "user_id": user_id}
+    params["nota"] = params["nota"] or None
+    if body.lat is not None and body.municipio is None:  # lejos de toda ciudad conocida: se queda la que tenía
+        params["municipio"] = nearest_city(body.lat, body.lon, MAX_CITY_KM)
     try:
         with db_engine.begin() as conn:
-            row = conn.execute(_PATCH_SQL, {**body.model_dump(), "id": str(cliente_id), "user_id": user_id}).fetchone()
+            row = conn.execute(_PATCH_SQL, params).fetchone()
     except Exception:  # driver messages embed bound parameters and row data: fixed text only
         raise HTTPException(status_code=500, detail="Error al guardar el cliente") from None
     if row is None:

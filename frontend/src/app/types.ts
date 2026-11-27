@@ -21,6 +21,9 @@ export interface Business {
   lon: number;
   distance_m: number;
   status?: "new" | "visited" | "client";
+  origen?: "cliente" | "negocio"; // "cliente": de la tabla clientes del usuario (cnpj = "cliente:<id>")
+  visita_diaria?: boolean;
+  atrasado?: boolean;
 }
 
 export interface SavedRouteStop {

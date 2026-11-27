@@ -10,6 +10,8 @@ import SearchBar from "../../components/SearchBar";
 import StatusMessage from "../../components/StatusMessage";
 import StopCard from "../../components/StopCard";
 import type { Stop, Business, SavedRoute } from "../../types";
+import { authHeaders } from "../../lib/auth";
+import { cargarClientes, mismaCiudad, pinesClientes, type Cliente } from "../../lib/clientes";
 
 const MapView = dynamic(() => import("../../components/MapView"), { ssr: false });
 
@@ -22,7 +24,8 @@ interface CityStats {
   state: string;
   lat: number;
   lon: number;
-  total_businesses: number;
+  total_businesses: number; // con sesión incluye los clientes propios
+  total_clientes?: number;
 }
 
 export default function CityPage({ params }: { params: Promise<{ id: string }> }) {
@@ -43,13 +46,14 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
   const [loadingRouteId, setLoadingRouteId] = useState<string | undefined>();
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const [todosClientes, setTodosClientes] = useState<Cliente[]>([]);
 
   useEffect(() => {
     let isMounted = true;
 
     const loadCity = async () => {
       try {
-        const res = await fetch(`/api/cities/${id}/stats`);
+        const res = await fetch(`/api/cities/${id}/stats`, { headers: authHeaders() });
         if (!res.ok) throw new Error("fail");
         const data: CityStats = await res.json();
         if (!isMounted) return;
@@ -62,6 +66,7 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
     };
 
     loadCity();
+    cargarClientes().then(c => { if (isMounted) setTodosClientes(c); });
 
     const loadRoutes = async () => {
       try {
@@ -85,7 +90,7 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
   const fetchBusinesses = useCallback(async (stopId: string, lat: number, lon: number) => {
     setStops(prev => prev.map(s => s.id === stopId ? { ...s, loadingBusinesses: true } : s));
     try {
-      const res = await fetch(`/api/businesses/near?lat=${lat}&lon=${lon}&radius=500`);
+      const res = await fetch(`/api/businesses/near?lat=${lat}&lon=${lon}&radius=500`, { headers: authHeaders() });
       if (!res.ok) throw new Error("fail");
       const data = await res.json();
       setStops(prev => prev.map(s => s.id === stopId ? { ...s, businesses: data.items, loadingBusinesses: false } : s));
@@ -141,7 +146,7 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
     const allBusinesses: Business[] = [];
     await Promise.all(newStops.map(async (stop) => {
       try {
-        const res = await fetch(`/api/businesses/near?lat=${stop.lat}&lon=${stop.lon}&radius=500`);
+        const res = await fetch(`/api/businesses/near?lat=${stop.lat}&lon=${stop.lon}&radius=500`, { headers: authHeaders() });
         if (!res.ok) return;
         const data = await res.json();
         const businesses: Business[] = data.items;
@@ -227,7 +232,12 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
     client: allBusinesses.filter(b => b.status === "client").length,
   }), [allBusinesses]);
 
-  const mapBusinesses = useMemo(() => filteredBusinesses.map(b => ({ lat: b.lat, lon: b.lon, nome_fantasia: b.nome_fantasia, distance_m: b.distance_m, status: b.status })), [filteredBusinesses]);
+  const clientesCiudad = useMemo(() => (city ? todosClientes.filter(c => mismaCiudad(c.municipio, city.name)) : []), [todosClientes, city]);
+  // los clientes propios van todos como pines aparte; los que trae near se omiten para no duplicarlos
+  const mapBusinesses = useMemo(() => [
+    ...filteredBusinesses.filter(b => b.origen !== "cliente").map(b => ({ lat: b.lat, lon: b.lon, nome_fantasia: b.nome_fantasia, distance_m: b.distance_m, status: b.status })),
+    ...pinesClientes(clientesCiudad),
+  ], [filteredBusinesses, clientesCiudad]);
 
   const paramLatNum = paramLat ? parseFloat(paramLat) : NaN;
   const paramLonNum = paramLon ? parseFloat(paramLon) : NaN;
@@ -263,7 +273,7 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
           Cidades
         </Link>
         <h1 className="text-lg lg:text-xl font-semibold tracking-tight" style={{ color: "var(--fg)" }}>{city.name}</h1>
-        <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>{city.total_businesses} lojas registradas · {city.state}</p>
+        <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>{city.total_businesses} lojas registradas{city.total_clientes ? ` (${city.total_clientes} mis clientes)` : ""} · {city.state}</p>
       </header>
       <div className="mb-4 lg:mb-5">
         <SearchBar onSearch={handleSearch} isLoading={status === "loading"} />
@@ -357,6 +367,26 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
               </div>
             </>
           )}
+          {clientesCiudad.length > 0 && (
+            <div className="flex flex-col gap-2" style={{ background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius)", padding: "12px" }}>
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-medium" style={{ color: "#3b82f6" }}>Mis clientes ({clientesCiudad.length})</p>
+                <Link href="/clientes" className="text-xs" style={{ color: "var(--accent)", textDecoration: "none" }}>Editar</Link>
+              </div>
+              <ul className="flex flex-col gap-1" style={{ maxHeight: "220px", overflowY: "auto" }}>
+                {clientesCiudad.map(c => (
+                  <li key={c.id} className="flex items-center justify-between gap-2 text-xs" style={{ padding: "6px 8px", background: "var(--bg-elevated)", borderRadius: "6px" }}>
+                    <span className="truncate" style={{ color: "var(--fg)" }}>{c.nombre_negocio || c.nombre_cliente || "Cliente"}</span>
+                    <span className="flex-shrink-0" style={{ color: "var(--muted)" }}>
+                      {c.atrasado && <span style={{ color: "#ef4444" }}>atrasado </span>}
+                      {c.visita_diaria && <span style={{ color: "#06b6d4" }}>diario </span>}
+                      {c.lat === null && <span>sin ubicación</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {stops.length === 0 && <StatusMessage type={status} message={status === "error" ? errorMessage : undefined} />}
           <div className="flex flex-col gap-3" style={{ maxHeight: "calc(100dvh - 340px)", overflowY: "auto" }}>
             {stops.map((stop, i) => (
@@ -369,6 +399,7 @@ export default function CityPage({ params }: { params: Promise<{ id: string }> }
             <p><span style={{ color: "#f59e0b", fontWeight: 500 }}>●</span> Nueva</p>
             <p><span style={{ color: "#22c55e", fontWeight: 500 }}>●</span> Visitada</p>
             <p><span style={{ color: "#8b5cf6", fontWeight: 500 }}>■</span> Cliente</p>
+            <p><span style={{ color: "#3b82f6", fontWeight: 500 }}>◆</span> Mi cliente <span style={{ color: "#ef4444" }}>◆</span> atrasado <span style={{ color: "#06b6d4" }}>◆</span> diario</p>
           </div>
         </aside>
       </div>

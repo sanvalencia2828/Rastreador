@@ -1,11 +1,13 @@
 "use client";
 
-import { useState, useRef, useCallback, useMemo } from "react";
+import { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import dynamic from "next/dynamic";
 import SearchBar from "./components/SearchBar";
 import StatusMessage from "./components/StatusMessage";
 import StopCard from "./components/StopCard";
 import type { Stop, Business } from "./types";
+import { authHeaders } from "./lib/auth";
+import { cargarClientes, pinesClientes, type Cliente } from "./lib/clientes";
 
 const MapView = dynamic(() => import("./components/MapView"), { ssr: false });
 
@@ -18,11 +20,16 @@ export default function Home() {
   const [stops, setStops] = useState<Stop[]>([]);
   const [filter, setFilter] = useState<FilterType>("all");
   const abortRef = useRef<AbortController | null>(null);
+  const [clientes, setClientes] = useState<Cliente[]>([]);
+
+  useEffect(() => {
+    cargarClientes().then(setClientes);
+  }, []);
 
   const fetchBusinesses = useCallback(async (stopId: string, lat: number, lon: number) => {
     setStops(prev => prev.map(s => s.id === stopId ? { ...s, loadingBusinesses: true } : s));
     try {
-      const res = await fetch(`/api/businesses/near?lat=${lat}&lon=${lon}&radius=500`);
+      const res = await fetch(`/api/businesses/near?lat=${lat}&lon=${lon}&radius=500`, { headers: authHeaders() });
       if (!res.ok) throw new Error("fail");
       const data = await res.json();
       setStops(prev => prev.map(s => s.id === stopId ? { ...s, businesses: data.items, loadingBusinesses: false } : s));
@@ -88,13 +95,25 @@ export default function Home() {
     client: allBusinesses.filter(b => b.status === "client").length,
   }), [allBusinesses]);
 
-  const mapBusinesses = useMemo(() => filteredBusinesses.map(b => ({ lat: b.lat, lon: b.lon, nome_fantasia: b.nome_fantasia, distance_m: b.distance_m, status: b.status })), [filteredBusinesses]);
+  // los clientes propios van todos como pines aparte; los que trae near se omiten para no duplicarlos
+  const mapBusinesses = useMemo(() => [
+    ...filteredBusinesses.filter(b => b.origen !== "cliente").map(b => ({ lat: b.lat, lon: b.lon, nome_fantasia: b.nome_fantasia, distance_m: b.distance_m, status: b.status })),
+    ...pinesClientes(clientes),
+  ], [filteredBusinesses, clientes]);
+  const conUbicacion = clientes.filter(c => c.lat !== null).length;
 
   return (
     <main className="flex flex-col min-h-dvh px-4 py-4 lg:px-5 lg:py-6" style={{ maxWidth: "1200px", margin: "0 auto", width: "100%" }}>
       <header className="mb-5 lg:mb-6">
         <h1 className="text-lg lg:text-xl font-semibold tracking-tight" style={{ color: "var(--fg)" }}>Rastreador de Lojas</h1>
         <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>Agregá direcciones para escanear lojas en un radio de 500m.</p>
+        {clientes.length > 0 && (
+          <p className="text-xs mt-1" style={{ color: "#3b82f6" }}>
+            ◆ {conUbicacion} de tus {clientes.length} clientes en el mapa
+            <span style={{ color: "#ef4444" }}> ◆ atrasado</span>
+            <span style={{ color: "#06b6d4" }}> ◆ diario</span>
+          </p>
+        )}
       </header>
       <div className="mb-4 lg:mb-5">
         <SearchBar onSearch={handleSearch} isLoading={status === "loading"} />

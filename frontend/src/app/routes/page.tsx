@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { authHeaders } from "../lib/auth";
 
 type DueStatus = "never" | "overdue" | "due_soon" | "ok";
 
@@ -13,6 +14,9 @@ interface Business {
   days_since_last_visit: number | null;
   due_in_days: number | null;
   status_due: DueStatus;
+  origen?: "cliente" | "negocio"; // con sesión el backend incluye los clientes propios, primero
+  visita_diaria?: boolean;
+  atrasado?: boolean;
 }
 
 type LoadState = "loading" | "ready" | "error";
@@ -53,6 +57,7 @@ export default function RoutesPage() {
       try {
         const response = await fetch("/api/businesses", {
           signal: controller.signal,
+          headers: authHeaders(),
         });
         if (!response.ok) throw new Error("businesses request failed");
 
@@ -124,7 +129,7 @@ export default function RoutesPage() {
             borderRadius: "var(--radius)",
           }}
         >
-          No hay negocios disponibles para planificar rutas.
+          No hay negocios ni clientes disponibles para planificar rutas.
         </div>
       )}
 
@@ -169,6 +174,11 @@ export default function RoutesPage() {
                     style={{ color: "var(--fg)" }}
                   >
                     {business.name || "Sin nombre"}
+                    {business.origen === "cliente" && (
+                      <div className="text-[11px] font-semibold" style={{ color: "#3b82f6" }}>
+                        Cliente{business.atrasado ? " · atrasado" : ""}{business.visita_diaria ? " · diario" : ""}
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3" style={{ color: "var(--fg-secondary)" }}>
                     {formatDate(business.last_visit_date)}

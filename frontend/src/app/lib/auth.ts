@@ -44,6 +44,12 @@ export function safeNext(raw: string | null): string {
   return raw && raw.startsWith("/") && !raw.startsWith("//") && !raw.startsWith("/\\") ? raw : "/";
 }
 
+/** Authorization si hay sesión, para endpoints públicos que con sesión añaden los clientes propios (sin redirigir). */
+export function authHeaders(): HeadersInit {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 /** fetch + Authorization: Bearer. Ante 401 borra el token y manda a /login (con vuelta a la página actual). */
 export async function apiFetch(input: string, init: RequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers);

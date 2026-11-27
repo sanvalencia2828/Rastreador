@@ -1,10 +1,13 @@
 """Cities and per-city routes."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import text
 
 from app.core.database import db_engine
-from app.core.security import get_current_user_id
+from app.core.security import get_current_user_id, get_optional_user_id
+from app.services import clientes_lojas
 from app.schemas.city import CityCreate
 from app.schemas.planned_route import RouteCreate
 
@@ -58,7 +61,8 @@ def create_city(city: CityCreate):
         raise HTTPException(status_code=500, detail=f"Failed to create city: {e}")
 
 @router.get("/api/cities/{city_id}/stats")
-def get_city_stats(city_id: int):
+def get_city_stats(city_id: int, response: Response, user_id: Optional[str] = Depends(get_optional_user_id)):
+    """Lojas de la ciudad; con sesión suma los clientes propios (total_clientes) a total_businesses."""
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
     try:
@@ -74,7 +78,12 @@ def get_city_stats(city_id: int):
                 text("SELECT COUNT(*) FROM estabelecimentos WHERE UPPER(municipio) = UPPER(:city_name) AND situacao_cadastral = 2 AND geom IS NOT NULL"),
                 {"city_name": city["name"]},
             ).scalar()
-            city["total_businesses"] = count
+            city["total_negocios"] = count
+            city["total_clientes"] = 0
+            if user_id:
+                city["total_clientes"] = clientes_lojas.counts_by_city(conn, user_id).get(clientes_lojas.city_key(city["name"]), 0)
+                response.headers["Cache-Control"] = "private, no-store"
+            city["total_businesses"] = count + city["total_clientes"]
             return city
     except HTTPException:
         raise

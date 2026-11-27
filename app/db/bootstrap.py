@@ -211,8 +211,16 @@ def _ensure_maringa_city() -> None:
         print(f"Error seeding Maringa city ({_err(e)})")
 
 
+# Arapongas (PR): hay clientes allí y sin fila en cities no aparecían en Cidades. Centro: -23.4194, -51.4244
+# (el mismo que cities.py y frontend/src/app/lib/ciudades.ts). Igual que migrations/012_cities_arapongas.sql.
+ARAPONGAS_CITY_SQL = """
+INSERT INTO cities (name, state, lat, lon) VALUES ('Arapongas', 'PR', -23.4194, -51.4244)
+ON CONFLICT (name, state) DO NOTHING;
+"""
+
+
 def _ensure_city_list() -> None:
-    """Swap Pirapó/Cambira for Marialva/Mandaguari in existing DBs (the seed is ON CONFLICT DO NOTHING); idempotent.
+    """Swap Pirapó/Cambira for Marialva/Mandaguari and add Arapongas in existing DBs (ON CONFLICT DO NOTHING); idempotent.
 
     An old city is deleted only if no foreign key row points at it; otherwise it stays and a warning is logged.
     """
@@ -228,6 +236,7 @@ def _ensure_city_list() -> None:
                     ('Mandaguari', 'PR', -23.5478, -51.6708)
                 ON CONFLICT (name, state) DO NOTHING
             """))
+            conn.execute(text(ARAPONGAS_CITY_SQL))
             fks = conn.execute(text("""
                 SELECT con.conrelid::regclass::text, att.attname
                   FROM pg_constraint con
