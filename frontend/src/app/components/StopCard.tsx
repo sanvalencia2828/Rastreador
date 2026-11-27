@@ -12,6 +12,9 @@ interface Business {
   lat?: number;
   lon?: number;
   status?: "new" | "visited" | "client";
+  origen?: "cliente" | "negocio";
+  visita_diaria?: boolean;
+  atrasado?: boolean;
 }
 
 interface StopCardProps {
@@ -79,7 +82,8 @@ export default function StopCard({ index, displayName, cep, businesses, loadingB
       {businesses.length > 0 ? (
         <div className="space-y-2" style={{ maxHeight: "200px", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
           {businesses.map(b => {
-            const isClient = b.status === "client";
+            const propio = b.origen === "cliente"; // ya es cliente: sin botones de CNPJ
+            const isClient = b.status === "client" || propio;
             const isVisited = b.status === "visited" || isClient;
             return (
               <div key={b.cnpj} className="flex items-start gap-2 text-xs" style={{ padding: "8px", background: isClient ? "#8b5cf608" : isVisited ? "#22c55e08" : "var(--bg-elevated)", borderRadius: "6px", borderLeft: isClient ? "2px solid #8b5cf6" : isVisited ? "2px solid #22c55e" : "2px solid transparent" }}>
@@ -87,7 +91,7 @@ export default function StopCard({ index, displayName, cep, businesses, loadingB
                 <div className="flex-1">
                   <p className="font-medium" style={{ color: "var(--fg)" }}>{b.nome_fantasia || b.cnpj}</p>
                   <p style={{ color: "var(--muted)" }}>{b.cnae_label} · {b.bairro}</p>
-                  <p style={{ color: isClient ? "#8b5cf6" : isVisited ? "#22c55e" : "var(--accent)", fontSize: "11px" }}>{isClient ? "✓ Cliente" : isVisited ? "✓ Visitada" : `${b.distance_m}m`}</p>
+                  <p style={{ color: isClient ? "#8b5cf6" : isVisited ? "#22c55e" : "var(--accent)", fontSize: "11px" }}>{propio ? ["Mi cliente", b.atrasado && "atrasado", b.visita_diaria && "diario", `${b.distance_m}m`].filter(Boolean).join(" · ") : isClient ? "✓ Cliente" : isVisited ? "✓ Visitada" : `${b.distance_m}m`}</p>
                 </div>
                 {!isVisited && b.lat && b.lon && (
                   <div className="flex flex-col gap-1">

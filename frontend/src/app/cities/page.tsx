@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import StatusMessage from "../components/StatusMessage";
+import { authHeaders } from "../lib/auth";
 
 interface CityWithStats {
   id: string | number;
@@ -10,7 +11,8 @@ interface CityWithStats {
   state: string;
   lat: number;
   lon: number;
-  total_businesses: number | null;
+  total_businesses: number | null; // con sesión incluye los clientes propios
+  total_clientes?: number;
 }
 
 const skeletonCards = Array.from({ length: 6 }, (_, index) => index);
@@ -43,10 +45,10 @@ export default function CitiesPage() {
 
         const statsResults = await Promise.allSettled(
           baseCities.map(async (city) => {
-            const statRes = await fetch(`/api/cities/${city.id}/stats`);
+            const statRes = await fetch(`/api/cities/${city.id}/stats`, { headers: authHeaders() });
             if (!statRes.ok) throw new Error(`Unable to fetch stats for ${city.id}`);
             const stat = await statRes.json();
-            return stat.total_businesses ?? null;
+            return { total: stat.total_businesses ?? null, clientes: stat.total_clientes ?? 0 };
           })
         );
 
@@ -56,7 +58,7 @@ export default function CitiesPage() {
           prev.map((city, i) => {
             const result = statsResults[i];
             if (!result || result.status === "rejected") return city;
-            return { ...city, total_businesses: result.value };
+            return { ...city, total_businesses: result.value.total, total_clientes: result.value.clientes };
           })
         );
       } catch {
@@ -179,6 +181,7 @@ export default function CitiesPage() {
               {city.total_businesses !== null && (
                 <p className="text-xs" style={{ color: "var(--accent)" }}>
                   {city.total_businesses} lojas registradas
+                  {city.total_clientes ? <span style={{ color: "#3b82f6" }}> · {city.total_clientes} mis clientes</span> : null}
                 </p>
               )}
 

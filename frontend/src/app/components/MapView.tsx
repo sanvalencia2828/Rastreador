@@ -39,11 +39,32 @@ const clientIcon = L.divIcon({
   className: "",
 });
 
+// Clientes propios: rombo azul; atrasado rojo y diario cian, más grandes.
+function clienteIcon(color: string, size: number) {
+  const h = size / 2;
+  return L.divIcon({
+    html: `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" xmlns="http://www.w3.org/2000/svg"><path d="M${h} 1 L${size - 1} ${h} L${h} ${size - 1} L1 ${h} Z" fill="${color}" stroke="#0f0f0f" stroke-width="1.5"/></svg>`,
+    iconSize: [size, size],
+    iconAnchor: [h, h],
+    className: "",
+  });
+}
+const clienteNormalIcon = clienteIcon("#3b82f6", 16);
+const clienteDiarioIcon = clienteIcon("#06b6d4", 20);
+const clienteAtrasadoIcon = clienteIcon("#ef4444", 20);
+
+const escapar = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
 interface MapStop { id: string; lat: number; lon: number; }
-interface MapBusiness { lat: number; lon: number; nome_fantasia: string; distance_m: number; status?: string; }
+interface MapBusiness {
+  lat: number; lon: number; nome_fantasia: string; distance_m: number; status?: string;
+  origen?: "cliente" | "negocio"; visita_diaria?: boolean; atrasado?: boolean;
+}
 interface MapViewProps { stops: MapStop[]; businesses: MapBusiness[]; center?: { lat: number; lon: number }; }
 
-function getIcon(status?: string) {
+function getIcon(b: MapBusiness) {
+  if (b.origen === "cliente") return b.atrasado ? clienteAtrasadoIcon : b.visita_diaria ? clienteDiarioIcon : clienteNormalIcon;
+  const status = b.status;
   if (status === "client") return clientIcon;
   if (status === "visited") return visitedIcon;
   return businessIcon;
@@ -80,12 +101,28 @@ export default function MapView({ stops, businesses, center }: MapViewProps) {
     }
   }, [stops]);
 
+  const encuadradoRef = useRef(false);
+  const sinParadas = stops.length === 0;
+  const hayCentro = center !== undefined; // booleano: center llega como objeto nuevo en cada render
+
   useEffect(() => {
     businessesLayerRef.current.clearLayers();
+    const map = mapRef.current;
+    const propios = businesses.filter(b => b.origen === "cliente");
+    // la primera vez que llegan clientes y no hay paradas ni centro pedido, encuadrarlos (si no, quedan fuera de vista)
+    if (map && sinParadas && !hayCentro && propios.length > 0 && !encuadradoRef.current) {
+      encuadradoRef.current = true;
+      map.fitBounds(L.latLngBounds(propios.map(b => [b.lat, b.lon] as [number, number])), { padding: [40, 40], maxZoom: 15 });
+    }
     businesses.forEach(b => {
-      L.marker([b.lat, b.lon], { icon: getIcon(b.status) }).bindPopup(`<b>${b.nome_fantasia}</b><br>${b.distance_m}m`).addTo(businessesLayerRef.current);
+      const detalle = b.origen === "cliente"
+        ? ["Cliente", b.atrasado && "atrasado", b.visita_diaria && "diario"].filter(Boolean).join(" · ")
+        : `${b.distance_m}m`;
+      L.marker([b.lat, b.lon], { icon: getIcon(b), zIndexOffset: b.origen === "cliente" ? 1000 : 0 })
+        .bindPopup(`<b>${escapar(b.nome_fantasia || "")}</b><br>${detalle}`)
+        .addTo(businessesLayerRef.current);
     });
-  }, [businesses]);
+  }, [businesses, sinParadas, hayCentro]);
 
   return (
     <div ref={containerRef} role="application" aria-label="Mapa con paradas y lojas" style={{ width: "100%", height: "100%", minHeight: "400px", borderRadius: "var(--radius)", overflow: "hidden" }} />

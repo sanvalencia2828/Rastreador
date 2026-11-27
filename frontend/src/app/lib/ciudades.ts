@@ -19,3 +19,20 @@ export function ciudadCercana(lat: number, lon: number): string {
   }
   return best;
 }
+
+/** "MaringÃ¡" -> "Maringá" (cities.name llega con mojibake); si no es mojibake, el texto tal cual. Igual que fix_encoding. */
+export function reparar(t: string): string {
+  try {
+    const bytes = Uint8Array.from(t, (ch) => {
+      const c = ch.charCodeAt(0);
+      if (c > 255) throw new Error("no latin-1");
+      return c;
+    });
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    return t;
+  }
+}
+
+export const mismaCiudad = (a: string | null, b: string) =>
+  reparar(a ?? "").toLocaleLowerCase() === reparar(b).toLocaleLowerCase();

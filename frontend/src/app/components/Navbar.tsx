@@ -10,6 +10,7 @@ const NAV_LINKS = [
   { href: "/cities", label: "Cidades" },
   { href: "/generate", label: "Gerar Rota" },
   { href: "/week", label: "Semana" },
+  { href: "/clientes", label: "Clientes" },
   { href: "/clientes/nuevo", label: "+ Cliente" },
   { href: "/routes", label: "🗺️ Rutas" },
   { href: "/tarjetas", label: "Tarjetas" },
@@ -37,6 +38,7 @@ export default function Navbar() {
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
+    if (href === "/clientes") return pathname === "/clientes"; // /clientes/nuevo tiene su propio enlace
     return pathname === href || pathname.startsWith(href + "/");
   };
 
