@@ -132,7 +132,8 @@ def test_create_unknown_or_far_city_is_422(engine, body):
 def test_patch_own_cliente(engine):
     r = client.patch(f"/api/clientes/{CID}", headers=h(UA), json={"municipio": "arapongas", "visita_diaria": True})
     assert r.status_code == 200, r.text
-    assert engine.params == {"municipio": "Arapongas", "visita_diaria": True, "id": CID, "user_id": UA}
+    assert engine.params == {"municipio": "Arapongas", "visita_diaria": True, "atrasado": None, "nombre_negocio": None,
+                             "nota": None, "set_nota": False, "lat": None, "lon": None, "id": CID, "user_id": UA}
 
 
 def test_patch_other_users_cliente_is_404(engine):

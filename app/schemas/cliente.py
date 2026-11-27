@@ -33,9 +33,22 @@ class ClienteCreate(BaseModel):
         return self
 
 
+# Paraná aproximado: rechaza coordenadas pegadas al revés o de otro estado.
+PR_LAT = (-24.5, -22.5)
+PR_LON = (-53.5, -50.5)
+Nota = Annotated[str, StringConstraints(strip_whitespace=True, max_length=1000)]
+
+
 class ClientePatch(BaseModel):
+    """Solo los campos enviados cambian; nota "" o null la borra."""
+
     municipio: Optional[Text] = None
     visita_diaria: Optional[bool] = None
+    atrasado: Optional[bool] = None
+    nombre_negocio: Optional[Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=300)]] = None
+    nota: Optional[Nota] = None
+    lat: Optional[float] = Field(None, ge=PR_LAT[0], le=PR_LAT[1])
+    lon: Optional[float] = Field(None, ge=PR_LON[0], le=PR_LON[1])
 
     @field_validator("municipio")
     @classmethod
@@ -44,8 +57,13 @@ class ClientePatch(BaseModel):
 
     @model_validator(mode="after")
     def something_to_change(self):
-        if self.municipio is None and self.visita_diaria is None:
-            raise ValueError("nada que cambiar: envía municipio o visita_diaria")
+        if not self.model_fields_set:
+            raise ValueError("nada que cambiar")
+        if (self.lat is None) != (self.lon is None):
+            raise ValueError("lat y lon deben venir juntos")
+        for f in ("visita_diaria", "atrasado", "nombre_negocio", "municipio"):
+            if f in self.model_fields_set and getattr(self, f) is None:
+                raise ValueError(f"{f} no puede ser null")
         return self
 
 

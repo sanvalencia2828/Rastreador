@@ -2,17 +2,18 @@
 
 from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import text
 
 from app.core.cache import get_cached_response, set_cached_response
 from app.core.database import db_engine
-from app.core.security import get_current_user_id
+from app.core.security import get_current_user_id, get_optional_user_id
 from app.schemas.business import (
     BusinessStatusUpdate,
     TechBusiness,
     TechBusinessesResponse,
 )
+from app.services import clientes_lojas
 from app.services.business_loader import load_businesses
 from app.services.geo import (
     TECH_CNAE_SUBCATEGORY,
@@ -88,8 +89,11 @@ def get_tech_businesses(limit: int = 50, offset: int = 0, search: str = ""):
 
 
 @router.get("/api/businesses/near")
-def get_businesses_near(lat: float, lon: float, radius: int = 500):
-    """
+def get_businesses_near(lat: float, lon: float, response: Response, radius: int = 500,
+                        user_id: Optional[str] = Depends(get_optional_user_id)):
+    """Negocios (origen "negocio") y, con sesión, los clientes propios cercanos (origen "cliente", primero).
+    La caché solo guarda negocios: los clientes se añaden después, por usuario.
+
     Returns businesses within `radius` meters of (lat, lon).
     Uses PostGIS ST_DWithin on the geography column for accurate meter-based search.
     Fallback to load_businesses() + haversine if geom column is unavailable.
@@ -98,7 +102,20 @@ def get_businesses_near(lat: float, lon: float, radius: int = 500):
         radius = 2000
     if radius < 1:
         radius = 500
+    public = _businesses_near(lat, lon, radius)
+    if not user_id or not db_engine:
+        return public
+    try:
+        with db_engine.connect() as conn:
+            mine = clientes_lojas.near(conn, user_id, lat, lon, radius)
+    except Exception:  # driver messages embed bound parameters: fixed text only
+        raise HTTPException(status_code=500, detail="No se pudieron leer los clientes") from None
+    response.headers["Cache-Control"] = "private, no-store"
+    items = mine + public["items"]
+    return {**public, "items": items, "total": len(items)}
 
+
+def _businesses_near(lat: float, lon: float, radius: int) -> dict:
     cache_key = f"near_{lat:.3f}_{lon:.3f}_{radius}"  # ~110 m cells
     cached = get_cached_response(cache_key)
     if cached is not None:
@@ -154,6 +171,7 @@ def get_businesses_near(lat: float, lon: float, radius: int = 500):
                         "cnae_label": cnae_to_category(r.get("cnae_fiscal")),
                         "cnae_icon": "",
                         "porte_empresa": str(r.get("porte_empresa") or ""),
+                        "origen": "negocio",
                     })
                 response = {"items": items, "total": len(items), "radius": radius}
                 set_cached_response(cache_key, response, ttl=120)
@@ -190,6 +208,7 @@ def get_businesses_near(lat: float, lon: float, radius: int = 500):
                 "cnae_label": cnae_to_category(cnae_raw),
                 "cnae_icon": "",
                 "porte_empresa": str(biz.get("porte_empresa") or ""),
+                "origen": "negocio",
             })
     items.sort(key=lambda x: x["distance_m"])
     items = items[:200]
@@ -255,11 +274,14 @@ def get_businesses_status(cnpjs: str):
 @router.get("/api/businesses")
 @router.get("/api/businesses/for-routes")
 def get_businesses_for_routes(
+    response: Response,
     city: Optional[str] = None,
     limit: int = 500,
     offset: int = 0,
+    user_id: Optional[str] = Depends(get_optional_user_id),
 ):
-    """Return businesses with persisted visit metrics and route urgency."""
+    """Businesses with visit metrics and route urgency; with a session the caller's own clientes come first
+    (origen "cliente", only on the first page)."""
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
     if limit < 1 or limit > 5000:
@@ -295,6 +317,9 @@ def get_businesses_for_routes(
         with db_engine.connect() as conn:
             rows = conn.execute(text(query), params)
             businesses = []
+            if user_id and offset == 0:
+                businesses += [_business_route_metrics(c) for c in clientes_lojas.for_routes(conn, user_id, city)]
+                response.headers["Cache-Control"] = "private, no-store"
             for row in rows:
                 item = dict(row._mapping)
                 item["lat"] = float(item["lat"]) if item["lat"] is not None else None
@@ -303,6 +328,7 @@ def get_businesses_for_routes(
                 item["city"] = fix_encoding(item.get("city") or "")
                 item["bairro"] = fix_encoding(item.get("bairro") or "")
                 item["logradouro"] = fix_encoding(item.get("logradouro") or "")
+                item["origen"] = "negocio"
                 businesses.append(_business_route_metrics(item))
             return businesses
     except Exception as e:
@@ -358,7 +384,8 @@ def search_businesses(q: str, limit: int = 50):
 
 
 @router.get("/api/stats/summary")
-def get_stats_summary():
+def get_stats_summary(response: Response, user_id: Optional[str] = Depends(get_optional_user_id)):
+    """Totales públicos; con sesión, `clientes_propios` y `clientes` por ciudad (los del usuario)."""
     if not db_engine:
         raise HTTPException(status_code=500, detail="Database connection unavailable")
     try:
@@ -402,8 +429,14 @@ def get_stats_summary():
                 }
                 for r in city_rows
             ]
+            mine = clientes_lojas.counts_by_city(conn, user_id) if user_id else {}
+            for c in cities_stats:
+                c["clientes"] = mine.get(c["name"].casefold(), 0)
+            if user_id:
+                response.headers["Cache-Control"] = "private, no-store"
 
             return {
+                "clientes_propios": sum(mine.values()),
                 "total_businesses": int(total),
                 "visited": int(visited),
                 "clients": int(clients),
