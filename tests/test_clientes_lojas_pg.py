@@ -4,6 +4,7 @@ Se omite sin TEST_PG_URL (ver tests/test_clientes_pg.py). Datos sintéticos; la 
 """
 
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,7 +13,7 @@ from sqlalchemy.engine import make_url
 
 from app.core.cache import clear_response_cache
 from app.core.security import create_jwt_token
-from app.db.bootstrap import CLIENTES_ATRASADO_DDL, CLIENTES_DDL, CLIENTES_VISITA_DIARIA_DDL
+from app.db.bootstrap import ARAPONGAS_CITY_SQL, CLIENTES_ATRASADO_DDL, CLIENTES_DDL, CLIENTES_VISITA_DIARIA_DDL
 from app.main import app
 from app.routes import businesses, cities, clientes
 
@@ -185,3 +186,26 @@ def test_patch_owner_only_and_fields(data, pg):
 def test_patch_rejects_bad_input(data, body):
     a, _, ids = data
     assert client.patch(f"/api/clientes/{ids['a_sin']}", headers=auth(a), json=body).status_code == 422
+
+
+MIGRATION_012 = Path(__file__).resolve().parent.parent / "migrations" / "012_cities_arapongas.sql"
+
+
+def test_migration_012_and_bootstrap_sql_are_identical():
+    body = " ".join(l for l in MIGRATION_012.read_text(encoding="utf-8").splitlines() if not l.startswith("--"))
+    assert " ".join(body.split()) == " ".join(ARAPONGAS_CITY_SQL.split())
+
+
+def test_migration_012_adds_arapongas_once_and_its_card_counts_clientes(data, pg):
+    a, _, _ = data
+    with pg.begin() as c:
+        c.execute(text("DELETE FROM cities WHERE name = 'Arapongas'"))  # base anterior a la migración
+    for _ in range(2):  # repetirla no duplica
+        with pg.begin() as c:
+            c.execute(text(MIGRATION_012.read_text(encoding="utf-8")))
+    with pg.begin() as c:
+        rows = c.execute(text("SELECT id, lat, lon FROM cities WHERE name = 'Arapongas' AND state = 'PR'")).fetchall()
+    assert len(rows) == 1 and (float(rows[0][1]), float(rows[0][2])) == (-23.4194, -51.4244)
+    card = client.get(f"/api/cities/{rows[0][0]}/stats", headers=auth(a)).json()
+    assert (card["total_clientes"], card["total_businesses"]) == (1, 1)  # A_ARAPONGAS, sin negocios
+    assert client.get(f"/api/cities/{rows[0][0]}/stats").json()["total_businesses"] == 0  # sin sesión: nada
