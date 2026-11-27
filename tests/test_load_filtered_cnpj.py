@@ -30,8 +30,47 @@ def test_row_to_dict_maps_columns():
     assert d["logradouro"] == "Rua A" and d["numero"] == "10" and d["bairro"] == "Centro"
 
 
-def test_non_tech_cnae_is_repairs():
-    assert row_to_dict(make_row(cnae="9529699"))["business_type"] == "repairs"
+def test_repair_cnae_is_repairs():
+    assert row_to_dict(make_row(cnae="9511800"))["business_type"] == "repairs"
+
+
+@pytest.mark.parametrize("cnae,kept", [
+    ("6201501", True), ("6202300", True), ("6209100", True), ("9511800", True), ("9512600", True),
+    ("9529699", False), ("4711302", False), ("", False),
+])
+def test_only_the_five_project_cnaes_are_loaded(tmp_path, cnae, kept):
+    rows, rejected = parse_rows(write_csv(tmp_path, [make_row(cnae=cnae)]))
+    assert (len(rows) == 1) is kept
+    assert kept or [m for _, m, _ in rejected] == ["otro_tipo"]
+
+
+def test_other_cnae_does_not_block_apply(tmp_path, monkeypatch):
+    path = write_csv(tmp_path, [make_row(), make_row(cnae="4711302")])
+    with pytest.raises(AssertionError, match="no debe conectarse"):
+        _run(monkeypatch, path, "--apply")  # llegó a conectarse => 'otro_tipo' no lo bloqueó
+
+
+def _receita_row(**kw):
+    r = make_row(**kw)
+    r[21], r[22], r[23], r[24], r[25], r[26], r[27] = "44", "30001111", "44", "30002222", "44", "30003333", "x@ejemplo.test"
+    return r
+
+
+def test_semicolon_receita_format_is_read(tmp_path):
+    p = tmp_path / "f.ESTABELE"
+    with open(p, "w", encoding="latin-1", newline="") as f:  # como lo escribe scripts/descargar_maringa.py
+        csv.writer(f, delimiter=";", quotechar='"', quoting=csv.QUOTE_ALL, lineterminator="\n").writerows(
+            [_receita_row(), _receita_row(mun="7427", cnae="9512600"), _receita_row(cnae="4711302")])
+    rows, rejected = parse_rows(str(p))
+    assert [(r["municipio"], r["business_type"]) for r in rows] == [("Maringá", "tech"), ("Arapongas", "repairs")]
+    assert [m for _, m, _ in rejected] == ["otro_tipo"]
+
+
+def test_contact_columns_are_never_read(tmp_path):
+    rows, _ = parse_rows(write_csv(tmp_path, [_receita_row()]))
+    assert rows[0]["ddd_1"] is None and rows[0]["telefone_1"] is None and rows[0]["correio_eletronico"] is None
+    contact = {"30001111", "30002222", "30003333", "x@ejemplo.test"}
+    assert not contact & {str(v) for v in rows[0].values()}
 
 
 @pytest.mark.parametrize("row,reason", [
