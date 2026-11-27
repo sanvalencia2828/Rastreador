@@ -34,8 +34,8 @@ def _rows(conn, user_id: str, city: Optional[str] = None) -> List[Dict[str, Any]
 
 
 def city_key(name: Optional[str]) -> str:
-    """Clave para comparar ciudades: cities.name llega con mojibake ("MaringÃ¡", así en base_schema y en
-    producción) y clientes.municipio no. casefold en Python: UPPER de Postgres depende del locale."""
+    """Clave para comparar ciudades: en producción cities.name tiene mojibake ("MaringÃ¡";
+    base_schema.py está bien, el origen no está claro) y clientes.municipio no. casefold en Python: UPPER de Postgres depende del locale."""
     return fix_encoding(name or "").casefold()
 
 

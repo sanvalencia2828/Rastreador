@@ -39,7 +39,7 @@ SETUP = [
     CLIENTES_ATRASADO_DDL,
 ]
 LAT, LON = -23.42, -51.93  # Maringá
-MARINGA_DB = "MaringÃ¡"  # como está en cities de producción (mojibake de base_schema.py)
+MARINGA_DB = "MaringÃ¡"  # como está en cities de producción (mojibake)
 CONTACT = {"telefone", "telefone_1", "telefono", "correio_eletronico", "email", "correo"}
 
 
