@@ -81,7 +81,7 @@ def get_city_stats(city_id: int, response: Response, user_id: Optional[str] = De
             city["total_negocios"] = count
             city["total_clientes"] = 0
             if user_id:
-                city["total_clientes"] = clientes_lojas.counts_by_city(conn, user_id).get(city["name"].casefold(), 0)
+                city["total_clientes"] = clientes_lojas.counts_by_city(conn, user_id).get(clientes_lojas.city_key(city["name"]), 0)
                 response.headers["Cache-Control"] = "private, no-store"
             city["total_businesses"] = count + city["total_clientes"]
             return city

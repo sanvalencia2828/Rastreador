@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import text
 
-from app.services.geo import haversine_m
+from app.services.geo import fix_encoding, haversine_m
 
 _ROWS = text("""
     SELECT id, nombre_negocio, nombre_cliente, direccion, bairro, municipio, lat, lon, visita_diaria, atrasado
@@ -24,7 +24,7 @@ def _rows(conn, user_id: str, city: Optional[str] = None) -> List[Dict[str, Any]
     out = []
     for r in conn.execute(_ROWS, {"u": user_id}).fetchall():
         m = dict(r._mapping)
-        if city and city.strip().casefold() not in (m["municipio"] or "").casefold():
+        if city and city_key(city.strip()) not in city_key(m["municipio"]):
             continue
         m["id"] = str(m["id"])
         m["lat"] = float(m["lat"]) if m["lat"] is not None else None
@@ -33,13 +33,18 @@ def _rows(conn, user_id: str, city: Optional[str] = None) -> List[Dict[str, Any]
     return out
 
 
+def city_key(name: Optional[str]) -> str:
+    """Clave para comparar ciudades: cities.name llega con mojibake ("MaringÃ¡", así en base_schema y en
+    producción) y clientes.municipio no. casefold en Python: UPPER de Postgres depende del locale."""
+    return fix_encoding(name or "").casefold()
+
+
 def counts_by_city(conn, user_id: str) -> Dict[str, int]:
-    """{municipio.casefold(): nº de clientes}, con y sin ubicación (casefold en Python: UPPER de Postgres
-    depende del locale y en "C" no pasa á a Á)."""
+    """{city_key(municipio): nº de clientes}, con y sin ubicación."""
     out: Dict[str, int] = {}
     for name, n in conn.execute(_COUNTS, {"u": user_id}).fetchall():
         if name:
-            out[name.casefold()] = out.get(name.casefold(), 0) + int(n)
+            out[city_key(name)] = out.get(city_key(name), 0) + int(n)
     return out
 
 

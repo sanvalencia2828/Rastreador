@@ -431,7 +431,7 @@ def get_stats_summary(response: Response, user_id: Optional[str] = Depends(get_o
             ]
             mine = clientes_lojas.counts_by_city(conn, user_id) if user_id else {}
             for c in cities_stats:
-                c["clientes"] = mine.get(c["name"].casefold(), 0)
+                c["clientes"] = mine.get(clientes_lojas.city_key(c["name"]), 0)
             if user_id:
                 response.headers["Cache-Control"] = "private, no-store"
 

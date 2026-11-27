@@ -38,6 +38,7 @@ SETUP = [
     CLIENTES_ATRASADO_DDL,
 ]
 LAT, LON = -23.42, -51.93  # Maringá
+MARINGA_DB = "MaringÃ¡"  # como está en cities de producción (mojibake de base_schema.py)
 CONTACT = {"telefone", "telefone_1", "telefono", "correio_eletronico", "email", "correo"}
 
 
@@ -51,13 +52,13 @@ def pg(monkeypatch):
         c.execute(text(f"DROP TABLE IF EXISTS {TABLES} CASCADE"))
         for ddl in SETUP:
             c.execute(text(ddl))
-        c.execute(text("INSERT INTO cities (name, lat, lon) VALUES ('Maringá', :la, :lo), ('Arapongas', -23.41, -51.42)"),
-                  {"la": LAT, "lo": LON})
+        c.execute(text("INSERT INTO cities (name, lat, lon) VALUES (:m, :la, :lo), ('Arapongas', -23.41, -51.42)"),
+                  {"m": MARINGA_DB, "la": LAT, "lo": LON})
         c.execute(text("""INSERT INTO estabelecimentos (cnpj_completo, nome_fantasia, situacao_cadastral, municipio,
                               latitude, longitude, geom, telefone_1, correio_eletronico)
-                          VALUES ('00000000000001', 'NEGOCIO_CERCA', 2, 'Maringá', :la, :lo,
+                          VALUES ('00000000000001', 'NEGOCIO_CERCA', 2, :m, :la, :lo,
                                   ST_SetSRID(ST_MakePoint(:lo, :la), 4326)::geography, 'SECRET-TEL', 'SECRET-MAIL')"""),
-                  {"la": LAT, "lo": LON})
+                  {"m": MARINGA_DB, "la": LAT, "lo": LON})
     for mod in (businesses, cities, clientes):
         monkeypatch.setattr(mod, "db_engine", engine)
     monkeypatch.setenv("APP_ENV", "production")
@@ -122,7 +123,7 @@ def test_stats_summary_adds_per_city_clientes_only_with_session(data):
     assert public["clientes_propios"] == 0 and all(c["clientes"] == 0 for c in public["cities"])
     mine = client.get("/api/stats/summary", headers=auth(a)).json()
     assert mine["clientes_propios"] == 3
-    assert {c["name"]: c["clientes"] for c in mine["cities"]} == {"Maringá": 2, "Arapongas": 1}
+    assert {c["name"]: c["clientes"] for c in mine["cities"]} == {MARINGA_DB: 2, "Arapongas": 1}
     assert mine["total_businesses"] == public["total_businesses"] == 1
 
 
