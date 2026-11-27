@@ -7,9 +7,10 @@ const EXACT_ROUTES = [
   "/api/businesses/:cnpj/status",
 ];
 
-// Prefijos que se reenvían al backend; `:path*` acepta cero segmentos, así que cubre también el
-// prefijo solo (p. ej. /api/clientes). Si el frontend llama a un prefijo nuevo, agrégalo aquí:
-// tests/test_frontend_rewrites.py falla si falta alguno.
+// Prefijos que se reenvían al backend. Cada uno lleva DOS reglas: la exacta (el prefijo solo, p. ej.
+// GET /api/clientes) y `${prefix}/:path*`. Sin la exacta, `:path*` con cero segmentos manda el destino
+// con barra final (/api/clientes/), FastAPI responde 307 a su propio dominio y el navegador lo bloquea.
+// Si el frontend llama a un prefijo nuevo, agrégalo aquí: tests/test_frontend_rewrites.py falla si falta alguno.
 // /api/geocode NO va: es una ruta local de Next (src/app/api/geocode/route.ts).
 const BACKEND_PREFIXES = [
   "/api/businesses",
@@ -29,6 +30,7 @@ const nextConfig = {
   async rewrites() {
     return [
       ...EXACT_ROUTES.map((route) => ({ source: route, destination: `${backendUrl}${route}` })),
+      ...BACKEND_PREFIXES.map((prefix) => ({ source: prefix, destination: `${backendUrl}${prefix}` })),
       ...BACKEND_PREFIXES.map((prefix) => ({
         source: `${prefix}/:path*`,
         destination: `${backendUrl}${prefix}/:path*`,
