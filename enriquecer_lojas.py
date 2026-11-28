@@ -62,9 +62,9 @@ load_env_file()
 # CONSTANTES
 # ==============================================================================
 NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
-HEADERS = {
-    "User-Agent": "LondrinaRadarComercial-Geocoder/1.0 (londrina.radar@antigravity.dev)"
-}
+# Nominatim exige un contacto real; se lee de .env para no publicarlo en el repo.
+GEOCODER_CONTACT = os.environ.get("GEOCODER_CONTACT", "").strip()
+HEADERS = {"User-Agent": f"Rastreador-Geocoder/1.0 ({GEOCODER_CONTACT})"}
 GEOCODE_MUNICIPIOS = tuple(c.name for c in CITIES)
 MAX_CONSECUTIVE_ERRORS = 5  # errores de red seguidos antes de abortar
 # Requiere las columnas de migrations/008_geocode_attempts.sql. La API las crea al arrancar
@@ -207,6 +207,7 @@ def geocode_all_pending(conn: psycopg2.extensions.connection) -> Tuple[int, int,
     not_found_count = 0
     error_count = 0
     consecutive_errors = 0
+    cache: dict = {}
 
     for i, row in enumerate(pendientes, 1):
         row_id, cnpj_completo, logradouro, numero, bairro, municipio, business_type = (
@@ -221,7 +222,11 @@ def geocode_all_pending(conn: psycopg2.extensions.connection) -> Tuple[int, int,
         source = None
 
         try:
-            result = geocode_address(address)
+            # Caché por dirección: varias CNPJ en el mismo local no repiten la petición.
+            if address in cache:
+                result = cache[address]
+            else:
+                result = cache[address] = geocode_address(address)
             if result:
                 lat, lon = result
                 source = "nominatim"
@@ -310,6 +315,9 @@ def main():
     logger.info("  Geocodificador Forward Nominatim - estabelecimentos")
     logger.info("=" * 60)
 
+    if "@" not in GEOCODER_CONTACT:
+        sys.exit("Falta GEOCODER_CONTACT (tu correo) en .env: Nominatim lo exige en el User-Agent.")
+    conn = None
     try:
         conn = get_db_connection()
         ok, not_found, err = geocode_all_pending(conn)
@@ -322,6 +330,11 @@ def main():
         logger.info(f"  Errores:       {err}")
         logger.info("=" * 60)
         logger.info("Geocodificación completada.")
+    except KeyboardInterrupt:
+        if conn:
+            conn.commit()  # guarda lo hecho desde el último checkpoint
+        logger.info("Interrumpido; progreso guardado. Vuelve a correr para continuar.")
+        sys.exit(130)
     except GeocodingAborted as e:
         logger.error(str(e))
         sys.exit(2)

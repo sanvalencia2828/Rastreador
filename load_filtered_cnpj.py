@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Carga filtered.csv (Receita, 30 columnas) en estabelecimentos de PROD_DATABASE_URL.
 
+Acepta el separador "," o ";" (el ;-con-comillas de la Receita y de scripts/descargar_maringa.py).
+Solo carga los 5 tipos de negocio del proyecto (CNAES: tecnología y reparaciones); los demás se omiten
+como "otro_tipo", sin contar como error. Teléfono, fax y correo no se leen: quedan en NULL.
+
 Por defecto es DRY-RUN de solo lectura. Insertar exige --apply.
 Uso: python load_filtered_cnpj.py <filtered.csv> [--apply] [--skip-bad] [--no-db] [--encoding ENC]
 
@@ -25,6 +29,9 @@ from cities import CITIES
 
 MUN = {c.receita_code: c.name for c in CITIES if c.receita_code}
 TECH = {"6201501", "6202300", "6209100"}
+REPAIRS = {"9511800", "9512600"}  # mismos 5 que download_cnpj_pr.py
+CNAES = TECH | REPAIRS
+NO_ERROR = {"inactiva", "otro_tipo"}  # se omiten sin bloquear --apply
 
 
 def prod_url() -> str:
@@ -45,8 +52,8 @@ def row_to_dict(r):
         "cnae_fiscal": r[11], "logradouro": r[14].strip(), "numero": r[15].strip(),
         "bairro": r[17].strip(), "cep": r[18].strip() or None, "uf": "PR",
         "codigo_municipio": r[20], "municipio": MUN[r[20]],
-        "ddd_1": r[21].strip() or None, "telefone_1": r[22].strip() or None,
-        "correio_eletronico": r[27].strip() or None,
+        # contacto: nunca se lee del CSV (no se usa y es dato personal)
+        "ddd_1": None, "telefone_1": None, "correio_eletronico": None,
         "business_type": "tech" if r[11] in TECH else "repairs",
     }
 
@@ -96,18 +103,23 @@ def parse_rows(path, encoding=None):
     """Devuelve (filas_validas, rechazadas); rechazada = (linea, motivo, detalle).
 
     Motivos con error de formato: 'corta', 'municipio_desconocido', 'formato'.
-    'inactiva' (situacao_cadastral != 2) se omite sin considerarse error.
+    'inactiva' (situacao_cadastral != 2) y 'otro_tipo' (CNAE fuera de CNAES) se omiten sin considerarse error.
     """
     rows, rejected = [], []
-    reader = csv.reader(io.StringIO(_read_text(path, encoding), newline=""))
+    text = _read_text(path, encoding)
+    first = text.partition("\n")[0]
+    delimiter = ";" if first.count(";") > first.count(",") else ","
+    reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter, quotechar='"')
     for r in reader:
         line = reader.line_num
         if len(r) < 30:
             rejected.append((line, "corta", f"{len(r)} columnas"))
         elif r[20] not in MUN:
             rejected.append((line, "municipio_desconocido", r[20]))
-        elif r[5].strip() != "2":
+        elif r[5].strip().lstrip("0") != "2":  # la Receita escribe "02"; un CSV re-guardado, "2"
             rejected.append((line, "inactiva", f"situacao_cadastral={r[5]!r}"))
+        elif r[11].strip() not in CNAES:
+            rejected.append((line, "otro_tipo", f"cnae={r[11]!r}"))
         else:
             try:
                 rows.append(row_to_dict(r))
@@ -132,7 +144,7 @@ def main():
     print(f"codificación: {enc}" + (" (forzada)" if args.encoding else " (detectada)"))
     rows, rejected = parse_rows(args.path, args.encoding)
     by_reason = Counter(m for _, m, _ in rejected)
-    bad_format = sum(n for m, n in by_reason.items() if m != "inactiva")
+    bad_format = sum(n for m, n in by_reason.items() if m not in NO_ERROR)
     print(f"filas válidas: {len(rows)}   rechazadas: {len(rejected)}")
     for m, n in sorted(by_reason.items()):
         print(f"  {m}: {n}")
