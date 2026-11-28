@@ -116,7 +116,7 @@ def parse_rows(path, encoding=None):
             rejected.append((line, "corta", f"{len(r)} columnas"))
         elif r[20] not in MUN:
             rejected.append((line, "municipio_desconocido", r[20]))
-        elif r[5].strip() != "2":
+        elif r[5].strip().lstrip("0") != "2":  # la Receita escribe "02"; un CSV re-guardado, "2"
             rejected.append((line, "inactiva", f"situacao_cadastral={r[5]!r}"))
         elif r[11].strip() not in CNAES:
             rejected.append((line, "otro_tipo", f"cnae={r[11]!r}"))

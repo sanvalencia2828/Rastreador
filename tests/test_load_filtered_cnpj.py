@@ -66,6 +66,15 @@ def test_semicolon_receita_format_is_read(tmp_path):
     assert [m for _, m, _ in rejected] == ["otro_tipo"]
 
 
+# Valores reales de K3241.K03200Y0.D61114.ESTABELE: "01","02","03","04","08". "2" = CSV re-guardado.
+@pytest.mark.parametrize("sit,active", [("01", False), ("02", True), ("03", False), ("04", False),
+                                        ("08", False), ("2", True), ("", False)])
+def test_receita_zero_padded_situacao(tmp_path, sit, active):
+    rows, rejected = parse_rows(write_csv(tmp_path, [make_row(sit=sit)]))
+    assert (len(rows) == 1) is active
+    assert active or [m for _, m, _ in rejected] == ["inactiva"]
+
+
 def test_contact_columns_are_never_read(tmp_path):
     rows, _ = parse_rows(write_csv(tmp_path, [_receita_row()]))
     assert rows[0]["ddd_1"] is None and rows[0]["telefone_1"] is None and rows[0]["correio_eletronico"] is None
