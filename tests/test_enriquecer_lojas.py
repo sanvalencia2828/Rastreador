@@ -33,7 +33,7 @@ class FakeConn:
 
 
 def pending(n):
-    return [(i, f"{i:014d}", "Rua A", "1", "Centro", "Maringá", "tech") for i in range(1, n + 1)]
+    return [(i, f"{i:014d}", "Rua A", str(i), "Centro", "Maringá", "tech") for i in range(1, n + 1)]
 
 
 @pytest.fixture(autouse=True)
@@ -71,6 +71,13 @@ def test_network_error_is_not_not_found_and_uses_no_attempt(monkeypatch):
     script(monkeypatch, [ConnectionError("boom"), (-23.4, -51.9)])
     assert el.geocode_all_pending(conn) == (1, 0, 1)
     assert not updates(conn, "geocode_attempts")
+
+
+def test_same_address_is_requested_once(monkeypatch):
+    rows = [(i, f"{i:014d}", "Rua A", "1", "Centro", "Maringá", "tech") for i in (1, 2)]
+    conn = FakeConn(rows)
+    script(monkeypatch, [(-23.4, -51.9)])  # una sola respuesta: una segunda petición haría StopIteration
+    assert el.geocode_all_pending(conn) == (2, 0, 0)
 
 
 def test_five_consecutive_errors_abort(monkeypatch):
